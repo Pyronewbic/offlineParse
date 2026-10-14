@@ -13,6 +13,19 @@ describe('normalizePhone', () => {
     }
   });
 
+  test('accepts numbers wrapped in invisible characters by autofill or copy-paste', () => {
+    for (const raw of ['\u200E9876501234', '\u202A+91 98765 01234\u202C', '\u2068+91 98765 01234\u2069',
+      '98765\u201101234', '98765\u2013012\u221234', '98765\u200B01234', '\uFEFF9876501234', '98765\u00A001234']) {
+      assert.equal(normalizePhone(raw), '+919876501234', JSON.stringify(raw));
+    }
+  });
+
+  test('errors tell the guest what was wrong', () => {
+    assert.throws(() => normalizePhone('987650644'), /We counted 9 digits/);
+    assert.throws(() => normalizePhone('+91 919876501234'), /We counted 12 digits/);
+    assert.throws(() => normalizePhone('5600001234'), /start with 6, 7, 8 or 9/);
+  });
+
   test('international numbers with +', () => {
     assert.equal(normalizePhone('+44 7700 900123'), '+447700900123');
   });

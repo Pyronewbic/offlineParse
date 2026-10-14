@@ -12,6 +12,9 @@ export const COLUMNS = [
 // Bidi overrides can make a stored name render as different text in the admin view.
 const STRIP_CHARS = /[\p{Cc}\p{Cs}\p{Co}\p{Cn}\u202A-\u202E\u2066-\u2069]/gu;
 
+// Contacts autofill and copy-paste wrap numbers in invisible format characters (\p{Cf}) and Unicode dashes.
+const PHONE_SEPARATORS = /[\s().\-\u2010-\u2015\u2212\p{Cf}]/gu;
+
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS leads (
   id INTEGER PRIMARY KEY,
@@ -29,12 +32,15 @@ CREATE TABLE IF NOT EXISTS leads (
 export class ValidationError extends Error {}
 
 function indianMobile(digits) {
-  if (digits.length === 10 && '6789'.includes(digits[0])) return digits;
-  throw new ValidationError('Enter a 10-digit Indian mobile number, or include your country code with +.');
+  if (digits.length !== 10) {
+    throw new ValidationError(`We counted ${digits.length} digits. Enter a 10-digit Indian mobile number, or include your country code with +.`);
+  }
+  if (!'6789'.includes(digits[0])) throw new ValidationError('Indian mobile numbers start with 6, 7, 8 or 9.');
+  return digits;
 }
 
 export function normalizePhone(raw) {
-  let s = String(raw ?? '').replace(/[\s\-().]/g, '');
+  let s = String(raw ?? '').replace(PHONE_SEPARATORS, '');
   if (!s) throw new ValidationError('Please enter your WhatsApp number.');
   if (s.length > 20) throw new ValidationError('That number is too long.');
   if (s.startsWith('00')) s = `+${s.slice(2)}`;
