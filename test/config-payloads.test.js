@@ -11,7 +11,6 @@ import { BASE_CONFIG, makeConfig, rawConfig } from './helpers.js';
 describe('config', () => {
   test('shipped config.json loads', () => {
     const cfg = loadConfig(fileURLToPath(new URL('../config.json', import.meta.url)));
-    assert.equal(cfg.eventCode, 'EVT26');
     assert.ok(Object.isFrozen(cfg));
   });
 

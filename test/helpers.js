@@ -2,7 +2,8 @@ import { readFileSync } from 'node:fs';
 import http from 'node:http';
 import { configFromObject } from '../src/config.js';
 
-export const BASE_CONFIG = JSON.parse(readFileSync(new URL('../config.json', import.meta.url), 'utf8'));
+// A fixed copy, so tests do not depend on the operator's live config.json.
+export const BASE_CONFIG = JSON.parse(readFileSync(new URL('./fixture-config.json', import.meta.url), 'utf8'));
 
 export const rawConfig = (overrides = {}) => ({ ...structuredClone(BASE_CONFIG), ...overrides });
 export const makeConfig = (overrides) => configFromObject(rawConfig(overrides));
