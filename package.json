@@ -1,0 +1,18 @@
+{
+  "name": "offline-parse",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Offline event sign-up portal: captive Wi-Fi form, local lead store, WhatsApp click-to-chat QR",
+  "type": "module",
+  "engines": {
+    "node": ">=22.13"
+  },
+  "scripts": {
+    "start": "node src/main.js",
+    "qr": "node scripts/make-qr.js",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "qrcode": "1.5.4"
+  }
+}
