@@ -16,11 +16,11 @@ describe('portal server', () => {
   let store;
   let server;
   let port;
-  const cfg = makeConfig({ laptopIp: '127.0.0.1' });
+  const cfg = makeConfig();
 
   before(async () => {
     store = new LeadStore(':memory:');
-    server = createPortalServer(cfg, store, { quiet: true });
+    server = createPortalServer(cfg, store, { laptopIp: '127.0.0.1', quiet: true });
     await new Promise((r) => server.listen(0, '0.0.0.0', r));
     port = server.address().port;
   });
@@ -44,6 +44,18 @@ describe('portal server', () => {
       assert.equal(res.status, 302, host);
       assert.equal(res.headers.location, `http://127.0.0.1:${port}/`);
     }
+  });
+
+  test('retargeting the laptop address moves both the redirect and the accepted host', async () => {
+    try {
+      server.setLaptopIp('10.9.9.9');
+      const probe = await request({ port, path: '/hotspot-detect.html', headers: { Host: 'captive.apple.com' } });
+      assert.equal(probe.headers.location, `http://10.9.9.9:${port}/`);
+      assert.equal((await request({ port, headers: { Host: `10.9.9.9:${port}` } })).status, 200);
+    } finally {
+      server.setLaptopIp('127.0.0.1');
+    }
+    assert.equal((await request({ port, headers: { Host: '10.9.9.9' } })).status, 302, 'old address no longer served');
   });
 
   test('the portal host serves the form', async () => {

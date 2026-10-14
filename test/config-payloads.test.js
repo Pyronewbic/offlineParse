@@ -39,6 +39,12 @@ describe('config', () => {
     }
   });
 
+  test('laptopIp accepts "auto" or an IPv4 address', () => {
+    assert.equal(configFromObject(rawConfig({ laptopIp: 'auto' })).laptopIp, 'auto');
+    assert.equal(configFromObject(rawConfig({ laptopIp: '192.168.88.8' })).laptopIp, '192.168.88.8');
+    assert.throws(() => configFromObject(rawConfig({ laptopIp: 'Auto' })), ConfigError);
+  });
+
   test('rejects unknown and missing keys', () => {
     assert.throws(() => configFromObject(rawConfig({ extra: 1 })), ConfigError);
     const raw = rawConfig();

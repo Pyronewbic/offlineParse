@@ -122,7 +122,7 @@ describe('lead files', () => {
 
   test('simultaneous sign-ups are all recorded exactly once', async () => {
     open();
-    const server = createPortalServer(makeConfig({ laptopIp: '127.0.0.1' }), store, { quiet: true });
+    const server = createPortalServer(makeConfig(), store, { laptopIp: '127.0.0.1', quiet: true });
     await new Promise((r) => server.listen(0, '127.0.0.1', r));
     const { port } = server.address();
     try {
@@ -152,7 +152,7 @@ describe('lead files', () => {
   test('admin page shows a file warning', async () => {
     csvPath = join(dir, 'missing-dir', 'leads.csv');
     open();
-    const server = createPortalServer(makeConfig({ laptopIp: '127.0.0.1' }), store, { quiet: true });
+    const server = createPortalServer(makeConfig(), store, { laptopIp: '127.0.0.1', quiet: true });
     await new Promise((r) => server.listen(0, '127.0.0.1', r));
     try {
       const admin = await request({ port: server.address().port, path: '/admin' });

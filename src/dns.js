@@ -69,10 +69,13 @@ export function ipv4Bytes(ip) {
   return Buffer.from(ip.split('.').map(Number));
 }
 
-/** Resolves once bound; the returned socket answers until closed. */
+/** Resolves once bound to a socket that answers until closed; `sock.setAnswerIp` retargets it. */
 export function startCatchAllDns({ answerIp, host = '0.0.0.0', port = 53, ttl = 0 }) {
-  const ipBytes = ipv4Bytes(answerIp);
+  let ipBytes = ipv4Bytes(answerIp);
   const sock = dgram.createSocket('udp4');
+  sock.setAnswerIp = (ip) => {
+    ipBytes = ipv4Bytes(ip);
+  };
   sock.on('message', (msg, rinfo) => {
     const response = buildResponse(msg, ipBytes, ttl);
     if (response) sock.send(response, rinfo.port, rinfo.address, () => {});

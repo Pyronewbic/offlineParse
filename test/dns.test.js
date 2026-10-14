@@ -77,6 +77,16 @@ describe('catch-all DNS server', () => {
     client.send(packet, server.address().port, '127.0.0.1');
   });
 
+  test('setAnswerIp retargets live answers', async () => {
+    try {
+      server.setAnswerIp('10.4.5.6');
+      const r = await ask(query('captive.apple.com'));
+      assert.deepEqual([...r.subarray(r.length - 4)], [10, 4, 5, 6]);
+    } finally {
+      server.setAnswerIp('10.1.2.3');
+    }
+  });
+
   test('still answers after garbage packets', async () => {
     client.send(Buffer.from('garbage'), server.address().port, '127.0.0.1');
     client.send(Buffer.alloc(0), server.address().port, '127.0.0.1');

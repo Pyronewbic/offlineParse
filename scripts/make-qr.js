@@ -3,6 +3,7 @@ import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { parseArgs } from 'node:util';
 import { ConfigError, loadConfig } from '../src/config.js';
+import { detectAddress } from '../src/netaddr.js';
 import { prefillText, whatsappLink, wifiPayload } from '../src/payloads.js';
 
 const { values } = parseArgs({
@@ -26,7 +27,12 @@ const payloads = {
   wifi: wifiPayload(cfg.wifiSsid, cfg.wifiPassword),
 };
 for (const [name, payload] of Object.entries(payloads)) console.log(`${name}: ${payload}`);
-console.log(`form fallback URL to print on the poster: http://${cfg.laptopIp}/`);
+try {
+  const { ip, how } = await detectAddress(cfg.laptopIp);
+  console.log(`form fallback URL to print on the poster: http://${ip}/ (${how}; reserve this address in the router so it stays put)`);
+} catch (e) {
+  console.log(`form fallback URL: unknown until the laptop is on the event Wi-Fi (${e.message})`);
+}
 
 let QRCode;
 try {

@@ -23,8 +23,11 @@ Edit `config.json`: org and event names, `eventCode` (shows up in WhatsApp messa
 The router must have **no internet** (nothing in the WAN port).
 
 1. Set the SSID (and password if any) to match `config.json`.
-2. Give the laptop a fixed IP with a DHCP reservation. Put it in `laptopIp` (`ipconfig getifaddr en0` while joined).
-3. In the router's DHCP settings, set the **DNS server handed to clients** to `laptopIp`. This makes the sign-in sheet pop up. If the router can't do this, the form still works at the printed URL, it just won't pop up.
+2. Join the laptop to it and run `npm start`; the first line shows the address it picked. Reserve that address for the laptop in the router (DHCP reservation) so the poster URL stays valid.
+3. In the router's DHCP settings, set the **DNS server handed to clients** to that address, and nothing else. This makes the sign-in sheet pop up. If the router can't do this, the form still works at the printed URL, it just won't pop up.
+4. Turn off IPv6 on the router (or its IPv6 DNS advertisement); otherwise phones can ask the router's IPv6 DNS and skip the laptop.
+
+`laptopIp` is `"auto"` by default: the server uses the address of the network interface that carries the default route, ignoring loopback, link-local and virtual adapters (Docker, WSL/Hyper-V, VirtualBox, VMware, VPNs). If the laptop has several real networks and none is the default route, it refuses to guess and lists them; set `laptopIp` to the right one, or pass it for one run with `npm start -- --ip 192.168.88.8`. Check the printed address if the laptop is also on another network (for example wired internet): that one may carry the default route.
 
 Then `npm run qr` writes `qr/whatsapp.{svg,png}` and `qr/wifi.{svg,png}` and prints the fallback URL for the poster.
 
@@ -39,12 +42,16 @@ These behaviours could not be confirmed from documentation; check them before re
 ## Event day
 
 ```sh
-caffeinate -dims npm start
+npm start
 ```
 
-macOS may ask to allow incoming connections for `node`: allow it. Ports 80 and 53 do not need `sudo` on current macOS. The server refuses to start if `laptopIp` is not this machine's address.
+Keep the laptop awake and plugged in (macOS: `caffeinate -dims npm start`). The server re-checks its address every 5 seconds: with `"auto"` it follows a changed address (and says so), with a fixed `laptopIp` it prints a warning until the address is back.
 
-- Form: `http://<laptopIp>/` (print this on the poster as a fallback)
+- **macOS:** allow incoming connections for `node` when asked. Ports 80 and 53 need no `sudo`.
+- **Windows:** allow Node.js through the firewall when asked, and set the event Wi-Fi to a **Private** network (Windows blocks incoming connections on Public ones). Ports 80 and 53 need no admin rights.
+- **Linux:** ports below 1024 need root, or once: `sudo setcap cap_net_bind_service=+ep "$(readlink -f "$(command -v node)")"`. Allow 80/tcp and 53/udp in the firewall (for example `ufw`). If systemd-resolved already holds port 53 on loopback, the DNS helper binds to the Wi-Fi address instead, automatically.
+
+- Form: `http://<laptop address>/` (print this on the poster as a fallback)
 - Admin, from the laptop only: `http://localhost/admin` (returns 404 to anyone on the Wi-Fi)
 - Data, all in `data/` and readable only by your user account (copy the whole folder to back up):
   - `leads.db`: the source of truth (SQLite).

@@ -1,15 +1,13 @@
-import { networkInterfaces } from 'node:os';
 import { dirname, join } from 'node:path';
 import { parseArgs } from 'node:util';
 import { ConfigError, loadConfig } from './config.js';
 import { startCatchAllDns } from './dns.js';
 import { LeadFiles } from './files.js';
 import { LeadStore } from './leads.js';
+import { AddressError, addressFollower, detectAddress } from './netaddr.js';
 import { createPortalServer } from './web.js';
 
-function localIPv4s() {
-  return Object.values(networkInterfaces()).flat().filter((a) => a && a.family === 'IPv4').map((a) => a.address);
-}
+const ADDRESS_CHECK_MS = 5000;
 
 function listen(server, port, host) {
   return new Promise((resolvePromise, reject) => {
@@ -21,11 +19,22 @@ function listen(server, port, host) {
   });
 }
 
+async function startDns(ip, port) {
+  try {
+    return { sock: await startCatchAllDns({ answerIp: ip, port }), host: '0.0.0.0' };
+  } catch (e) {
+    if (e.code !== 'EADDRINUSE') throw e;
+  }
+  // Linux: systemd-resolved already holds 127.0.0.53:53, so bind only the Wi-Fi address.
+  return { sock: await startCatchAllDns({ answerIp: ip, host: ip, port }), host: ip };
+}
+
 async function main(argv) {
   const { values } = parseArgs({
     args: argv,
     options: {
       config: { type: 'string', default: 'config.json' },
+      ip: { type: 'string' },
       'no-dns': { type: 'boolean', default: false },
       quiet: { type: 'boolean', default: false },
     },
@@ -39,10 +48,13 @@ async function main(argv) {
     console.error(`config error: ${e.message}`);
     return 2;
   }
-  const local = localIPv4s();
-  if (!local.includes(cfg.laptopIp)) {
-    console.error(`laptopIp ${cfg.laptopIp} is not an address of this machine (have: ${local.join(', ')}); ` +
-      'phones would be sent to the wrong place. Join the event Wi-Fi and set laptopIp to `ipconfig getifaddr en0`.');
+  const configured = values.ip ?? cfg.laptopIp;
+  let address;
+  try {
+    address = await detectAddress(configured);
+  } catch (e) {
+    if (!(e instanceof AddressError)) throw e;
+    console.error(`laptop address: ${e.message}`);
     return 2;
   }
 
@@ -57,11 +69,11 @@ async function main(argv) {
     return 1;
   }
   const store = new LeadStore(cfg.dbPath, { files });
-  const server = createPortalServer(cfg, store, { quiet: values.quiet });
+  const server = createPortalServer(cfg, store, { laptopIp: address.ip, quiet: values.quiet });
   let dns = null;
   try {
     await listen(server, cfg.httpPort, '0.0.0.0');
-    if (!values['no-dns']) dns = await startCatchAllDns({ answerIp: cfg.laptopIp, port: cfg.dnsPort });
+    if (!values['no-dns']) dns = await startDns(address.ip, cfg.dnsPort);
   } catch (e) {
     console.error(`cannot open port: ${e.message}`);
     server.close();
@@ -71,17 +83,44 @@ async function main(argv) {
   }
 
   const { port } = server.address();
+  const dnsLine = () => (dns ? `answering every name with ${follower.current.ip} on ${dns.host}:${cfg.dnsPort}` : 'off');
+  const follower = addressFollower({
+    initial: address,
+    detect: () => detectAddress(configured),
+    onProblem: (msg) => console.error(`WARNING laptop address: ${msg}. Phones cannot reach the form until this is fixed.`),
+    onRecovered: (ip) => console.log(`Laptop address OK again: ${ip}`),
+    onChange: async (next, previous) => {
+      server.setLaptopIp(next.ip);
+      if (dns?.host === '0.0.0.0') {
+        dns.sock.setAnswerIp(next.ip);
+      } else if (dns) {
+        dns.sock.close();
+        try {
+          dns = await startDns(next.ip, cfg.dnsPort);
+        } catch (e) {
+          dns = null;
+          console.error(`WARNING DNS could not move to ${next.ip}: ${e.message}`);
+        }
+      }
+      console.log(`Laptop address changed from ${previous.ip} to ${next.ip} (${next.how}).`);
+      console.log(`Sign-up form is now ${server.portalUrl()}; DNS ${dnsLine()}. Reprint the poster URL if it shows the old one.`);
+    },
+  });
+  const timer = setInterval(() => follower.check().catch((e) => console.error(`address check failed: ${e.message}`)), ADDRESS_CHECK_MS);
+
+  console.log(`Laptop address:      ${address.ip} (${address.how})`);
   console.log(`Sign-up form:        ${server.portalUrl()}`);
   console.log(`Admin (laptop only): http://localhost${port === 80 ? '' : `:${port}`}/admin`);
-  console.log(`DNS: ${dns ? `answering every name with ${cfg.laptopIp} on port ${dns.address().port}` : 'off'}`);
+  console.log(`DNS:                 ${dnsLine()}`);
   console.log(`Leads database:      ${cfg.dbPath}`);
   console.log(`Synced spreadsheet:  ${files.csvPath}`);
   console.log(`Append-only log:     ${files.logPath}`);
 
   const stop = () => {
+    clearInterval(timer);
     server.close();
     server.closeAllConnections();
-    dns?.close();
+    dns?.sock.close();
     store.close();
     files.close();
   };

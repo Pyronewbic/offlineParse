@@ -66,7 +66,9 @@ export function configFromObject(raw) {
   if (raw.wifiPassword && (raw.wifiPassword.length < 8 || raw.wifiPassword.length > 63)) {
     throw new ConfigError('wifiPassword must be empty (open network) or 8-63 characters');
   }
-  if (!isIPv4(raw.laptopIp)) throw new ConfigError('laptopIp must be an IPv4 address');
+  if (raw.laptopIp !== 'auto' && !isIPv4(raw.laptopIp)) {
+    throw new ConfigError('laptopIp must be "auto" or an IPv4 address');
+  }
 
   const socialKeys = Object.keys(raw.socials).sort();
   if (socialKeys.join() !== [...SOCIAL_KEYS].sort().join()) {

@@ -187,10 +187,16 @@ function tokenMatches(given, expected) {
   return a.length === b.length && timingSafeEqual(a, b);
 }
 
-export function createPortalServer(cfg, store, { quiet = false } = {}) {
+export function createPortalServer(cfg, store, { laptopIp, quiet = false }) {
   const adminToken = randomBytes(32).toString('base64url');
-  const portalHosts = new Set([cfg.laptopIp, 'localhost', '127.0.0.1']);
-  let portalUrl = `http://${cfg.laptopIp}/`;
+  let portalHosts;
+  let portalUrl;
+  const setLaptopIp = (ip) => {
+    laptopIp = ip;
+    portalHosts = new Set([ip, 'localhost', '127.0.0.1']);
+    const port = server.address()?.port ?? cfg.httpPort;
+    portalUrl = `http://${ip}${port === 80 ? '' : `:${port}`}/`;
+  };
   const log = quiet ? () => {} : (...args) => console.log(new Date().toISOString(), ...args);
 
   async function submit(req, res) {
@@ -273,10 +279,9 @@ export function createPortalServer(cfg, store, { quiet = false } = {}) {
   });
   server.requestTimeout = 15_000;
   server.headersTimeout = 10_000;
-  server.on('listening', () => {
-    const { port } = server.address();
-    portalUrl = `http://${cfg.laptopIp}${port === 80 ? '' : `:${port}`}/`;
-  });
+  setLaptopIp(laptopIp);
+  server.on('listening', () => setLaptopIp(laptopIp));
   server.portalUrl = () => portalUrl;
+  server.setLaptopIp = setLaptopIp;
   return server;
 }
