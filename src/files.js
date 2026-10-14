@@ -36,9 +36,10 @@ export class LeadFiles {
     this.onError = onError;
     this.problems = new Map();
     mkdirSync(dirname(this.logPath), { recursive: true });
-    // O_NOFOLLOW: a symlink planted at the log path must not redirect our writes.
+    // O_NOFOLLOW: a symlink planted at the log path must not redirect our writes (absent on Windows,
+    // where creating a symlink needs admin rights anyway).
     this.logFd = openSync(this.logPath,
-      constants.O_WRONLY | constants.O_APPEND | constants.O_CREAT | constants.O_NOFOLLOW, 0o600);
+      constants.O_WRONLY | constants.O_APPEND | constants.O_CREAT | (constants.O_NOFOLLOW ?? 0), 0o600);
   }
 
   record(event, lead) {
