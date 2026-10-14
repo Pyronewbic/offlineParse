@@ -11,11 +11,16 @@ import { makeConfig, postForm, request } from './helpers.js';
 const csvRows = (path) => readFileSync(path, 'utf8').replace(/^\uFEFF/, '').trimEnd().split('\r\n').slice(1);
 const logEntries = (path) => readFileSync(path, 'utf8').trimEnd().split('\n').filter(Boolean).map((l) => JSON.parse(l));
 
-test('leadsCsv leaves empty sent dates blank', () => {
-  const csv = leadsCsv([{ id: 1, name: 'A', phone: '+919876543210', source: 'form', eventCode: 'E',
-    consentAt: 't', noticeVersion: 'v', createdAt: 't', updatedAt: 't', socialsSentAt: null }]);
-  assert.ok(csv.startsWith('\uFEFFid,name,phone'));
-  assert.ok(csv.split('\r\n')[1].endsWith(',t,'));
+test('leadsCsv has readable headers and an explicit sent yes/no', () => {
+  const lead = { id: 1, name: 'A', phone: '+919876543210', source: 'form', eventCode: 'E',
+    consentAt: 't', noticeVersion: 'v', createdAt: 't', updatedAt: 't', socialsSentAt: null };
+  const csv = leadsCsv([lead, { ...lead, id: 2, source: 'whatsapp', socialsSentAt: '2026-10-15T09:00:00Z' }]);
+  const [header, unsent, sent] = csv.replace(/^\uFEFF/, '').split('\r\n');
+  assert.equal(header, 'ID,Name,WhatsApp number,Socials sent?,Socials sent (UTC),Came in via,Event,' +
+    'Signed up (UTC),Last updated (UTC),Consent given (UTC),Notice version');
+  assert.equal(unsent, '1,A,+919876543210,no,,Wi-Fi form,E,t,t,t,v');
+  assert.equal(sent, '2,A,+919876543210,yes,2026-10-15T09:00:00Z,WhatsApp message,E,t,t,t,v');
+  assert.ok(!/socialsSentAt/.test(csv), 'no internal field names in the sheet');
 });
 
 describe('lead files', () => {
@@ -56,8 +61,8 @@ describe('lead files', () => {
     assert.equal(readFileSync(csvPath, 'utf8'), leadsCsv(store.list()));
     const rows = csvRows(csvPath);
     assert.equal(rows.length, 2);
-    assert.match(rows[0], /^1,Asha Rao,\+919876543210,form,.*,\d{4}-\d\d-\d\dT[\d:]+Z$/);
-    assert.match(rows[1], /^2,Ravi,\+919123456789,whatsapp,.*,$/);
+    assert.match(rows[0], /^1,Asha Rao,\+919876543210,yes,\d{4}-\d\d-\d\dT[\d:]+Z,Wi-Fi form,/);
+    assert.match(rows[1], /^2,Ravi,\+919123456789,no,,WhatsApp message,/);
     assert.deepEqual(readdirSync(dir).filter((f) => f.endsWith('.tmp')), [], 'no temp files left behind');
   });
 

@@ -1,7 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import { closeSync, constants, mkdirSync, openSync, renameSync, unlinkSync, writeFileSync, writeSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
-import { COLUMNS } from './leads.js';
 
 const CSV_FORMULA_PREFIXES = ['=', '+', '-', '@', '\t', '\r'];
 const LOG_FIELDS = ['id', 'name', 'phone', 'source', 'eventCode', 'socialsSentAt'];
@@ -12,13 +11,29 @@ function csvCell(value) {
   return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 
+const SOURCE_LABELS = { form: 'Wi-Fi form', whatsapp: 'WhatsApp message' };
+// Spreadsheet columns for people, not code: [header, value, guard against formula injection].
+const SHEET = [
+  ['ID', (l) => l.id, false],
+  ['Name', (l) => l.name, true],
+  ['WhatsApp number', (l) => l.phone, false],
+  ['Socials sent?', (l) => (l.socialsSentAt ? 'yes' : 'no'), false],
+  ['Socials sent (UTC)', (l) => l.socialsSentAt, false],
+  ['Came in via', (l) => SOURCE_LABELS[l.source] ?? l.source, true],
+  ['Event', (l) => l.eventCode, true],
+  ['Signed up (UTC)', (l) => l.createdAt, false],
+  ['Last updated (UTC)', (l) => l.updatedAt, false],
+  ['Consent given (UTC)', (l) => l.consentAt, false],
+  ['Notice version', (l) => l.noticeVersion, true],
+];
+
 export function leadsCsv(leads) {
-  const lines = [COLUMNS.join(',')];
+  const lines = [SHEET.map(([header]) => header).join(',')];
   for (const lead of leads) {
-    lines.push(COLUMNS.map((c) => {
-      const v = lead[c];
-      const guarded = c !== 'phone' && typeof v === 'string' && CSV_FORMULA_PREFIXES.some((p) => v.startsWith(p));
-      return csvCell(guarded ? `'${v}` : v);
+    lines.push(SHEET.map(([, value, guard]) => {
+      const v = value(lead);
+      const risky = guard && typeof v === 'string' && CSV_FORMULA_PREFIXES.some((p) => v.startsWith(p));
+      return csvCell(risky ? `'${v}` : v);
     }).join(','));
   }
   return `\uFEFF${lines.join('\r\n')}\r\n`;
