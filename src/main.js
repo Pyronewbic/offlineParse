@@ -46,6 +46,8 @@ async function main(argv) {
     return 2;
   }
 
+  // Everything under data/ holds guests' names and numbers: owner-only.
+  process.umask(0o077);
   const dataDir = dirname(cfg.dbPath);
   let files;
   try {
