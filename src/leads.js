@@ -69,8 +69,9 @@ export function cleanName(raw) {
 const now = () => new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
 
 export class LeadStore {
-  constructor(path) {
+  constructor(path, { files = null } = {}) {
     if (path !== ':memory:') mkdirSync(dirname(resolve(path)), { recursive: true });
+    this.files = files;
     this.db = new DatabaseSync(path);
     this.db.exec('PRAGMA journal_mode = WAL;');
     this.db.exec(SCHEMA);
@@ -86,6 +87,7 @@ export class LeadStore {
       get: this.db.prepare(`SELECT ${cols} FROM leads WHERE id = ?`),
       markSent: this.db.prepare('UPDATE leads SET socialsSentAt = ? WHERE id = ? AND socialsSentAt IS NULL'),
     };
+    this.files?.sync(this.list());
   }
 
   /** Insert or refresh a lead keyed on phone. Returns true if it was new. */
@@ -95,9 +97,11 @@ export class LeadStore {
     const existing = this.stmts.byPhone.get(phone);
     if (existing) {
       this.stmts.refresh.run(name, ts, noticeVersion, ts, existing.id);
+      this.changed('lead.updated', existing.id);
       return false;
     }
-    this.stmts.insert.run(phone, name, source, eventCode, ts, noticeVersion, ts, ts);
+    const { lastInsertRowid } = this.stmts.insert.run(phone, name, source, eventCode, ts, noticeVersion, ts, ts);
+    this.changed('lead.created', Number(lastInsertRowid));
     return true;
   }
 
@@ -111,7 +115,15 @@ export class LeadStore {
   }
 
   markSent(id) {
-    return this.stmts.markSent.run(now(), id).changes === 1;
+    const sent = this.stmts.markSent.run(now(), id).changes === 1;
+    if (sent) this.changed('socials.sent', id);
+    return sent;
+  }
+
+  changed(event, id) {
+    if (!this.files) return;
+    this.files.record(event, this.get(id));
+    this.files.sync(this.list());
   }
 
   close() {

@@ -1,7 +1,9 @@
 import { networkInterfaces } from 'node:os';
+import { dirname, join } from 'node:path';
 import { parseArgs } from 'node:util';
 import { ConfigError, loadConfig } from './config.js';
 import { startCatchAllDns } from './dns.js';
+import { LeadFiles } from './files.js';
 import { LeadStore } from './leads.js';
 import { createPortalServer } from './web.js';
 
@@ -44,7 +46,15 @@ async function main(argv) {
     return 2;
   }
 
-  const store = new LeadStore(cfg.dbPath);
+  const dataDir = dirname(cfg.dbPath);
+  let files;
+  try {
+    files = new LeadFiles({ csvPath: join(dataDir, 'leads.csv'), logPath: join(dataDir, 'leads.log') });
+  } catch (e) {
+    console.error(`cannot open the lead log: ${e.message}`);
+    return 1;
+  }
+  const store = new LeadStore(cfg.dbPath, { files });
   const server = createPortalServer(cfg, store, { quiet: values.quiet });
   let dns = null;
   try {
@@ -54,6 +64,7 @@ async function main(argv) {
     console.error(`cannot open port: ${e.message}`);
     server.close();
     store.close();
+    files.close();
     return 1;
   }
 
@@ -62,12 +73,15 @@ async function main(argv) {
   console.log(`Admin (laptop only): http://localhost${port === 80 ? '' : `:${port}`}/admin`);
   console.log(`DNS: ${dns ? `answering every name with ${cfg.laptopIp} on port ${dns.address().port}` : 'off'}`);
   console.log(`Leads database:      ${cfg.dbPath}`);
+  console.log(`Synced spreadsheet:  ${files.csvPath}`);
+  console.log(`Append-only log:     ${files.logPath}`);
 
   const stop = () => {
     server.close();
     server.closeAllConnections();
     dns?.close();
     store.close();
+    files.close();
   };
   process.once('SIGINT', stop);
   process.once('SIGTERM', stop);

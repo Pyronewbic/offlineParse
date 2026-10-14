@@ -1,12 +1,12 @@
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import http from 'node:http';
-import { COLUMNS, NAME_MAX, ValidationError, cleanName, normalizePhone } from './leads.js';
+import { leadsCsv } from './files.js';
+import { NAME_MAX, ValidationError, cleanName, normalizePhone } from './leads.js';
 import { socialsText, whatsappLink } from './payloads.js';
 
 export const MAX_BODY = 8 * 1024;
 const MAX_FIELDS = 20;
 const LOOPBACK = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
-const CSV_FORMULA_PREFIXES = ['=', '+', '-', '@', '\t', '\r'];
 const CSP = "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'";
 
 const CSS = `
@@ -75,7 +75,7 @@ export function thanksPage(cfg, name, phone) {
 <p class="small">Changed your mind? Reply STOP on WhatsApp and we'll delete your details.</p>`);
 }
 
-export function adminPage(cfg, leads, token, error = '') {
+export function adminPage(cfg, leads, token, error = '', warnings = []) {
   const pending = leads.filter((l) => !l.socialsSentAt).length;
   const rows = leads.map((lead) => {
     let action;
@@ -93,6 +93,7 @@ export function adminPage(cfg, leads, token, error = '') {
       `<td>${esc(lead.createdAt)}</td><td>${action}</td></tr>`;
   });
   return page('Leads admin', `
+${warnings.map((w) => `<p class="error" role="alert">${esc(w)}</p>`).join('')}
 <h1>Leads: ${leads.length} total, ${pending} waiting for socials</h1>
 <p><a href="/admin/export.csv">Download CSV</a></p>
 <div class="scroll"><table><thead><tr><th>Name</th><th>Phone</th><th>Source</th><th>Added (UTC)</th><th>Socials</th></tr></thead>
@@ -109,23 +110,7 @@ ${errorBlock(error)}
 <textarea readonly>${esc(socialsText(cfg, 'there'))}</textarea>`, true);
 }
 
-function csvCell(value) {
-  if (value === null || value === undefined) return '';
-  const s = String(value);
-  return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-}
-
-export function leadsCsv(leads) {
-  const lines = [COLUMNS.join(',')];
-  for (const lead of leads) {
-    lines.push(COLUMNS.map((c) => {
-      const v = lead[c];
-      const guarded = c !== 'phone' && typeof v === 'string' && CSV_FORMULA_PREFIXES.some((p) => v.startsWith(p));
-      return csvCell(guarded ? `'${v}` : v);
-    }).join(','));
-  }
-  return `\uFEFF${lines.join('\r\n')}\r\n`;
-}
+const warningsOf = (store) => store.files?.warnings() ?? [];
 
 function send(res, status, type, body, extra = {}) {
   const buf = Buffer.from(body, 'utf8');
@@ -244,7 +229,7 @@ export function createPortalServer(cfg, store, { quiet = false } = {}) {
         phone = normalizePhone(fields.phone);
       } catch (e) {
         if (!(e instanceof ValidationError)) throw e;
-        return html(res, 400, adminPage(cfg, store.list(), adminToken, e.message));
+        return html(res, 400, adminPage(cfg, store.list(), adminToken, e.message, warningsOf(store)));
       }
       store.upsert({ name, phone, source: 'whatsapp', eventCode: cfg.eventCode, noticeVersion: cfg.noticeVersion });
       return redirect(res, '/admin', 303);
@@ -264,7 +249,7 @@ export function createPortalServer(cfg, store, { quiet = false } = {}) {
 
     if (isAdmin) {
       if (!LOOPBACK.has(req.socket.remoteAddress)) return plain(res, 404, 'not found', { Connection: 'close' });
-      if (method === 'GET' && path === '/admin') return html(res, 200, adminPage(cfg, store.list(), adminToken));
+      if (method === 'GET' && path === '/admin') return html(res, 200, adminPage(cfg, store.list(), adminToken, '', warningsOf(store)));
       if (method === 'GET' && path === '/admin/export.csv') {
         return send(res, 200, 'text/csv; charset=utf-8', leadsCsv(store.list()),
           { 'Content-Disposition': 'attachment; filename="leads.csv"' });

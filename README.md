@@ -46,7 +46,11 @@ macOS may ask to allow incoming connections for `node`: allow it. Ports 80 and 5
 
 - Form: `http://<laptopIp>/` (print this on the poster as a fallback)
 - Admin, from the laptop only: `http://localhost/admin` (returns 404 to anyone on the Wi-Fi)
-- Data: `data/leads.db` (WAL mode; copy the whole `data/` folder to back up). **Download CSV** on the admin page exports everything.
+- Data, all in `data/` (copy the whole folder to back up):
+  - `leads.db`: the source of truth (SQLite).
+  - `leads.csv`: opens in Excel or Numbers. Rewritten after every sign-up, admin add, and Mark sent, so it always matches the database (one row per phone number). Excel does not refresh an open file: reopen it, or use the admin page for a live view. Rebuilt on startup if deleted.
+  - `leads.log`: append-only, one JSON line per event (`lead.created`, `lead.updated`, `socials.sent`). Never rewritten, so it keeps every submission, including repeats.
+  - If the CSV or log cannot be written, sign-ups still save to the database and the admin page shows a red warning.
 
 ## After the event
 

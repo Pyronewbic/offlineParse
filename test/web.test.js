@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { networkInterfaces } from 'node:os';
 import { after, before, beforeEach, describe, test } from 'node:test';
 import { LeadStore } from '../src/leads.js';
-import { MAX_BODY, createPortalServer, leadsCsv } from '../src/web.js';
+import { MAX_BODY, createPortalServer } from '../src/web.js';
 import { makeConfig, postForm, request } from './helpers.js';
 
 const VALID = { name: 'Asha Rao', phone: '98765 43210', consent: 'yes' };
@@ -149,11 +149,4 @@ describe('portal server', () => {
     assert.equal(post.status, 404);
     assert.equal(store.list().length, 0);
   });
-});
-
-test('leadsCsv leaves empty sent dates blank', () => {
-  const csv = leadsCsv([{ id: 1, name: 'A', phone: '+919876543210', source: 'form', eventCode: 'E',
-    consentAt: 't', noticeVersion: 'v', createdAt: 't', updatedAt: 't', socialsSentAt: null }]);
-  assert.ok(csv.startsWith('\uFEFFid,name,phone'));
-  assert.ok(csv.split('\r\n')[1].endsWith(',t,'));
 });
