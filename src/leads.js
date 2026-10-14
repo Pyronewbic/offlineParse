@@ -10,7 +10,7 @@ export const COLUMNS = [
 ];
 
 // Bidi overrides can make a stored name render as different text in the admin view.
-const STRIP_CHARS = /[\p{Cc}\p{Cs}\p{Co}\p{Cn}‪-‮⁦-⁩]/gu;
+const STRIP_CHARS = /[\p{Cc}\p{Cs}\p{Co}\p{Cn}\u202A-\u202E\u2066-\u2069]/gu;
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS leads (

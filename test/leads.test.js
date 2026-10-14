@@ -20,8 +20,8 @@ describe('normalizePhone', () => {
   test('rejects malformed and hostile input', () => {
     for (const raw of ['', '   ', '12345', '5876543210', '98765432101', '+91 5876543210',
       '+1234567', '+1234567890123456', '98765abcde', '+', '00', null, undefined,
-      '٩٨٧٦٥٤٣٢١٠', // Arabic-Indic digits
-      '９８７６５４３２１０', // fullwidth digits
+      '\u0669\u0668\u0667\u0666\u0665\u0664\u0663\u0662\u0661\u0660', // Arabic-Indic digits
+      '\uFF19\uFF18\uFF17\uFF16\uFF15\uFF14\uFF13\uFF12\uFF11\uFF10', // fullwidth digits
       '9'.repeat(200), '98765\u000043210']) {
       assert.throws(() => normalizePhone(raw), ValidationError, String(raw));
     }
@@ -34,11 +34,11 @@ describe('cleanName', () => {
   });
 
   test('strips control and bidi override characters', () => {
-    assert.equal(cleanName('Asha\u0000\u001b[31m‮oaR'), 'Asha[31moaR');
+    assert.equal(cleanName('Asha\u0000\u001b[31m\u202EoaR'), 'Asha[31moaR');
   });
 
   test('keeps the zero-width joiner Indic scripts rely on', () => {
-    const malayalam = 'അന്‍';
+    const malayalam = '\u0D05\u0D28\u0D4D\u200D';
     assert.equal(cleanName(malayalam), malayalam);
   });
 

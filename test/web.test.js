@@ -108,7 +108,7 @@ describe('portal server', () => {
   test('admin POSTs need the page token', async () => {
     await postForm(port, '/submit', VALID);
     const { id } = store.list()[0];
-    for (const token of ['', 'wrong', 'ü'.repeat(43)]) {
+    for (const token of ['', 'wrong', '\u00FC'.repeat(43)]) {
       const res = await postForm(port, '/admin/mark-sent', { id, token });
       assert.equal(res.status, 403);
     }
@@ -154,6 +154,6 @@ describe('portal server', () => {
 test('leadsCsv leaves empty sent dates blank', () => {
   const csv = leadsCsv([{ id: 1, name: 'A', phone: '+919876543210', source: 'form', eventCode: 'E',
     consentAt: 't', noticeVersion: 'v', createdAt: 't', updatedAt: 't', socialsSentAt: null }]);
-  assert.ok(csv.startsWith('﻿id,name,phone'));
+  assert.ok(csv.startsWith('\uFEFFid,name,phone'));
   assert.ok(csv.split('\r\n')[1].endsWith(',t,'));
 });

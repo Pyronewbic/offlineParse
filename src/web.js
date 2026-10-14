@@ -124,7 +124,7 @@ export function leadsCsv(leads) {
       return csvCell(guarded ? `'${v}` : v);
     }).join(','));
   }
-  return `﻿${lines.join('\r\n')}\r\n`;
+  return `\uFEFF${lines.join('\r\n')}\r\n`;
 }
 
 function send(res, status, type, body, extra = {}) {
