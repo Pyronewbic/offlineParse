@@ -23,39 +23,50 @@ describe('localAddresses', () => {
       eth0: undefined,
     });
     assert.deepEqual(found.filter((a) => a.usable).map((a) => a.name), ['en0', 'Wi-Fi', 'wlan0']);
+    assert.deepEqual(found.filter((a) => a.connected && !a.usable).map((a) => a.name),
+      ['docker0', 'br-9f2c', 'vEthernet (WSL)', 'VirtualBox Host-Only Network', 'utun3', 'tailscale0', 'bridge100']);
     assert.equal(found.length, 12, 'IPv6 entries are skipped, everything IPv4 is listed');
   });
 });
 
 describe('chooseAddress', () => {
-  const wifi = { name: 'Wi-Fi', address: '192.168.88.8', usable: true };
-  const ethernet = { name: 'Ethernet', address: '10.1.1.5', usable: true };
-  const docker = { name: 'docker0', address: '172.17.0.1', usable: false };
-  const loopback = { name: 'lo', address: '127.0.0.1', usable: false };
+  const wifi = { name: 'Wi-Fi', address: '192.168.88.8', connected: true, usable: true };
+  const tether = { name: 'en7', address: '172.20.10.2', connected: true, usable: true };
+  const docker = { name: 'docker0', address: '172.17.0.1', connected: true, usable: false };
+  const loopback = { name: 'lo', address: '127.0.0.1', connected: false, usable: false };
+  const unplugged = { name: 'Ethernet', address: '169.254.3.4', connected: false, usable: false };
 
-  test('auto prefers the default-route address', () => {
-    const r = chooseAddress({ configured: 'auto', addresses: [loopback, docker, ethernet, wifi], routed: '192.168.88.8' });
-    assert.equal(r.ip, '192.168.88.8');
-    assert.match(r.how, /default route/);
-  });
-
-  test('auto ignores a default route through a virtual adapter and uses the only real address', () => {
+  test('auto uses the only real network, even when the default route is a virtual adapter', () => {
     const r = chooseAddress({ configured: 'auto', addresses: [loopback, docker, wifi], routed: '172.17.0.1' });
-    assert.equal(r.ip, '192.168.88.8');
-    assert.match(r.how, /only network address/);
-  });
-
-  test('auto with no route (offline router without a gateway) uses the only real address', () => {
+    assert.deepEqual(r, { ip: '192.168.88.8', how: 'auto: Wi-Fi, the only network' });
     assert.equal(chooseAddress({ configured: 'auto', addresses: [loopback, wifi], routed: null }).ip, '192.168.88.8');
   });
 
-  test('auto refuses to guess between several real addresses without a route', () => {
-    assert.throws(() => chooseAddress({ configured: 'auto', addresses: [ethernet, wifi], routed: null }),
-      (e) => e instanceof AddressError && /10\.1\.1\.5 \(Ethernet\)/.test(e.message) && /--ip/.test(e.message));
+  test('auto refuses with booth Wi-Fi plus a tether, and flags the default route as the likely internet', () => {
+    assert.throws(() => chooseAddress({ configured: 'auto', addresses: [loopback, wifi, tether], routed: '172.20.10.2' }),
+      (e) => e instanceof AddressError &&
+        e.message.includes('192.168.88.8 (Wi-Fi), 172.20.10.2 (en7, default route, probably internet)') &&
+        /adapter name or address/.test(e.message));
   });
 
   test('auto with no real address says to join the Wi-Fi', () => {
-    assert.throws(() => chooseAddress({ configured: 'auto', addresses: [loopback, docker], routed: null }), /join the event Wi-Fi/);
+    assert.throws(() => chooseAddress({ configured: 'auto', addresses: [loopback, docker, unplugged], routed: null }), /join the event Wi-Fi/);
+  });
+
+  test('an adapter name picks that adapter, ignoring the default route', () => {
+    const r = chooseAddress({ configured: 'Wi-Fi', addresses: [wifi, tether], routed: '172.20.10.2' });
+    assert.deepEqual(r, { ip: '192.168.88.8', how: 'adapter Wi-Fi' });
+    assert.equal(chooseAddress({ configured: 'wi-fi', addresses: [wifi, tether], routed: null }).ip, '192.168.88.8',
+      'case-insensitive fallback for Windows adapter names');
+    assert.equal(chooseAddress({ configured: 'docker0', addresses: [docker, wifi], routed: null }).ip, '172.17.0.1',
+      'an explicitly named virtual adapter is honoured');
+  });
+
+  test('an adapter that is down or missing is an error that lists what is connected', () => {
+    assert.throws(() => chooseAddress({ configured: 'Ethernet', addresses: [unplugged, wifi], routed: null }),
+      /adapter "Ethernet" has no usable IPv4 address/);
+    assert.throws(() => chooseAddress({ configured: 'wlan0', addresses: [loopback, wifi, tether], routed: null }),
+      /no adapter named "wlan0" \(connected adapters: Wi-Fi, en7\)/);
   });
 
   test('a fixed address must belong to this machine; loopback is allowed for local testing', () => {
@@ -63,7 +74,6 @@ describe('chooseAddress', () => {
     assert.equal(chooseAddress({ configured: '127.0.0.1', addresses: [loopback], routed: null }).ip, '127.0.0.1');
     assert.throws(() => chooseAddress({ configured: '192.168.88.5', addresses: [loopback, wifi], routed: null }),
       /192\.168\.88\.5 is not an address of this machine/);
-    assert.throws(() => chooseAddress({ configured: 'laptop.local', addresses: [wifi], routed: null }), /not an IPv4/);
   });
 });
 

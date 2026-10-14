@@ -18,7 +18,11 @@ describe('config', () => {
     const socials = BASE_CONFIG.socials;
     const cases = {
       'whatsapp number with +': { whatsappNumber: '+919999999999' },
-      'laptopIp hostname': { laptopIp: 'laptop.local' },
+      'laptopIp bad address': { laptopIp: '192.168.88.256' },
+      'laptopIp empty': { laptopIp: '' },
+      'laptopIp padded': { laptopIp: ' en0' },
+      'laptopIp control char': { laptopIp: 'en0\u001b[2J' },
+      'laptopIp too long': { laptopIp: 'x'.repeat(65) },
       'port as string': { httpPort: '80' },
       'port as bool': { httpPort: true },
       'port zero': { httpPort: 0 },
@@ -39,10 +43,10 @@ describe('config', () => {
     }
   });
 
-  test('laptopIp accepts "auto" or an IPv4 address', () => {
-    assert.equal(configFromObject(rawConfig({ laptopIp: 'auto' })).laptopIp, 'auto');
-    assert.equal(configFromObject(rawConfig({ laptopIp: '192.168.88.8' })).laptopIp, '192.168.88.8');
-    assert.throws(() => configFromObject(rawConfig({ laptopIp: 'Auto' })), ConfigError);
+  test('laptopIp accepts "auto", an IPv4 address, or an adapter name', () => {
+    for (const value of ['auto', '192.168.88.8', 'en0', 'wlan0', 'Wi-Fi', 'Ethernet 2', 'vEthernet (WSL)']) {
+      assert.equal(configFromObject(rawConfig({ laptopIp: value })).laptopIp, value);
+    }
   });
 
   test('rejects unknown and missing keys', () => {

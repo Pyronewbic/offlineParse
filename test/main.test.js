@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { detectAddress } from '../src/netaddr.js';
+import { detectAddress, localAddresses } from '../src/netaddr.js';
 import { postForm, rawConfig } from './helpers.js';
 
 const MAIN = fileURLToPath(new URL('../src/main.js', import.meta.url));
@@ -74,6 +74,23 @@ describe('entry point', () => {
     const { outcome, err } = await start({ laptopIp: '127.0.0.1' }, ['--ip', '203.0.113.7']);
     assert.equal(outcome, 'exit 2');
     assert.match(err(), /203\.0\.113\.7 is not an address of this machine/);
+  });
+
+  test('--ip with an adapter name serves on that adapter; an unknown name is refused', async (t) => {
+    const adapter = localAddresses().find((a) => a.connected);
+    if (!adapter) {
+      t.skip('no connected network adapter on this machine');
+      return;
+    }
+    const ok = await start({ laptopIp: 'auto' }, ['--ip', adapter.name]);
+    assert.equal(ok.outcome, 'ready', ok.err());
+    assert.ok(ok.out().includes(`Laptop address:      ${adapter.address} (adapter ${adapter.name})`), ok.out());
+    child.kill('SIGTERM');
+    await new Promise((r) => child.once('exit', r));
+
+    const bad = await start({ laptopIp: 'no-such-adapter0' });
+    assert.equal(bad.outcome, 'exit 2');
+    assert.match(bad.err(), /no adapter named "no-such-adapter0"/);
   });
 
   test('auto picks the same address as detectAddress and prints it', async (t) => {

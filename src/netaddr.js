@@ -13,11 +13,10 @@ export class AddressError extends Error {}
 export function localAddresses(ifaces = networkInterfaces()) {
   return Object.entries(ifaces).flatMap(([name, addrs]) => (addrs ?? [])
     .filter((a) => a.family === 'IPv4' || a.family === 4)
-    .map((a) => ({
-      name,
-      address: a.address,
-      usable: !a.internal && !a.address.startsWith('169.254.') && !VIRTUAL.test(name),
-    })));
+    .map((a) => {
+      const linkLocal = a.address.startsWith('169.254.');
+      return { name, address: a.address, connected: !a.internal && !linkLocal, usable: !a.internal && !linkLocal && !VIRTUAL.test(name) };
+    }));
 }
 
 export function defaultRouteAddress() {
@@ -44,26 +43,35 @@ export function defaultRouteAddress() {
   });
 }
 
-const describe = (addresses) => addresses.map((a) => `${a.address} (${a.name})`).join(', ') || 'none';
+const describe = (addresses, routed) =>
+  addresses.map((a) => `${a.address} (${a.name}${a.address === routed ? ', default route, probably internet' : ''})`).join(', ') || 'none';
 
-/** Decide which address phones are sent to. `configured` is "auto" or an IPv4 address. */
+/** Decide which address phones are sent to. `configured` is "auto", an IPv4 address, or an adapter name. */
 export function chooseAddress({ configured, addresses, routed }) {
-  if (configured !== 'auto') {
-    if (!isIPv4(configured)) throw new AddressError(`"${configured}" is not an IPv4 address`);
+  if (isIPv4(configured)) {
     if (!addresses.some((a) => a.address === configured)) {
       throw new AddressError(`${configured} is not an address of this machine (it has: ${describe(addresses)})`);
     }
-    return { ip: configured, how: 'set in config or --ip' };
+    return { ip: configured, how: 'fixed address' };
+  }
+  if (configured !== 'auto') {
+    const named = addresses.filter((a) => a.name === configured);
+    const matches = named.length ? named : addresses.filter((a) => a.name.toLowerCase() === configured.toLowerCase());
+    const live = matches.find((a) => a.connected);
+    if (live) return { ip: live.address, how: `adapter ${live.name}` };
+    const names = [...new Set(addresses.filter((a) => a.connected).map((a) => a.name))].join(', ') || 'none';
+    throw new AddressError(matches.length
+      ? `adapter "${configured}" has no usable IPv4 address; is it connected to the event Wi-Fi?`
+      : `no adapter named "${configured}" (connected adapters: ${names})`);
   }
   const usable = addresses.filter((a) => a.usable);
-  const viaRoute = usable.find((a) => a.address === routed);
-  if (viaRoute) return { ip: viaRoute.address, how: `auto: ${viaRoute.name}, the default route` };
-  if (usable.length === 1) return { ip: usable[0].address, how: `auto: ${usable[0].name}, the only network address` };
+  if (usable.length === 1) return { ip: usable[0].address, how: `auto: ${usable[0].name}, the only network` };
   if (usable.length === 0) {
     throw new AddressError('no network address found; join the event Wi-Fi first');
   }
-  throw new AddressError(`several network addresses (${describe(usable)}) and none is the default route; ` +
-    'set laptopIp in config.json or pass --ip to pick the event Wi-Fi one');
+  // With two real networks the default route is usually the internet one, never the booth Wi-Fi.
+  throw new AddressError(`connected to several networks: ${describe(usable, routed)}. ` +
+    'Set laptopIp in config.json (or pass --ip) to the event Wi-Fi adapter name or address, for example "en0" or "Wi-Fi"');
 }
 
 export async function detectAddress(configured) {

@@ -27,7 +27,15 @@ The router must have **no internet** (nothing in the WAN port).
 3. In the router's DHCP settings, set the **DNS server handed to clients** to that address, and nothing else. This makes the sign-in sheet pop up. If the router can't do this, the form still works at the printed URL, it just won't pop up.
 4. Turn off IPv6 on the router (or its IPv6 DNS advertisement); otherwise phones can ask the router's IPv6 DNS and skip the laptop.
 
-`laptopIp` is `"auto"` by default: the server uses the address of the network interface that carries the default route, ignoring loopback, link-local and virtual adapters (Docker, WSL/Hyper-V, VirtualBox, VMware, VPNs). If the laptop has several real networks and none is the default route, it refuses to guess and lists them; set `laptopIp` to the right one, or pass it for one run with `npm start -- --ip 192.168.88.8`. Check the printed address if the laptop is also on another network (for example wired internet): that one may carry the default route.
+`laptopIp` is `"auto"` by default, which works when the laptop is on exactly one network: it uses that network's address, ignoring loopback, link-local and virtual adapters (Docker, WSL/Hyper-V, VirtualBox, VMware, VPNs). On two or more networks it refuses to guess and lists them, marking the default route (usually the internet one). Then set `laptopIp` to the event Wi-Fi adapter's name, which keeps working if its address changes: `"en0"` on most Macs, `"Wi-Fi"` on Windows, `"wlan0"` or similar on Linux. A fixed address also works. `npm start -- --ip <name or address>` overrides it for one run.
+
+### Internet on the laptop during the event (optional)
+
+Nothing needs internet until you send the socials. If you want it anyway, keep Wi-Fi on the event router and add a second connection: USB tethering from a phone with signal, or Ethernet.
+
+- Set `laptopIp` to the Wi-Fi adapter name (see above); `"auto"` will refuse because there are now two networks.
+- Give the laptop's own Wi-Fi a manual DNS server such as `1.1.1.1`, or exclude the laptop from the router's DNS setting. Otherwise the laptop asks its own catch-all DNS for every website and gets nowhere.
+- Put the tether or Ethernet above Wi-Fi in the network order (macOS: Network settings, Set Service Order; Windows does this automatically; Linux: lower route metric) so internet traffic leaves that way. Traffic to the booth Wi-Fi's own address range still uses Wi-Fi.
 
 Then `npm run qr` writes `qr/whatsapp.{svg,png}` and `qr/wifi.{svg,png}` and prints the fallback URL for the poster.
 

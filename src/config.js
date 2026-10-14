@@ -66,8 +66,11 @@ export function configFromObject(raw) {
   if (raw.wifiPassword && (raw.wifiPassword.length < 8 || raw.wifiPassword.length > 63)) {
     throw new ConfigError('wifiPassword must be empty (open network) or 8-63 characters');
   }
-  if (raw.laptopIp !== 'auto' && !isIPv4(raw.laptopIp)) {
-    throw new ConfigError('laptopIp must be "auto" or an IPv4 address');
+  if (!/^[^\p{C}]{1,64}$/u.test(raw.laptopIp) || raw.laptopIp.trim() !== raw.laptopIp) {
+    throw new ConfigError('laptopIp must be "auto", an IPv4 address, or a network adapter name such as "en0" or "Wi-Fi"');
+  }
+  if (/^[0-9.]+$/.test(raw.laptopIp) && !isIPv4(raw.laptopIp)) {
+    throw new ConfigError(`laptopIp "${raw.laptopIp}" looks like an address but is not a valid IPv4 address`);
   }
 
   const socialKeys = Object.keys(raw.socials).sort();
