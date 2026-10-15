@@ -9,9 +9,27 @@ const networkOf = (ip, prefix) => (toInt(ip) & maskBits(prefix)) >>> 0;
 export const sameSubnet = (a, b, prefix) => networkOf(a, prefix) === networkOf(b, prefix);
 export const prefixToMask = (prefix) => toIp(maskBits(prefix));
 
-function upSteps(platform, iface, ip, prefix, gateway) {
-  // macOS: a /32 alias avoids a duplicate route for the subnet the adapter is already on.
-  if (platform === 'darwin') return [['sudo', ['ifconfig', iface, 'alias', ip, '255.255.255.255']]];
+/** Map device -> network service name from `networksetup -listnetworkserviceorder` output. */
+export function parseServiceOrder(text) {
+  const services = new Map();
+  for (const m of String(text).matchAll(/^\((?:\d+|\*)\)\s+(.+?)\s*\r?\n\(Hardware Port: [^,]*, Device: ([^)]*)\)/gm)) {
+    if (m[2]) services.set(m[2], m[1]);
+  }
+  return services;
+}
+
+function macService(iface, services) {
+  const service = services?.get(iface);
+  if (!service) throw new BoothIpError(`could not find the macOS network service for ${iface} (networksetup -listnetworkserviceorder)`);
+  return service;
+}
+
+function upSteps(platform, iface, ip, prefix, gateway, services) {
+  // macOS only lets a normal user open port 53 on all addresses, so the booth address must be the
+  // adapter's only one (an extra alias would make DNS replies leave from the other address).
+  if (platform === 'darwin') {
+    return [['sudo', ['networksetup', '-setmanual', macService(iface, services), ip, prefixToMask(prefix), gateway]]];
+  }
   if (platform === 'linux') return [['sudo', ['ip', 'addr', 'add', `${ip}/${prefix}`, 'dev', iface]]];
   if (platform === 'win32') {
     return [['netsh', ['interface', 'ipv4', 'set', 'address', iface, 'static', ip, prefixToMask(prefix), gateway]]];
@@ -19,8 +37,8 @@ function upSteps(platform, iface, ip, prefix, gateway) {
   throw new BoothIpError(`booth-ip does not support ${platform}; add ${ip} to the Wi-Fi adapter by hand`);
 }
 
-function undoSteps(platform, iface, ip, prefix) {
-  if (platform === 'darwin') return [['sudo', ['ifconfig', iface, '-alias', ip]]];
+function undoSteps(platform, iface, ip, prefix, services) {
+  if (platform === 'darwin') return [['sudo', ['networksetup', '-setdhcp', macService(iface, services)]]];
   if (platform === 'linux') return [['sudo', ['ip', 'addr', 'del', `${ip}/${prefix}`, 'dev', iface]]];
   if (platform === 'win32') return [['netsh', ['interface', 'ipv4', 'set', 'address', iface, 'dhcp']]];
   throw new BoothIpError(`booth-ip does not support ${platform}`);
@@ -30,7 +48,7 @@ function undoSteps(platform, iface, ip, prefix) {
  * Work out the commands that give this machine the booth address (or take it away with undo).
  * Pure: `addresses` comes from netaddr.localAddresses(), so tests can describe any machine.
  */
-export function planBoothIp({ platform, addresses, boothIp, undo = false, prefix = 24, gateway }) {
+export function planBoothIp({ platform, addresses, boothIp, undo = false, prefix = 24, gateway, services }) {
   if (!isIPv4(boothIp)) {
     throw new BoothIpError(`laptopIp in config.json must be the fixed booth address, e.g. "192.168.0.2" (it is "${boothIp}")`);
   }
@@ -44,7 +62,7 @@ export function planBoothIp({ platform, addresses, boothIp, undo = false, prefix
 
   if (undo) {
     if (!holder) return { steps: [], note: `${boothIp} is not on this machine, so there is nothing to undo.` };
-    return { iface: holder.name, steps: undoSteps(platform, holder.name, boothIp, prefix) };
+    return { iface: holder.name, steps: undoSteps(platform, holder.name, boothIp, prefix, services) };
   }
   if (holder) return { iface: holder.name, steps: [], note: `${boothIp} is already on ${holder.name}. Run npm start.` };
 
@@ -53,7 +71,7 @@ export function planBoothIp({ platform, addresses, boothIp, undo = false, prefix
   if (names.length > 1) {
     throw new BoothIpError(`several adapters are on ${subnet} (${names.join(', ')}); disconnect all but the booth Wi-Fi`);
   }
-  return { iface: names[0], steps: upSteps(platform, names[0], boothIp, prefix, gw) };
+  return { iface: names[0], steps: upSteps(platform, names[0], boothIp, prefix, gw, services) };
 }
 
 /**

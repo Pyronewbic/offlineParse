@@ -55,7 +55,7 @@ npm start
 ```
 
 - **Windows:** run `booth-ip` in a terminal opened with **Run as administrator**, allow Node.js through the firewall, and set the booth Wi-Fi to a **Private** network.
-- **macOS:** allow incoming connections for `node` when asked. Keep it awake with `caffeinate -dims npm start`.
+- **macOS:** `booth-ip` switches Wi-Fi to the fixed booth address (macOS only lets a normal user answer DNS on all addresses, so it must be the only one). Allow incoming connections for `node` when asked. Keep it awake with `caffeinate -dims npm start`.
 - **Linux:** ports 80 and 53 need root or `sudo setcap cap_net_bind_service=+ep "$(readlink -f "$(command -v node)")"`; open 80/tcp and 53/udp in the firewall.
 - `npm run booth-ip -- --dry-run` shows the command without running it. If `npm start` warns that the booth address is gone, run `npm run booth-ip` again.
 
@@ -66,7 +66,7 @@ npm start
 ## After the event
 
 1. Stop the server (Ctrl+C).
-2. Remove the booth address: `npm run booth-ip -- --undo`. **Required on Windows** (as administrator), or the laptop keeps `192.168.0.2` on every network. Do it on macOS and Linux too; a reboot also clears it there.
+2. Remove the booth address: `npm run booth-ip -- --undo`. **Required on macOS and Windows** (Windows: as administrator), or the laptop keeps `192.168.0.2` on every network. On Linux a reboot also clears it.
 3. Add anyone who registered by WhatsApp: search WhatsApp for the event code, then **Add a registration** on the admin page.
 
 ## Data

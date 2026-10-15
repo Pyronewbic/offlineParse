@@ -3,10 +3,10 @@ import { isIPv4 } from 'node:net';
 import { parseArgs } from 'node:util';
 import { BrandError, loadBrand } from './brand.js';
 import { ConfigError, loadConfig } from './config.js';
-import { startCatchAllDns } from './dns.js';
+import { rivalAddresses, startDnsOn as startDns } from './dnsbind.js';
 import { LeadFiles } from './files.js';
 import { LeadStore } from './leads.js';
-import { AddressError, addressFollower, detectAddress } from './netaddr.js';
+import { AddressError, addressFollower, detectAddress, localAddresses } from './netaddr.js';
 import { createPortalServer } from './web.js';
 
 const ADDRESS_CHECK_MS = 5000;
@@ -19,13 +19,6 @@ function listen(server, port, host) {
       resolvePromise();
     });
   });
-}
-
-// Bind DNS to the booth address itself: on a laptop with a second address, a wildcard socket can
-// answer from the other one, and phones drop replies from an address they did not ask. This also
-// sidesteps systemd-resolved, which holds 127.0.0.53:53 on Linux.
-async function startDns(ip, port) {
-  return { sock: await startCatchAllDns({ answerIp: ip, host: ip, port }), host: ip };
 }
 
 async function main(argv) {
@@ -118,6 +111,11 @@ async function main(argv) {
   console.log(`Sign-up form:        ${server.portalUrl()}`);
   console.log(`Admin (laptop only): http://localhost${port === 80 ? '' : `:${port}`}/admin`);
   console.log(`DNS:                 ${dnsLine()}`);
+  const rivals = dns?.host === '0.0.0.0' ? rivalAddresses(address.ip, localAddresses()) : [];
+  if (rivals.length) {
+    console.error(`WARNING ${rivals.map((r) => r.address).join(', ')} is also on the booth network, so DNS replies may leave ` +
+      `from it and phones will ignore them. Run "npm run booth-ip" so ${address.ip} is the only address.`);
+  }
   console.log(`Leads database:      ${cfg.dbPath}`);
   console.log(`Synced spreadsheet:  ${files.csvPath}`);
   console.log(`Append-only log:     ${files.logPath}`);

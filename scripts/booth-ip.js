@@ -2,7 +2,7 @@
 // points at it whoever's laptop runs the booth. `--undo` takes it away again (needed on Windows).
 import { spawnSync } from 'node:child_process';
 import { parseArgs } from 'node:util';
-import { BoothIpError, applyBoothIp, planBoothIp } from '../src/boothip.js';
+import { BoothIpError, applyBoothIp, parseServiceOrder, planBoothIp } from '../src/boothip.js';
 import { ConfigError, loadConfig } from '../src/config.js';
 import { localAddresses } from '../src/netaddr.js';
 
@@ -35,6 +35,9 @@ try {
   plan = planBoothIp({
     platform: process.platform, addresses: localAddresses(), boothIp,
     undo: values.undo, prefix: Number(values.prefix), gateway: values.gateway,
+    services: process.platform === 'darwin'
+      ? parseServiceOrder(spawnSync('networksetup', ['-listnetworkserviceorder'], { encoding: 'utf8' }).stdout ?? '')
+      : undefined,
   });
 } catch (e) {
   if (!(e instanceof BoothIpError)) throw e;
@@ -76,9 +79,10 @@ try {
 
 if (values.undo) {
   console.log(`Done: ${boothIp} removed.`);
-} else if (process.platform === 'win32') {
+} else if (process.platform === 'win32' || process.platform === 'darwin') {
   console.log(`Done: ${plan.iface} now uses ${boothIp}. Run npm start.`);
-  console.log('After the event run "npm run booth-ip -- --undo" (as administrator), or this laptop stays on the booth address everywhere.');
+  console.log(`After the event run "npm run booth-ip -- --undo"${process.platform === 'win32' ? ' (as administrator)' : ''}, ` +
+    'or this laptop stays on the booth address on every network.');
 } else {
   console.log(`Done: ${boothIp} added. Run npm start. It goes away by itself on reboot or Wi-Fi reconnect.`);
 }
