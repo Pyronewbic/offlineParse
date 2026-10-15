@@ -1,9 +1,23 @@
 import { randomBytes } from 'node:crypto';
-import { closeSync, constants, mkdirSync, openSync, renameSync, unlinkSync, writeFileSync, writeSync } from 'node:fs';
+import {
+  closeSync, constants, mkdirSync, openSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync, writeSync,
+} from 'node:fs';
 import { dirname, resolve } from 'node:path';
 
 const CSV_FORMULA_PREFIXES = ['=', '+', '-', '@', '\t', '\r'];
 const LOG_FIELDS = ['id', 'name', 'phone', 'source', 'eventCode'];
+const MAX_LOG_REWRITE_BYTES = 64 * 1024 * 1024;
+
+const openLog = (path) =>
+  openSync(path, constants.O_WRONLY | constants.O_APPEND | constants.O_CREAT | (constants.O_NOFOLLOW ?? 0), 0o600);
+
+function mentionsPhone(line, phone) {
+  try {
+    return JSON.parse(line).phone === phone;
+  } catch {
+    return line.includes(phone);
+  }
+}
 const IST_OFFSET_MS = 330 * 60 * 1000; // India has no daylight saving, so a fixed +05:30 is exact
 
 /** "2026-10-15T13:48:30Z" -> "2026-10-15 19:18 IST"; anything unparseable is returned as-is. */
@@ -57,15 +71,15 @@ export class LeadFiles {
     mkdirSync(dirname(this.logPath), { recursive: true });
     // O_NOFOLLOW: a symlink planted at the log path must not redirect our writes (absent on Windows,
     // where creating a symlink needs admin rights anyway).
-    this.logFd = openSync(this.logPath,
-      constants.O_WRONLY | constants.O_APPEND | constants.O_CREAT | (constants.O_NOFOLLOW ?? 0), 0o600);
+    this.logFd = openLog(this.logPath);
   }
 
-  record(event, lead) {
+  record(event, lead, fields = LOG_FIELDS) {
     const entry = { ts: new Date().toISOString(), event };
-    for (const field of LOG_FIELDS) entry[field] = lead[field] ?? null;
+    for (const field of fields) entry[field] = lead[field] ?? null;
     const buf = Buffer.from(`${JSON.stringify(entry)}\n`, 'utf8');
     try {
+      if (this.logFd === null) throw new Error('log is closed after a failed rewrite');
       let offset = 0;
       while (offset < buf.length) offset += writeSync(this.logFd, buf, offset);
       this.problems.delete(this.logPath);
@@ -90,6 +104,37 @@ export class LeadFiles {
     }
   }
 
+  /**
+   * Erase a deleted person from the log: rewrite it without any line for their number, then
+   * append a deletion entry that carries only the id. The CSV is resynced by the caller.
+   */
+  forget(lead) {
+    const tmp = `${this.logPath}.${randomBytes(6).toString('hex')}.tmp`;
+    try {
+      if (statSync(this.logPath).size > MAX_LOG_REWRITE_BYTES) throw new Error('log too large to rewrite');
+      const kept = readFileSync(this.logPath, 'utf8').split('\n').filter((line) => line && !mentionsPhone(line, lead.phone));
+      writeFileSync(tmp, kept.map((line) => `${line}\n`).join(''), { flag: 'wx', mode: 0o600 });
+      // The append handle points at the old file; swap files, then reopen on the new one.
+      closeSync(this.logFd);
+      this.logFd = null;
+      renameSync(tmp, this.logPath);
+      this.logFd = openLog(this.logPath);
+      this.problems.delete(this.logPath);
+    } catch (e) {
+      try {
+        unlinkSync(tmp);
+      } catch {}
+      if (this.logFd === null) {
+        try {
+          this.logFd = openLog(this.logPath);
+        } catch {}
+      }
+      this.fail(this.logPath, e);
+      return;
+    }
+    this.record('lead.deleted', lead, ['id']);
+  }
+
   fail(path, e) {
     this.problems.set(path, e.message);
     this.onError(`not updated: ${path}: ${e.message}`);
@@ -100,6 +145,6 @@ export class LeadFiles {
   }
 
   close() {
-    closeSync(this.logFd);
+    if (this.logFd !== null) closeSync(this.logFd);
   }
 }

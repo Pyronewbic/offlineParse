@@ -79,6 +79,8 @@ export class LeadStore {
     this.files = files;
     this.db = new DatabaseSync(path);
     this.db.exec('PRAGMA journal_mode = WAL;');
+    // Overwrite deleted rows with zeros instead of leaving them in free pages: deletion must erase.
+    this.db.exec('PRAGMA secure_delete = ON;');
     this.db.exec(SCHEMA);
     const cols = COLUMNS.join(', ');
     this.stmts = {
@@ -88,6 +90,7 @@ export class LeadStore {
         ' VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(phone) DO NOTHING'),
       list: this.db.prepare(`SELECT ${cols} FROM leads ORDER BY id`),
       get: this.db.prepare(`SELECT ${cols} FROM leads WHERE id = ?`),
+      remove: this.db.prepare('DELETE FROM leads WHERE id = ?'),
     };
     this.files?.sync(this.list());
   }
@@ -112,6 +115,20 @@ export class LeadStore {
   get(id) {
     const row = this.stmts.get.get(id);
     return row ? { ...row } : null;
+  }
+
+  /** Delete one registration everywhere it is stored. Returns the deleted row, or null. */
+  remove(id) {
+    const lead = this.get(id);
+    if (!lead) return null;
+    this.stmts.remove.run(id);
+    // Fold the WAL back in and truncate it, so the pre-delete page images do not linger there.
+    this.db.exec('PRAGMA wal_checkpoint(TRUNCATE);');
+    if (this.files) {
+      this.files.forget(lead);
+      this.files.sync(this.list());
+    }
+    return lead;
   }
 
   changed(event, id) {

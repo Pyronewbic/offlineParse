@@ -178,6 +178,30 @@ describe('portal server', () => {
     assert.equal(store.list().length, 1);
   });
 
+  test('admin delete asks for confirmation, then removes the registration', async () => {
+    await postForm(port, '/submit', { ...VALID, name: 'Asha <b>Rao</b>' });
+    const { id } = store.list()[0];
+    const token = await adminToken();
+    const confirm = await postForm(port, '/admin/delete', { id, token });
+    assert.equal(confirm.status, 200);
+    assert.match(confirm.body, /Delete this registration\?/);
+    assert.match(confirm.body, /<strong>Asha &lt;b&gt;Rao&lt;\/b&gt;<\/strong>/);
+    assert.match(confirm.body, /name="confirm" value="yes"/);
+    assert.equal(store.list().length, 1, 'nothing deleted before confirming');
+
+    for (const bad of ['', 'wrong']) {
+      assert.equal((await postForm(port, '/admin/delete', { id, token: bad, confirm: 'yes' })).status, 403);
+    }
+    assert.equal(store.list().length, 1);
+
+    const done = await postForm(port, '/admin/delete', { id, token, confirm: 'yes' });
+    assert.equal(done.status, 303);
+    assert.equal(store.list().length, 0);
+    assert.equal((await postForm(port, '/admin/delete', { id, token, confirm: 'yes' })).status, 404, 'second delete finds nothing');
+    assert.equal((await postForm(port, '/admin/delete', { id: 'abc', token })).status, 404);
+    assert.equal((await postForm(port, '/submit', VALID)).status, 200, 'the number can register again');
+  });
+
   test('admin can add a WhatsApp lead and rejects a bad number', async () => {
     const token = await adminToken();
     const bad = await postForm(port, '/admin/add', { name: 'Ravi', phone: '123', token });
@@ -207,6 +231,11 @@ describe('portal server', () => {
     }
     const post = await postForm(port, '/admin/add', { name: 'X', phone: '9876543210', token: await adminToken() }, { host });
     assert.equal(post.status, 404);
+    await postForm(port, '/submit', VALID);
+    const del = await postForm(port, '/admin/delete', { id: store.list()[0].id, token: await adminToken(), confirm: 'yes' }, { host });
+    assert.equal(del.status, 404, 'delete is not reachable from the Wi-Fi side');
+    assert.equal(store.list().length, 1);
+    store.db.exec('DELETE FROM leads');
     assert.equal(store.list().length, 0);
   });
 });

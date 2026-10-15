@@ -63,11 +63,11 @@ Keep the laptop awake and plugged in (macOS: `caffeinate -dims npm start`). The 
 - Data, all in `data/` and readable only by your user account (copy the whole folder to back up):
   - `leads.db`: the source of truth (SQLite).
   - `leads.csv`: opens in Excel or Numbers. Rewritten after every sign-up and admin add, so it always matches the database (one row per phone number). Excel does not refresh an open file: reopen it, or use the admin page for a live view. Rebuilt on startup if deleted.
-  - `leads.log`: append-only, one JSON line per registration (`lead.created`, UTC timestamps). Never rewritten.
+  - `leads.log`: append-only, one JSON line per registration (`lead.created`) or deletion (`lead.deleted`, id only), with UTC timestamps. Only ever appended to, except when a registration is deleted.
   - If the CSV or log cannot be written, sign-ups still save to the database and the admin page shows a red warning.
 
 ## After the event
 
 - WhatsApp QR registrations: search WhatsApp for the event code to find them, then add each one with **Add someone who messaged us**.
 - A phone number can register only once. A second attempt, on the form or the admin page, is refused with an error and the first registration is left as it was.
-- Honour deletion requests by deleting the row; the form promises this.
+- Deletion requests (the form promises them): use **Delete** next to the person on the admin page and confirm. It removes them from the database (overwriting the old bytes), the spreadsheet and the log, and frees the number to register again. Spreadsheets already downloaded or copied elsewhere are not touched.

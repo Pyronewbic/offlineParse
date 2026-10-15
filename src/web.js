@@ -42,6 +42,8 @@ form:not(.inline) > button:not(.primary){margin-top:1rem}
 .notice{margin:1.4rem 4px 0;font-size:.85rem;color:var(--muted)}
 .small{font-size:.85rem;color:var(--muted)}
 .nowrap{white-space:nowrap}
+button.danger{color:var(--onDanger);background:var(--danger)}
+button.danger + a{margin-left:1.25rem}
 .error{border:3px solid var(--error);background:var(--errorBg);color:var(--text);border-radius:10px;padding:.75rem;font-weight:600}
 .confetti{position:absolute;pointer-events:none;overflow:visible}
 .confetti path{fill:var(--pink);stroke:var(--line);stroke-width:2.5;stroke-linejoin:round}
@@ -137,13 +139,15 @@ export function thanksPage(cfg, name, phone, brand = NO_BRAND) {
 export function adminPage(cfg, leads, token, error = '', warnings = []) {
   const rows = leads.map((lead) =>
     `<tr><td>${esc(lead.name)}</td><td class="nowrap">${esc(displayPhone(lead.phone))}</td>` +
-    `<td>${esc(SOURCE_LABELS[lead.source] ?? lead.source)}</td><td class="nowrap">${esc(toIST(lead.createdAt))}</td></tr>`);
+    `<td>${esc(SOURCE_LABELS[lead.source] ?? lead.source)}</td><td class="nowrap">${esc(toIST(lead.createdAt))}</td>` +
+    `<td><form class="inline" method="post" action="/admin/delete">${hidden(token, lead.id)}` +
+    '<button class="danger">Delete</button></form></td></tr>');
   return page('Registrations', `
 ${warnings.map((w) => `<p class="error" role="alert">${esc(w)}</p>`).join('')}
 <h1>Registrations: ${leads.length}</h1>
 <p><a href="/admin/export.csv">Download CSV</a></p>
-<div class="scroll"><table><thead><tr><th>Name</th><th>Phone</th><th>Came in via</th><th>Signed up (IST)</th></tr></thead>
-<tbody>${rows.join('') || '<tr><td colspan="4">No registrations yet.</td></tr>'}</tbody></table></div>
+<div class="scroll"><table><thead><tr><th>Name</th><th>Phone</th><th>Came in via</th><th>Signed up (IST)</th><th></th></tr></thead>
+<tbody>${rows.join('') || '<tr><td colspan="5">No registrations yet.</td></tr>'}</tbody></table></div>
 <h2>Add someone who messaged us on WhatsApp</h2>
 ${errorBlock(error)}
 <form method="post" action="/admin/add">
@@ -152,6 +156,19 @@ ${errorBlock(error)}
   <label for="phone">Mobile number</label><input id="phone" name="phone" type="tel" maxlength="20" required>
   <button type="submit">Add registration</button>
 </form>`, true);
+}
+
+const hidden = (token, id) =>
+  `<input type="hidden" name="token" value="${esc(token)}"><input type="hidden" name="id" value="${esc(id)}">`;
+
+export function confirmDeletePage(lead, token) {
+  return page('Delete registration', `
+<h1>Delete this registration?</h1>
+<p><strong>${esc(lead.name)}</strong>, <span class="nowrap">${esc(displayPhone(lead.phone))}</span>, signed up ${esc(toIST(lead.createdAt))}.</p>
+<p>This removes them from the database, the spreadsheet and the log. It cannot be undone. Spreadsheets you
+already downloaded or copied are not changed.</p>
+<form method="post" action="/admin/delete">${hidden(token, lead.id)}<input type="hidden" name="confirm" value="yes">
+<button class="danger" type="submit">Yes, delete</button> <a href="/admin">Cancel</a></form>`, true);
 }
 
 const warningsOf = (store) => store.files?.warnings() ?? [];
@@ -273,6 +290,15 @@ export function createPortalServer(cfg, store, { laptopIp, quiet = false, brand 
   async function adminPost(req, res, path) {
     const fields = await readForm(req);
     if (!tokenMatches(fields.token, adminToken)) return plain(res, 403, 'bad or missing admin token; reload /admin');
+    if (path === '/admin/delete') {
+      const id = Number(fields.id);
+      const lead = Number.isSafeInteger(id) ? store.get(id) : null;
+      if (!lead) return plain(res, 404, 'registration not found; it may already be deleted');
+      if (fields.confirm !== 'yes') return html(res, 200, confirmDeletePage(lead, adminToken));
+      store.remove(id);
+      log('registration deleted');
+      return redirect(res, '/admin', 303);
+    }
     if (path === '/admin/add') {
       let name;
       let phone;

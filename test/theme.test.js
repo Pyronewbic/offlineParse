@@ -19,6 +19,8 @@ for (const [mode, t] of Object.entries(THEME)) {
       ['muted on bg', t.muted, t.bg, TEXT],
       ['muted on surface', t.muted, t.surface, TEXT],
       ['button text on pink', t.onPink, t.pink, TEXT],
+      ['delete button text', t.onDanger, t.danger, TEXT],
+      ['delete button on bg', t.danger, t.bg, UI],
       ['error on surface', t.error, t.surface, TEXT],
       ['error on bg', t.error, t.bg, TEXT],
       ['text on error background', t.text, t.errorBg, TEXT],

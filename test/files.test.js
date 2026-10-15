@@ -172,3 +172,65 @@ describe('lead files', () => {
     }
   });
 });
+
+describe('deleting a registration', () => {
+  let dir;
+  let files;
+  let store;
+  const paths = () => ({ db: join(dir, 'leads.db'), csv: join(dir, 'leads.csv'), log: join(dir, 'leads.log') });
+  const open = () => {
+    files = new LeadFiles({ csvPath: paths().csv, logPath: paths().log, onError: () => {} });
+    store = new LeadStore(paths().db, { files });
+  };
+  const reg = (name, phone) => store.register({ name, phone, source: 'form', eventCode: 'EVT26', noticeVersion: 'v1' });
+  const rawEverywhere = () => readdirSync(dir).map((f) => readFileSync(join(dir, f)).toString('latin1')).join('\n');
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'delete-'));
+    open();
+  });
+  afterEach(() => {
+    store.close();
+    files.close();
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  test('erases the person from the database bytes, WAL, spreadsheet and log, and keeps everyone else', () => {
+    reg('Zanzibar Quokka', '+919111122222');
+    reg('Asha Rao', '+919876543210');
+    assert.ok(rawEverywhere().includes('Zanzibar Quokka'), 'positive control: the name is on disk before deletion');
+    assert.ok(rawEverywhere().includes('+919111122222'));
+
+    const removed = store.remove(1);
+    assert.equal(removed.name, 'Zanzibar Quokka');
+    assert.equal(store.get(1), null);
+
+    const raw = rawEverywhere();
+    assert.ok(!raw.includes('Zanzibar Quokka'), 'name gone from every file in the data folder');
+    assert.ok(!raw.includes('+919111122222') && !raw.includes('9111122222'), 'number gone from every file');
+    assert.ok(raw.includes('Asha Rao') && raw.includes('+919876543210'), 'the other registration is intact');
+
+    const entries = logEntries(paths().log);
+    assert.deepEqual(entries.map((e) => e.event), ['lead.created', 'lead.deleted']);
+    assert.deepEqual(Object.keys(entries[1]).sort(), ['event', 'id', 'ts'], 'the deletion entry carries no personal data');
+    assert.equal(entries[1].id, 1);
+    assert.equal(csvRows(paths().csv).length, 1);
+  });
+
+  test('the log keeps working after it is rewritten, and the number can register again', () => {
+    reg('Zanzibar Quokka', '+919111122222');
+    store.remove(1);
+    assert.deepEqual(reg('Zanzibar Quokka', '+919111122222'), { created: true });
+    reg('Ravi', '+919123456789');
+    assert.deepEqual(logEntries(paths().log).map((e) => [e.event, e.name ?? null]),
+      [['lead.deleted', null], ['lead.created', 'Zanzibar Quokka'], ['lead.created', 'Ravi']]);
+    assert.equal(files.warnings().length, 0);
+  });
+
+  test('an unknown id deletes nothing', () => {
+    reg('Asha Rao', '+919876543210');
+    assert.equal(store.remove(99), null);
+    assert.equal(store.list().length, 1);
+    assert.equal(logEntries(paths().log).length, 1);
+  });
+});

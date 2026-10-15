@@ -13,6 +13,8 @@ export const THEME = {
     focus: '#1F4FFF',
     error: '#B3002D',
     errorBg: '#FDE7EC',
+    danger: '#B3002D',
+    onDanger: '#FFFFFF',
   },
   dark: {
     bg: '#1B1B1D',
@@ -26,6 +28,8 @@ export const THEME = {
     focus: '#FFE14D',
     error: '#FF7A8A',
     errorBg: '#3A1D24',
+    danger: '#FF7A8A',
+    onDanger: '#1B1B1D',
   },
 };
 
