@@ -73,8 +73,4 @@ Keep the laptop awake and plugged in (macOS: `caffeinate -dims npm start`). The 
 - Form leads: **Open WhatsApp**, send, **Mark sent**.
 - Leads are de-duplicated by phone number, so someone who did both appears once.
 - Sending to many new chats from a regular WhatsApp account can get it flagged for spam. Keep batches modest; everyone on the list opted in, which helps.
-- Honour STOP replies by deleting the row; the form and messages promise this.
-
-## Phase 2: automated sends
-
-Planned: WhatsApp Cloud API. A guest's own message opens a 24-hour window in which a free-form reply is currently free (re-check Meta's rate card), so the WhatsApp QR path can auto-reply. Form leads need an approved marketing template, which is a paid send. `socialsSentAt` and `source` in the `leads` table are where that work plugs in.
+- Honour deletion requests by deleting the row; the form promises this.
