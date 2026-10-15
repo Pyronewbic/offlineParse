@@ -123,7 +123,7 @@ ${inline ? '' : errorBlock(error)}
   <button class="primary" type="submit">Register</button>
 </form>`, `
 <p class="notice">${esc(cfg.orgName)} uses your name and number only for this event's registration.
-Ask us at the desk any time to have your details deleted.</p>`);
+Reach out to us at the desk any time to have your details deleted.</p>`);
 }
 
 export function thanksPage(cfg, name, phone, brand = NO_BRAND) {
@@ -131,7 +131,7 @@ export function thanksPage(cfg, name, phone, brand = NO_BRAND) {
 <h1>You're registered, ${esc(firstName(name))}!</h1>
 <p class="lede">We've got you down as <strong>${esc(name)}</strong> on <strong class="nowrap">${esc(displayPhone(phone))}</strong>.</p>
 <p>You can disconnect from this Wi-Fi now so your phone goes back to mobile data.</p>`, `
-<p class="notice">Changed your mind? Ask us at the desk and we'll delete your details.</p>`);
+<p class="notice">Changed your mind? Reach out to us at the desk and we'll delete your details.</p>`);
 }
 
 export function adminPage(cfg, leads, token, error = '', warnings = []) {
