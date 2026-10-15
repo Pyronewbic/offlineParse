@@ -68,7 +68,7 @@ describe('portal server', () => {
   test('a valid submission is stored normalized', async () => {
     const res = await postForm(port, '/submit', VALID);
     assert.equal(res.status, 200);
-    assert.match(res.body, /You're on the list, Asha!/);
+    assert.match(res.body, /You're in, Asha!/);
     const leads = store.list();
     assert.equal(leads.length, 1);
     assert.deepEqual([leads[0].name, leads[0].phone, leads[0].source, leads[0].eventCode],
@@ -76,13 +76,30 @@ describe('portal server', () => {
   });
 
   test('invalid submissions are rejected and nothing is stored', async () => {
-    for (const fields of [{ ...VALID, consent: '' }, { name: 'Asha', phone: '98765 43210' },
-      { ...VALID, phone: '12345' }, { ...VALID, name: '   ' }, {}]) {
+    const cases = [[{ ...VALID, consent: '' }, 'consent'], [{ name: 'Asha', phone: '98765 43210' }, 'consent'],
+      [{ ...VALID, phone: '12345' }, 'phone'], [{ ...VALID, name: '   ' }, 'name'], [{}, 'name']];
+    for (const [fields, field] of cases) {
       const res = await postForm(port, '/submit', fields);
       assert.equal(res.status, 400, JSON.stringify(fields));
-      assert.match(res.body, /class="error"/);
+      assert.match(res.body, new RegExp(`<p class="field-error" id="${field}-error" role="alert">`), JSON.stringify(fields));
+      const input = res.body.match(new RegExp(`<input id="${field}"[^>]*>|<input type="checkbox" name="${field}"[^>]*>`))[0];
+      assert.match(input, new RegExp(`aria-invalid="true" autofocus`), `${field} input is flagged and focused`);
+      assert.match(input, new RegExp(`aria-describedby="[^"]*${field}-error`), `${field} input points at its error`);
+      assert.equal((res.body.match(/aria-invalid="true"/g) || []).length, 1, 'only one field is flagged');
     }
     assert.equal(store.list().length, 0);
+  });
+
+  test('a re-rendered form keeps the consent tick only if it was given', async () => {
+    const ticked = await postForm(port, '/submit', { ...VALID, phone: '12345' });
+    assert.match(ticked.body, /name="consent" value="yes" required checked/);
+    const unticked = await postForm(port, '/submit', { ...VALID, phone: '12345', consent: '' });
+    assert.ok(!/name="consent"[^>]* checked/.test(unticked.body));
+  });
+
+  test('the thank-you page shows the number in readable groups', async () => {
+    const res = await postForm(port, '/submit', VALID);
+    assert.match(res.body, /<strong class="nowrap">\+91 98765 43210<\/strong>/);
   });
 
   test('re-rendered form escapes what the user typed', async () => {

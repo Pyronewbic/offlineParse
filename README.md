@@ -16,7 +16,7 @@ npm install          # only for the QR script
 npm test
 ```
 
-Edit `config.json`: org and event names, `eventCode` (shows up in WhatsApp messages so you can tell events apart), `whatsappNumber` (country code, no `+`), the real social links, and `wifiSsid` / `wifiPassword` (empty password = open network).
+Edit `config.json`: org name (shown in the consent line and WhatsApp messages; the logo replaces it as the page heading), event name, `eventCode` (shows up in WhatsApp messages so you can tell events apart), `whatsappNumber` (country code, no `+`), the real social links, and `wifiSsid` / `wifiPassword` (empty password = open network). `logoLight` / `logoDark` point at PNG logos for light and dark phones (checked at startup; empty shows the org name instead).
 
 ### Router
 

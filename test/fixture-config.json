@@ -9,6 +9,8 @@
   "httpPort": 80,
   "dnsPort": 53,
   "dbPath": "data/leads.db",
+  "logoLight": "",
+  "logoDark": "",
   "noticeVersion": "2026-10-v1",
   "socials": {
     "instagram": "https://instagram.com/PLACEHOLDER",

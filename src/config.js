@@ -15,6 +15,8 @@ const FIELD_TYPES = {
   httpPort: 'port',
   dnsPort: 'port',
   dbPath: 'string',
+  logoLight: 'string',
+  logoDark: 'string',
   noticeVersion: 'string',
   socials: 'object',
   socialsMessage: 'string',
@@ -71,6 +73,10 @@ export function configFromObject(raw) {
   }
   if (/^[0-9.]+$/.test(raw.laptopIp) && !isIPv4(raw.laptopIp)) {
     throw new ConfigError(`laptopIp "${raw.laptopIp}" looks like an address but is not a valid IPv4 address`);
+  }
+
+  for (const key of ['logoLight', 'logoDark']) {
+    if (raw[key].length > 512 || /\p{C}/u.test(raw[key])) throw new ConfigError(`${key} must be a file path or empty`);
   }
 
   const socialKeys = Object.keys(raw.socials).sort();

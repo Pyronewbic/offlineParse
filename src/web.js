@@ -3,42 +3,61 @@ import http from 'node:http';
 import { leadsCsv } from './files.js';
 import { NAME_MAX, ValidationError, cleanName, normalizePhone } from './leads.js';
 import { socialsText, whatsappLink } from './payloads.js';
+import { themeCss } from './theme.js';
 
 export const MAX_BODY = 8 * 1024;
 const MAX_FIELDS = 20;
+export const BRAND_PATHS = { '/brand/logo-light.png': 'light', '/brand/logo-dark.png': 'dark' };
 const LOOPBACK = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
-const CSP = "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'";
+const CSP = "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'";
 
-const CSS = `
+const HEAVY = 'Impact,Haettenschweiler,"Arial Narrow Bold",system-ui,sans-serif';
+const CSS = `${themeCss()}
 *{box-sizing:border-box}
-body{margin:0;background:#f6f5f2;color:#1d1d1f;font:16px/1.5 -apple-system,system-ui,"Segoe UI",Roboto,sans-serif}
-main{max-width:30rem;margin:0 auto;padding:24px 16px}
+body{margin:0;background:var(--bg);color:var(--text);font:500 17px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;-webkit-text-size-adjust:100%}
+main{max-width:28rem;margin:0 auto;padding:14px 16px 40px}
 main.wide{max-width:64rem}
-h1{font-size:1.5rem;margin:0 0 .25rem}
-label{display:block;font-weight:600;margin:1rem 0 .25rem}
-input[type=text],input[type=tel]{width:100%;padding:.75rem;font-size:1rem;border:1px solid #b9b6ae;border-radius:8px;background:#fff;color:inherit}
-.check{display:flex;gap:.5rem;align-items:flex-start;font-weight:400}
-.check input{margin-top:.3rem;width:1.1rem;height:1.1rem}
-button,.btn{display:inline-block;margin-top:1.25rem;padding:.8rem 1.2rem;font-size:1rem;font-weight:600;border:0;border-radius:8px;background:#1f6f4a;color:#fff;text-decoration:none;cursor:pointer}
-.small{font-size:.85rem;color:#5b5953}
-.error{background:#fde8e6;color:#8a1c12;padding:.75rem;border-radius:8px}
+a{color:inherit}
+.brand{margin:0 0 14px}
+.brand img{display:block;width:100%;max-width:250px;height:auto;margin:0 auto}
+.wordmark{margin:8px 0 0;text-align:center;font:900 2.2rem/1 ${HEAVY};text-transform:uppercase}
+.card{position:relative;background:var(--surface);border:3px solid var(--line);border-radius:14px;box-shadow:6px 6px 0 var(--pink);padding:20px 18px 24px}
+.card h1{margin:0 0 .35rem;font:900 1.7rem/1.1 ${HEAVY};text-transform:uppercase;letter-spacing:.02em}
+.lede{margin:0 0 .5rem;color:var(--muted)}
+label{display:block;font-weight:700;margin:1rem 0 .35rem}
+input[type=text],input[type=tel]{width:100%;min-height:52px;padding:.7rem .85rem;font-size:17px;font-family:inherit;color:var(--text);background:var(--surface);border:3px solid var(--line);border-radius:10px;-webkit-appearance:none;appearance:none}
+input[aria-invalid=true]{border-color:var(--error)}
+:focus-visible,input:focus{outline:3px solid var(--focus);outline-offset:2px}
+.hint{margin:.35rem 0 0;font-size:.9rem;color:var(--muted)}
+.field-error{margin:.45rem 0 0;font-weight:700;color:var(--error)}
+.field-error::before{content:"!";display:inline-block;width:1.25em;height:1.25em;margin-right:.4em;border-radius:50%;background:var(--error);color:var(--surface);text-align:center;line-height:1.25em;font-weight:900}
+.check{display:flex;gap:.75rem;align-items:flex-start;font-weight:500;margin-top:1.2rem;cursor:pointer}
+.check input{flex:none;width:28px;height:28px;margin:0;accent-color:var(--pink)}
+button,.btn{display:inline-block;padding:.75rem 1.1rem;font:800 1rem/1.1 system-ui,sans-serif;color:var(--onPink);background:var(--pink);border:3px solid var(--line);border-radius:12px;box-shadow:4px 4px 0 var(--shadow);text-decoration:none;cursor:pointer}
+button:active,.btn:active{transform:translate(3px,3px);box-shadow:1px 1px 0 var(--shadow)}
+form:not(.inline) > button:not(.primary){margin-top:1rem}
+.primary{display:block;width:100%;min-height:58px;margin-top:1.3rem;font:900 1.25rem/1 ${HEAVY};text-transform:uppercase;letter-spacing:.04em}
+.notice{margin:1.4rem 4px 0;font-size:.85rem;color:var(--muted)}
+.small{font-size:.85rem;color:var(--muted)}
+.nowrap{white-space:nowrap}
+.error{border:3px solid var(--error);background:var(--errorBg);color:var(--text);border-radius:10px;padding:.75rem;font-weight:600}
+.confetti{position:absolute;pointer-events:none;overflow:visible}
+.confetti path{fill:var(--pink);stroke:var(--line);stroke-width:2.5;stroke-linejoin:round}
+.confetti.tr{top:-24px;right:-8px;width:58px}
+.confetti.bl{bottom:-20px;left:-12px;width:38px}
 .scroll{overflow-x:auto}
 table{width:100%;border-collapse:collapse;font-size:.9rem}
-th,td{text-align:left;padding:.5rem;border-bottom:1px solid #dedad2;vertical-align:top}
-td button,td .btn{margin:0;padding:.4rem .7rem;font-size:.85rem}
+th,td{text-align:left;padding:.5rem;border-bottom:1px solid var(--muted);vertical-align:top}
+td button,td .btn{margin:0;padding:.4rem .7rem;font-size:.85rem;box-shadow:2px 2px 0 var(--shadow)}
 form.inline{display:inline}
-textarea{width:100%;min-height:9rem;font:inherit;padding:.5rem}
-@media (prefers-color-scheme: dark){
-body{background:#17171a;color:#ecebe8}
-input[type=text],input[type=tel],textarea{background:#232327;border-color:#4a4943;color:#ecebe8}
-.small{color:#a9a69e}
-.error{background:#4a1d18;color:#ffd9d3}
-th,td{border-color:#36352f}
-}`;
+textarea{width:100%;min-height:9rem;font:inherit;padding:.5rem;color:var(--text);background:var(--surface);border:2px solid var(--line);border-radius:8px}
+@media (prefers-reduced-motion: reduce){button:active,.btn:active{transform:none}}
+`;
 
 const ESCAPES = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#x27;' };
 export const esc = (value) => String(value).replace(/[&<>"']/g, (ch) => ESCAPES[ch]);
 const firstName = (name) => name.split(' ')[0];
+export const displayPhone = (phone) => phone.replace(/^\+91(\d{5})(\d{5})$/, '+91 $1 $2');
 
 function page(title, body, wide = false) {
   return '<!doctype html><html lang="en"><head><meta charset="utf-8">' +
@@ -49,30 +68,69 @@ function page(title, body, wide = false) {
 
 const errorBlock = (error) => (error ? `<p class="error" role="alert">${esc(error)}</p>` : '');
 
-export function formPage(cfg, { error = '', name = '', phone = '' } = {}) {
-  return page(`${cfg.orgName} sign-up`, `
-<h1>Hi from ${esc(cfg.orgName)}!</h1>
-<p>Leave your name and WhatsApp number and we'll send you our Instagram, YouTube and Discord.</p>
-${errorBlock(error)}
+const CONFETTI =
+  '<svg class="confetti tr" viewBox="0 0 60 44" aria-hidden="true" focusable="false">' +
+  '<path d="M3 13 L19 3 L23 25 Z"/><path d="M31 7 L57 17 L37 41 Z"/></svg>' +
+  '<svg class="confetti bl" viewBox="0 0 40 40" aria-hidden="true" focusable="false">' +
+  '<path d="M3 5 L33 3 L11 33 Z"/></svg>';
+
+function logoMarkup(cfg, brand) {
+  const img = (src, logo) =>
+    `<img src="${src}" alt="${esc(cfg.orgName)}" width="${logo.width}" height="${logo.height}">`;
+  if (brand.light && brand.dark) {
+    return '<picture><source srcset="/brand/logo-dark.png" media="(prefers-color-scheme: dark)">' +
+      `${img('/brand/logo-light.png', brand.light)}</picture>`;
+  }
+  if (brand.light) return img('/brand/logo-light.png', brand.light);
+  if (brand.dark) return img('/brand/logo-dark.png', brand.dark);
+  return `<p class="wordmark">${esc(cfg.orgName)}</p>`;
+}
+
+const NO_BRAND = { light: null, dark: null };
+
+function portalPage(cfg, brand, title, card, after = '') {
+  return page(title, `<header class="brand">${logoMarkup(cfg, brand)}</header>` +
+    `<section class="card">${CONFETTI}${card}</section>${after}`);
+}
+
+const FIELDS = ['name', 'phone', 'consent'];
+
+export function formPage(cfg, { error = '', field = null, name = '', phone = '', consent = false } = {}, brand = NO_BRAND) {
+  const inline = error && FIELDS.includes(field);
+  const fieldError = (id) => (inline && field === id
+    ? `<p class="field-error" id="${id}-error" role="alert">${esc(error)}</p>` : '');
+  const attrs = (id, hint = '') => {
+    const describedBy = [inline && field === id ? `${id}-error` : '', hint].filter(Boolean).join(' ');
+    return (describedBy ? ` aria-describedby="${describedBy}"` : '') +
+      (inline && field === id ? ' aria-invalid="true" autofocus' : '');
+  };
+  return portalPage(cfg, brand, `${cfg.orgName} sign-up`, `
+<h1>Get the links</h1>
+<p class="lede">Get our Instagram, YouTube and Discord on WhatsApp.</p>
+${inline ? '' : errorBlock(error)}
 <form method="post" action="/submit">
   <label for="name">Your name</label>
-  <input id="name" name="name" type="text" autocomplete="name" maxlength="${NAME_MAX}" required value="${esc(name)}">
+  <input id="name" name="name" type="text" autocomplete="name" autocapitalize="words" maxlength="${NAME_MAX}" required value="${esc(name)}"${attrs('name')}>
+  ${fieldError('name')}
   <label for="phone">WhatsApp number</label>
-  <input id="phone" name="phone" type="tel" inputmode="tel" autocomplete="tel" maxlength="20" placeholder="98765 43210" required value="${esc(phone)}">
-  <label class="check"><input type="checkbox" name="consent" value="yes" required>
+  <input id="phone" name="phone" type="tel" inputmode="tel" autocomplete="tel" maxlength="20" placeholder="98765 43210" required value="${esc(phone)}"${attrs('phone', 'phone-hint')}>
+  <p class="hint" id="phone-hint">10-digit mobile number, or start with + and your country code.</p>
+  ${fieldError('phone')}
+  <label class="check"><input type="checkbox" name="consent" value="yes" required${consent ? ' checked' : ''}${attrs('consent')}>
     <span>I agree to get WhatsApp messages from ${esc(cfg.orgName)}.</span></label>
-  <button type="submit">Send me the links</button>
-</form>
-<p class="small">${esc(cfg.orgName)} uses your name and number only to send you our social links and news about
+  ${fieldError('consent')}
+  <button class="primary" type="submit">Send me the links</button>
+</form>`, `
+<p class="notice">${esc(cfg.orgName)} uses your name and number only to send you our social links and news about
 our events. Reply STOP on WhatsApp any time to opt out or have your details deleted.</p>`);
 }
 
-export function thanksPage(cfg, name, phone) {
-  return page('Thanks!', `
-<h1>You're on the list, ${esc(firstName(name))}!</h1>
-<p>We'll send our Instagram, YouTube and Discord links to WhatsApp <strong>${esc(phone)}</strong> soon.</p>
-<p>You can disconnect from this Wi-Fi now so your phone goes back to mobile data.</p>
-<p class="small">Changed your mind? Reply STOP on WhatsApp and we'll delete your details.</p>`);
+export function thanksPage(cfg, name, phone, brand = NO_BRAND) {
+  return portalPage(cfg, brand, "You're in!", `
+<h1>You're in, ${esc(firstName(name))}!</h1>
+<p class="lede">Our Instagram, YouTube and Discord links are on their way to WhatsApp <strong class="nowrap">${esc(displayPhone(phone))}</strong>.</p>
+<p>You can disconnect from this Wi-Fi now so your phone goes back to mobile data.</p>`, `
+<p class="notice">Changed your mind? Reply STOP on WhatsApp and we'll delete your details.</p>`);
 }
 
 export function adminPage(cfg, leads, token, error = '', warnings = []) {
@@ -113,7 +171,7 @@ ${errorBlock(error)}
 const warningsOf = (store) => store.files?.warnings() ?? [];
 
 function send(res, status, type, body, extra = {}) {
-  const buf = Buffer.from(body, 'utf8');
+  const buf = Buffer.isBuffer(body) ? body : Buffer.from(body, 'utf8');
   res.writeHead(status, {
     'Content-Type': type,
     'Content-Length': buf.length,
@@ -187,7 +245,7 @@ function tokenMatches(given, expected) {
   return a.length === b.length && timingSafeEqual(a, b);
 }
 
-export function createPortalServer(cfg, store, { laptopIp, quiet = false }) {
+export function createPortalServer(cfg, store, { laptopIp, quiet = false, brand = { light: null, dark: null } }) {
   const adminToken = randomBytes(32).toString('base64url');
   let portalHosts;
   let portalUrl;
@@ -208,14 +266,16 @@ export function createPortalServer(cfg, store, { laptopIp, quiet = false }) {
     try {
       name = cleanName(rawName);
       phone = normalizePhone(rawPhone);
-      if (fields.consent !== 'yes') throw new ValidationError("Please tick the box so we're allowed to message you.");
+      if (fields.consent !== 'yes') throw new ValidationError("Please tick the box so we're allowed to message you.", 'consent');
     } catch (e) {
       if (!(e instanceof ValidationError)) throw e;
-      return html(res, 400, formPage(cfg, { error: e.message, name: rawName.slice(0, NAME_MAX), phone: rawPhone.slice(0, 20) }));
+      return html(res, 400, formPage(cfg, {
+        error: e.message, field: e.field, name: rawName.slice(0, NAME_MAX), phone: rawPhone.slice(0, 20), consent: fields.consent === 'yes',
+      }, brand));
     }
     const created = store.upsert({ name, phone, source: 'form', eventCode: cfg.eventCode, noticeVersion: cfg.noticeVersion });
     log(`lead ${created ? 'added' : 'updated'} via form`);
-    html(res, 200, thanksPage(cfg, name, phone));
+    html(res, 200, thanksPage(cfg, name, phone, brand));
   }
 
   async function adminPost(req, res, path) {
@@ -264,7 +324,11 @@ export function createPortalServer(cfg, store, { laptopIp, quiet = false }) {
       return plain(res, 404, 'not found');
     }
     if (method === 'POST' && path === '/submit') return submit(req, res);
-    if (method === 'GET' && path === '/' && portalHosts.has(hostOf(req))) return html(res, 200, formPage(cfg));
+    const logo = method === 'GET' && BRAND_PATHS[path];
+    if (logo && brand[logo]) {
+      return send(res, 200, 'image/png', brand[logo].bytes, { 'Cache-Control': 'public, max-age=86400' });
+    }
+    if (method === 'GET' && path === '/' && portalHosts.has(hostOf(req))) return html(res, 200, formPage(cfg, {}, brand));
     // Every other URL, including the OS captive-portal probes, goes to the form.
     redirect(res, portalUrl, method === 'GET' ? 302 : 303);
   }

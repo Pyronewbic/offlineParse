@@ -29,31 +29,36 @@ CREATE TABLE IF NOT EXISTS leads (
   socialsSentAt TEXT
 );`;
 
-export class ValidationError extends Error {}
+export class ValidationError extends Error {
+  constructor(message, field = null) {
+    super(message);
+    this.field = field;
+  }
+}
 
 function indianMobile(digits) {
   if (digits.length !== 10) {
-    throw new ValidationError(`We counted ${digits.length} digits. Enter a 10-digit Indian mobile number, or include your country code with +.`);
+    throw new ValidationError(`We counted ${digits.length} digits. Enter a 10-digit Indian mobile number, or include your country code with +.`, 'phone');
   }
-  if (!'6789'.includes(digits[0])) throw new ValidationError('Indian mobile numbers start with 6, 7, 8 or 9.');
+  if (!'6789'.includes(digits[0])) throw new ValidationError('Indian mobile numbers start with 6, 7, 8 or 9.', 'phone');
   return digits;
 }
 
 export function normalizePhone(raw) {
   let s = String(raw ?? '').replace(PHONE_SEPARATORS, '');
-  if (!s) throw new ValidationError('Please enter your WhatsApp number.');
-  if (s.length > 20) throw new ValidationError('That number is too long.');
+  if (!s) throw new ValidationError('Please enter your WhatsApp number.', 'phone');
+  if (s.length > 20) throw new ValidationError('That number is too long.', 'phone');
   if (s.startsWith('00')) s = `+${s.slice(2)}`;
   if (s.startsWith('+')) {
     const digits = s.slice(1);
-    if (!/^[0-9]+$/.test(digits)) throw new ValidationError('Use digits only after the +.');
+    if (!/^[0-9]+$/.test(digits)) throw new ValidationError('Use digits only after the +.', 'phone');
     if (digits.startsWith('91')) return `+91${indianMobile(digits.slice(2))}`;
     if (digits.length < 8 || digits.length > 15) {
-      throw new ValidationError('International numbers need 8-15 digits after the +.');
+      throw new ValidationError('International numbers need 8-15 digits after the +.', 'phone');
     }
     return `+${digits}`;
   }
-  if (!/^[0-9]+$/.test(s)) throw new ValidationError('Use digits only.');
+  if (!/^[0-9]+$/.test(s)) throw new ValidationError('Use digits only.', 'phone');
   if (s.length === 12 && s.startsWith('91')) s = s.slice(2);
   else if (s.length === 11 && s.startsWith('0')) s = s.slice(1);
   return `+91${indianMobile(s)}`;
@@ -61,8 +66,8 @@ export function normalizePhone(raw) {
 
 export function cleanName(raw) {
   const name = String(raw ?? '').replace(STRIP_CHARS, '').split(/\s+/).filter(Boolean).join(' ');
-  if (!name) throw new ValidationError('Please enter your name.');
-  if ([...name].length > NAME_MAX) throw new ValidationError(`Name is too long (${NAME_MAX} characters max).`);
+  if (!name) throw new ValidationError('Please enter your name.', 'name');
+  if ([...name].length > NAME_MAX) throw new ValidationError(`Name is too long (${NAME_MAX} characters max).`, 'name');
   return name;
 }
 

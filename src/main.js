@@ -1,5 +1,6 @@
 import { dirname, join } from 'node:path';
 import { parseArgs } from 'node:util';
+import { BrandError, loadBrand } from './brand.js';
 import { ConfigError, loadConfig } from './config.js';
 import { startCatchAllDns } from './dns.js';
 import { LeadFiles } from './files.js';
@@ -48,6 +49,14 @@ async function main(argv) {
     console.error(`config error: ${e.message}`);
     return 2;
   }
+  let brand;
+  try {
+    brand = loadBrand(cfg);
+  } catch (e) {
+    if (!(e instanceof BrandError)) throw e;
+    console.error(`config error: ${e.message}`);
+    return 2;
+  }
   const configured = values.ip ?? cfg.laptopIp;
   let address;
   try {
@@ -69,7 +78,7 @@ async function main(argv) {
     return 1;
   }
   const store = new LeadStore(cfg.dbPath, { files });
-  const server = createPortalServer(cfg, store, { laptopIp: address.ip, quiet: values.quiet });
+  const server = createPortalServer(cfg, store, { laptopIp: address.ip, quiet: values.quiet, brand });
   let dns = null;
   try {
     await listen(server, cfg.httpPort, '0.0.0.0');

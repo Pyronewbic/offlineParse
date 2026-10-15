@@ -1,5 +1,5 @@
 {
-  "orgName": "Daijobu",
+  "orgName": "Versus Experience",
   "eventName": "Event XYZ",
   "eventCode": "EVT26",
   "whatsappNumber": "919999999999",
@@ -9,6 +9,8 @@
   "httpPort": 80,
   "dnsPort": 53,
   "dbPath": "data/leads.db",
+  "logoLight": "assets/VERSUS EXPERIENCE _ LOGO _2025-05.png",
+  "logoDark": "assets/VERSUS EXPERIENCE _ LOGO _2025-06.png",
   "noticeVersion": "2026-10-v1",
   "socials": {
     "instagram": "https://instagram.com/PLACEHOLDER",

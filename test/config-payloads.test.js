@@ -23,6 +23,8 @@ describe('config', () => {
       'laptopIp padded': { laptopIp: ' en0' },
       'laptopIp control char': { laptopIp: 'en0\u001b[2J' },
       'laptopIp too long': { laptopIp: 'x'.repeat(65) },
+      'logo path with control char': { logoLight: 'assets/logo\u0007.png' },
+      'logo path as number': { logoDark: 5 },
       'port as string': { httpPort: '80' },
       'port as bool': { httpPort: true },
       'port zero': { httpPort: 0 },
