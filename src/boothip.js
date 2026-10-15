@@ -32,7 +32,7 @@ function undoSteps(platform, iface, ip, prefix) {
  */
 export function planBoothIp({ platform, addresses, boothIp, undo = false, prefix = 24, gateway }) {
   if (!isIPv4(boothIp)) {
-    throw new BoothIpError(`laptopIp in config.json must be the fixed booth address, e.g. "192.168.88.2" (it is "${boothIp}")`);
+    throw new BoothIpError(`laptopIp in config.json must be the fixed booth address, e.g. "192.168.0.2" (it is "${boothIp}")`);
   }
   if (!Number.isInteger(prefix) || prefix < 8 || prefix > 30) throw new BoothIpError('--prefix must be a whole number from 8 to 30');
   const gw = gateway ?? toIp(networkOf(boothIp, prefix) + 1);

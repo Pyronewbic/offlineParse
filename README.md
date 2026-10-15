@@ -22,12 +22,12 @@ Edit `config.json`: org name (shown in the consent line and WhatsApp messages; t
 
 The router must have **no internet** (nothing in the WAN port). Menu names below are from a TP-Link TL-WR845N; other routers have the same settings under similar names.
 
-1. **Network > LAN:** router address `192.168.88.1`.
+1. **Network > LAN:** leave the router at its default address, `192.168.0.1` (its admin page; join its Wi-Fi first).
 2. **Wireless:** SSID and password to match `config.json`.
-3. **DHCP > DHCP Settings:** start `192.168.88.100`, end `192.168.88.199` (keeps the booth address `.2` out of the pool), **Primary DNS `192.168.88.2`**, Secondary DNS `0.0.0.0`. Save.
+3. **DHCP > DHCP Settings:** start `192.168.0.100`, end `192.168.0.199` (keeps the booth address `.2` out of the pool), **Primary DNS `192.168.0.2`**, Secondary DNS `0.0.0.0`. Save.
 4. Turn IPv6 off if the router has it, then **System Tools > Reboot**.
 
-That is all the router ever needs: no per-laptop reservation. Whichever laptop runs the booth takes the booth address, `laptopIp` in `config.json` (`"192.168.88.2"`), with `npm run booth-ip` (see Event day). Every phone asks that address for DNS, which makes the sign-in sheet open the form.
+That is all the router ever needs: no per-laptop reservation. Whichever laptop runs the booth takes the booth address, `laptopIp` in `config.json` (`"192.168.0.2"`), with `npm run booth-ip` (see Event day). Every phone asks that address for DNS, which makes the sign-in sheet open the form.
 
 `laptopIp` can instead be `"auto"` or an adapter name such as `"en0"` / `"Wi-Fi"`, for a setup where the router's DNS points at one particular laptop's own address; `npm start -- --ip <address or name>` overrides it for one run.
 
@@ -52,7 +52,7 @@ These behaviours could not be confirmed from documentation; check them before re
 Join the booth Wi-Fi, then:
 
 ```sh
-npm run booth-ip   # gives this laptop 192.168.88.2; asks for the admin password
+npm run booth-ip   # gives this laptop 192.168.0.2; asks for the admin password
 npm start
 ```
 
@@ -66,7 +66,7 @@ Keep the laptop awake and plugged in (macOS: `caffeinate -dims npm start`). The 
 - **Windows:** allow Node.js through the firewall when asked, and set the event Wi-Fi to a **Private** network (Windows blocks incoming connections on Public ones). Ports 80 and 53 need no admin rights.
 - **Linux:** ports below 1024 need root, or once: `sudo setcap cap_net_bind_service=+ep "$(readlink -f "$(command -v node)")"`. Allow 80/tcp and 53/udp in the firewall (for example `ufw`). The DNS helper listens only on the booth address, so systemd-resolved holding port 53 on loopback does not conflict.
 
-- Form: `http://192.168.88.2/` (print this on the poster as a fallback)
+- Form: `http://192.168.0.2/` (print this on the poster as a fallback)
 - Admin, from the laptop only: `http://localhost/admin` (returns 404 to anyone on the Wi-Fi). Newest registrations first, totals by source, search by name or any part of the number, manual add, and per-row delete. Use **Refresh** to see new sign-ups; it does not auto-refresh, so typing is never wiped.
 - Data, all in `data/` and readable only by your user account (copy the whole folder to back up):
   - `leads.db`: the source of truth (SQLite).
