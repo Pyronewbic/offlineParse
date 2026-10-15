@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { rivalAddresses, startDnsOn } from '../src/dnsbind.js';
+import { explainPortError, rivalAddresses, startDnsOn } from '../src/dnsbind.js';
 
 const failing = (code) => Object.assign(new Error(code), { code });
 
@@ -18,7 +18,7 @@ test('falls back to all addresses only when the OS refuses the specific bind (ma
     if (host !== '0.0.0.0') throw failing('EACCES');
     return 'wild';
   };
-  assert.deepEqual(await startDnsOn('192.168.0.2', 53, start), { sock: 'wild', host: '0.0.0.0' });
+  assert.deepEqual(await startDnsOn('192.168.0.2', 53, start, null, 'darwin'), { sock: 'wild', host: '0.0.0.0' });
   assert.deepEqual(calls, ['192.168.0.2', '0.0.0.0']);
 });
 
@@ -34,6 +34,27 @@ test('other bind errors are not papered over', async () => {
   await assert.rejects(startDnsOn('192.168.0.2', 53, async () => {
     throw failing('EACCES');
   }), (e) => e.code === 'EACCES', 'a refused wildcard bind is reported, not swallowed');
+});
+
+test('outside macOS, EACCES is explained instead of retried on all addresses', async () => {
+  for (const [platform, hint] of [['win32', /UDP port 53 is already used by another program.*netstat -ano -p UDP \| findstr :53.*Mobile Hotspot/],
+    ['linux', /UDP port 53 needs root or the setcap command/]]) {
+    const calls = [];
+    await assert.rejects(startDnsOn('100.64.0.2', 53, async ({ host }) => {
+      calls.push(host);
+      throw failing('EACCES');
+    }, null, platform), (e) => e.code === 'EACCES' && hint.test(e.message), platform);
+    assert.deepEqual(calls, ['100.64.0.2'], `${platform}: no wildcard retry`);
+  }
+});
+
+test('explainPortError names the next step per platform and leaves other errors alone', () => {
+  const inUse = failing('EADDRINUSE');
+  assert.match(explainPortError(inUse, 80, 'TCP', 'win32').message, /TCP port 80 .*findstr :80.*PID 4 is IIS/);
+  assert.match(explainPortError(inUse, 53, 'UDP', 'darwin').message, /already used .*sudo lsof -nP -i UDP:53/);
+  assert.equal(explainPortError(inUse, 53, 'UDP', 'darwin').cause, inUse);
+  assert.equal(explainPortError(failing('EACCES'), 53, 'UDP', 'darwin').message, 'EACCES');
+  assert.equal(explainPortError(failing('EADDRNOTAVAIL'), 53, 'UDP', 'win32').message, 'EADDRNOTAVAIL');
 });
 
 test('real port 53 on this machine: specific refused or allowed, either way DNS ends up listening', async (t) => {

@@ -71,6 +71,19 @@ describe('entry point', () => {
     }
   });
 
+  test('a web port held by another program is explained, and nothing starts', async () => {
+    const holder = createServer().listen(0, '0.0.0.0');
+    await new Promise((r) => holder.once('listening', r));
+    try {
+      const busy = holder.address().port;
+      const { outcome, err } = await start({ laptopIp: '127.0.0.1', httpPort: busy });
+      assert.equal(outcome, 'exit 1');
+      assert.match(err(), new RegExp(`cannot open port: TCP port ${busy} is already used by another program`));
+    } finally {
+      holder.close();
+    }
+  });
+
   test('--ip overrides config and a non-local address is refused before anything opens', async () => {
     const { outcome, err } = await start({ laptopIp: '127.0.0.1' }, ['--ip', '203.0.113.7']);
     assert.equal(outcome, 'exit 2');

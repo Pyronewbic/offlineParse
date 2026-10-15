@@ -3,7 +3,7 @@ import { isIPv4 } from 'node:net';
 import { parseArgs } from 'node:util';
 import { BrandError, loadBrand } from './brand.js';
 import { ConfigError, loadConfig } from './config.js';
-import { rivalAddresses, startDnsOn as startDns } from './dnsbind.js';
+import { explainPortError, rivalAddresses, startDnsOn as startDns } from './dnsbind.js';
 import { LeadFiles } from './files.js';
 import { LeadStore } from './leads.js';
 import { AddressError, addressFollower, detectAddress, localAddresses } from './netaddr.js';
@@ -77,7 +77,9 @@ async function main(argv) {
   const server = createPortalServer(cfg, store, { laptopIp: address.ip, quiet: values.quiet, brand, onRequest });
   let dns = null;
   try {
-    await listen(server, cfg.httpPort, '0.0.0.0');
+    await listen(server, cfg.httpPort, '0.0.0.0').catch((e) => {
+      throw explainPortError(e, cfg.httpPort, 'TCP');
+    });
     if (!values['no-dns']) dns = await startDns(address.ip, cfg.dnsPort, undefined, onQuery);
   } catch (e) {
     console.error(`cannot open port: ${e.message}`);
