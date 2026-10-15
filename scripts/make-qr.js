@@ -25,13 +25,17 @@ try {
   process.exit(2);
 }
 
+// The register code opens the form directly, for phones where the sign-in sheet does not appear.
+const formUrl = isIPv4(cfg.laptopIp) ? `http://${cfg.laptopIp}/` : null;
 const payloads = {
-  whatsapp: whatsappLink(cfg.whatsappNumber, prefillText(cfg)),
   wifi: wifiPayload(cfg.wifiSsid, cfg.wifiPassword),
+  ...(formUrl ? { register: formUrl } : {}),
+  whatsapp: whatsappLink(cfg.whatsappNumber, prefillText(cfg)),
 };
 const labels = {
-  whatsapp: `WhatsApp: message ${cfg.orgName}`,
   wifi: `Wi-Fi: join "${cfg.wifiSsid}"${cfg.wifiPassword ? '' : ' (open network)'}`,
+  register: `Register: open ${formUrl} after joining the Wi-Fi`,
+  whatsapp: `WhatsApp: message ${cfg.orgName}`,
 };
 if (!values.terminal) for (const [name, payload] of Object.entries(payloads)) console.log(`${name}: ${payload}`);
 if (isIPv4(cfg.laptopIp)) {
@@ -53,7 +57,7 @@ try {
   process.exit(2);
 }
 if (values.terminal) {
-  for (const name of ['wifi', 'whatsapp']) {
+  for (const name of Object.keys(payloads)) {
     console.log(`\n${labels[name]}`);
     console.log(await QRCode.toString(payloads[name], { type: 'terminal', small: true, errorCorrectionLevel: 'M' }));
   }

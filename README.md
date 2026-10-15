@@ -41,9 +41,9 @@ After step 2, reach the router by `http://192.168.0.1` only; `tplinkwifi.net` wi
 
 ### QR codes
 
-- `npm run qr` writes `qr/wifi.{svg,png}` and `qr/whatsapp.{svg,png}` for the poster.
+- `npm run qr` writes `qr/wifi`, `qr/register` and `qr/whatsapp` (`.svg` and `.png`) for the poster. The Register code opens the form directly, for phones where the sign-in sheet does not open.
 - `npm run qr:show` draws them in the terminal to scan off the screen (if a scan fails, zoom the terminal out).
-- Print `http://192.168.0.2/` on the poster too, for phones where the sign-in sheet does not open.
+- Print `http://192.168.0.2/` under the Register code too.
 
 ## Event day
 
@@ -57,7 +57,7 @@ npm start
 - **Windows:** run `booth-ip` in a terminal opened with **Run as administrator**, allow Node.js through the firewall, and set the booth Wi-Fi to a **Private** network.
 - **macOS:** `booth-ip` switches Wi-Fi to the fixed booth address (macOS only lets a normal user answer DNS on all addresses, so it must be the only one). Allow incoming connections for `node` when asked. Keep it awake with `caffeinate -dims npm start`.
 - **Linux:** ports 80 and 53 need root or `sudo setcap cap_net_bind_service=+ep "$(readlink -f "$(command -v node)")"`; open 80/tcp and 53/udp in the firewall.
-- `npm run booth-ip -- --dry-run` shows the command without running it. If `npm start` warns that the booth address is gone, run `npm run booth-ip` again.
+- `npm run booth-ip -- --dry-run` shows the command without running it; `--ip <address>` acts on an address other than `config.json`'s (e.g. to undo an old one). If `npm start` warns that the booth address is gone, run `npm run booth-ip` again.
 
 **Admin:** `http://localhost/admin` on the laptop only. Newest first, search by name or any part of the number, add, delete, and **Download CSV**. Press **Refresh** for new sign-ups.
 

@@ -10,6 +10,7 @@ const { values } = parseArgs({
   options: {
     config: { type: 'string', default: 'config.json' },
     undo: { type: 'boolean', default: false },
+    ip: { type: 'string' },
     'dry-run': { type: 'boolean', default: false },
     gateway: { type: 'string' },
     prefix: { type: 'string', default: '24' },
@@ -29,7 +30,8 @@ try {
   fail(`config error: ${e.message}`, 2);
 }
 
-const boothIp = cfg.laptopIp;
+// --ip names a different address, e.g. to undo an old booth address after config.json changed.
+const boothIp = values.ip ?? cfg.laptopIp;
 let plan;
 try {
   plan = planBoothIp({
