@@ -56,16 +56,36 @@ describe('planBoothIp', () => {
   });
 
   test('Windows sets the adapter static with the .1 gateway, keeping spaces in the name as one argument', () => {
-    assert.deepEqual(plan({ platform: 'win32', addresses: [wifi('Wi-Fi 2')] }).steps,
-      [['netsh', ['interface', 'ipv4', 'set', 'address', 'Wi-Fi 2', 'static', BOOTH, '255.255.255.0', '192.168.88.1']]]);
+    assert.deepEqual(plan({ platform: 'win32', addresses: [wifi('Wi-Fi 2')] }).steps[0],
+      ['netsh', ['interface', 'ipv4', 'set', 'address', 'Wi-Fi 2', 'static', BOOTH, '255.255.255.0', '192.168.88.1']]);
     assert.equal(plan({ platform: 'win32', addresses: [wifi('Wi-Fi')], gateway: '192.168.88.254' }).steps[0][1].at(-1), '192.168.88.254');
+  });
+
+  test('Windows then replaces its firewall rules: the booth ports, booth network only, every profile', () => {
+    const rest = plan({ platform: 'win32', addresses: [wifi('Wi-Fi')], ports: { http: 8080, dns: 5353 } }).steps.slice(1);
+    assert.deepEqual(rest, [
+      ['netsh', ['advfirewall', 'firewall', 'delete', 'rule', 'name=offlineParse-booth-http'], { mayFail: true }],
+      ['netsh', ['advfirewall', 'firewall', 'delete', 'rule', 'name=offlineParse-booth-dns'], { mayFail: true }],
+      ['netsh', ['advfirewall', 'firewall', 'add', 'rule', 'name=offlineParse-booth-http', 'dir=in', 'action=allow',
+        'protocol=TCP', 'localport=8080', 'remoteip=192.168.88.0/24', 'profile=any']],
+      ['netsh', ['advfirewall', 'firewall', 'add', 'rule', 'name=offlineParse-booth-dns', 'dir=in', 'action=allow',
+        'protocol=UDP', 'localport=5353', 'remoteip=192.168.88.0/24', 'profile=any']],
+    ]);
+    assert.match(plan({ platform: 'win32', addresses: [wifi('Wi-Fi')] }).steps.at(-1)[1].join(' '), /localport=53 /);
+    for (const platform of ['darwin', 'linux']) {
+      assert.ok(!JSON.stringify(plan({ platform, addresses: [wifi()] }).steps).includes('advfirewall'), platform);
+    }
   });
 
   test('undo removes it from whichever adapter holds it', () => {
     const holding = [wifi('en0', BOOTH), wifi('en0')];
     assert.deepEqual(plan({ undo: true, addresses: holding }).steps, [['sudo', ['networksetup', '-setdhcp', 'Wi-Fi']]]);
-    assert.deepEqual(plan({ platform: 'win32', undo: true, addresses: [wifi('Wi-Fi', BOOTH)] }).steps,
-      [['netsh', ['interface', 'ipv4', 'set', 'address', 'Wi-Fi', 'dhcp']]]);
+    assert.deepEqual(plan({ platform: 'win32', undo: true, addresses: [wifi('Wi-Fi', BOOTH)] }).steps, [
+      ['netsh', ['interface', 'ipv4', 'set', 'address', 'Wi-Fi', 'dhcp']],
+      ['netsh', ['interface', 'ipv4', 'set', 'dnsservers', 'Wi-Fi', 'dhcp']],
+      ['netsh', ['advfirewall', 'firewall', 'delete', 'rule', 'name=offlineParse-booth-http'], { mayFail: true }],
+      ['netsh', ['advfirewall', 'firewall', 'delete', 'rule', 'name=offlineParse-booth-dns'], { mayFail: true }],
+    ]);
     assert.deepEqual(plan({ platform: 'linux', undo: true, addresses: [wifi('wlan0', BOOTH)] }).steps,
       [['sudo', ['ip', 'addr', 'del', `${BOOTH}/24`, 'dev', 'wlan0']]]);
   });
@@ -127,8 +147,19 @@ describe('applyBoothIp', () => {
 
   test('a failing command stops the run before later steps', async () => {
     const { promise, ran } = harness({ statuses: [1, 0] });
-    await assert.rejects(promise, /sudo failed \(exit 1\)/);
+    await assert.rejects(promise, /sudo failed \(exit 1\); nothing was changed/);
     assert.equal(ran.length, 1);
+    await assert.rejects(harness({ statuses: [0, 1] }).promise, /echo failed \(exit 1\); the steps after it were not run/);
+  });
+
+  test('a step marked mayFail (deleting a rule that is not there) does not stop the run', async () => {
+    const ran = [];
+    await applyBoothIp({
+      plan: { iface: 'en0', steps: [['netsh', ['delete'], { mayFail: true }], ['netsh', ['add']]] }, boothIp: BOOTH, undo: false,
+      run: (cmd, args) => (ran.push(args[0]), ran.length === 1 ? 1 : 0),
+      hasAddress: () => true, log: () => {}, sleep: async () => {},
+    });
+    assert.deepEqual(ran, ['delete', 'add']);
   });
 
   test('exit 0 without the address appearing is still a failure', async () => {

@@ -24,7 +24,15 @@ function macService(iface, services) {
   return service;
 }
 
-function upSteps(platform, iface, ip, prefix, gateway, services) {
+// Windows often files a Wi-Fi with no internet as Public, where an app-specific allow rule may not
+// apply, so open the booth ports by number to the booth network only, for every profile.
+const FIREWALL_RULES = [['offlineParse-booth-http', 'TCP', 'http'], ['offlineParse-booth-dns', 'UDP', 'dns']];
+const firewallDelete = () => FIREWALL_RULES.map(([name]) =>
+  ['netsh', ['advfirewall', 'firewall', 'delete', 'rule', `name=${name}`], { mayFail: true }]);
+const firewallAdd = (subnet, ports) => FIREWALL_RULES.map(([name, protocol, key]) => ['netsh', ['advfirewall', 'firewall', 'add',
+  'rule', `name=${name}`, 'dir=in', 'action=allow', `protocol=${protocol}`, `localport=${ports[key]}`, `remoteip=${subnet}`, 'profile=any']]);
+
+function upSteps(platform, iface, ip, prefix, gateway, services, subnet, ports) {
   // macOS only lets a normal user open port 53 on all addresses, so the booth address must be the
   // adapter's only one (an extra alias would make DNS replies leave from the other address).
   if (platform === 'darwin') {
@@ -32,7 +40,8 @@ function upSteps(platform, iface, ip, prefix, gateway, services) {
   }
   if (platform === 'linux') return [['sudo', ['ip', 'addr', 'add', `${ip}/${prefix}`, 'dev', iface]]];
   if (platform === 'win32') {
-    return [['netsh', ['interface', 'ipv4', 'set', 'address', iface, 'static', ip, prefixToMask(prefix), gateway]]];
+    return [['netsh', ['interface', 'ipv4', 'set', 'address', iface, 'static', ip, prefixToMask(prefix), gateway]],
+      ...firewallDelete(), ...firewallAdd(subnet, ports)];
   }
   throw new BoothIpError(`booth-ip does not support ${platform}; add ${ip} to the Wi-Fi adapter by hand`);
 }
@@ -40,7 +49,10 @@ function upSteps(platform, iface, ip, prefix, gateway, services) {
 function undoSteps(platform, iface, ip, prefix, services) {
   if (platform === 'darwin') return [['sudo', ['networksetup', '-setdhcp', macService(iface, services)]]];
   if (platform === 'linux') return [['sudo', ['ip', 'addr', 'del', `${ip}/${prefix}`, 'dev', iface]]];
-  if (platform === 'win32') return [['netsh', ['interface', 'ipv4', 'set', 'address', iface, 'dhcp']]];
+  if (platform === 'win32') {
+    return [['netsh', ['interface', 'ipv4', 'set', 'address', iface, 'dhcp']],
+      ['netsh', ['interface', 'ipv4', 'set', 'dnsservers', iface, 'dhcp']], ...firewallDelete()];
+  }
   throw new BoothIpError(`booth-ip does not support ${platform}`);
 }
 
@@ -48,7 +60,7 @@ function undoSteps(platform, iface, ip, prefix, services) {
  * Work out the commands that give this machine the booth address (or take it away with undo).
  * Pure: `addresses` comes from netaddr.localAddresses(), so tests can describe any machine.
  */
-export function planBoothIp({ platform, addresses, boothIp, undo = false, prefix = 24, gateway, services }) {
+export function planBoothIp({ platform, addresses, boothIp, undo = false, prefix = 24, gateway, services, ports = { http: 80, dns: 53 } }) {
   if (!isIPv4(boothIp)) {
     throw new BoothIpError(`laptopIp in config.json must be the fixed booth address, e.g. "100.64.0.2" (it is "${boothIp}")`);
   }
@@ -71,7 +83,7 @@ export function planBoothIp({ platform, addresses, boothIp, undo = false, prefix
   if (names.length > 1) {
     throw new BoothIpError(`several adapters are on ${subnet} (${names.join(', ')}); disconnect all but the booth Wi-Fi`);
   }
-  return { iface: names[0], steps: upSteps(platform, names[0], boothIp, prefix, gw, services) };
+  return { iface: names[0], steps: upSteps(platform, names[0], boothIp, prefix, gw, services, subnet, ports) };
 }
 
 /**
@@ -79,10 +91,12 @@ export function planBoothIp({ platform, addresses, boothIp, undo = false, prefix
  * `run(cmd, args)` returns an exit status; `hasAddress()` re-reads the machine's addresses.
  */
 export async function applyBoothIp({ plan, boothIp, undo, run, hasAddress, log, sleep, attempts = 10 }) {
-  for (const [cmd, args] of plan.steps) {
+  for (const [i, [cmd, args, opts]] of plan.steps.entries()) {
     log(`> ${cmd} ${args.map((a) => (/\s/.test(a) ? `"${a}"` : a)).join(' ')}`);
     const status = run(cmd, args);
-    if (status !== 0) throw new BoothIpError(`${cmd} failed (exit ${status}); nothing else was changed`);
+    if (status !== 0 && !opts?.mayFail) {
+      throw new BoothIpError(`${cmd} failed (exit ${status}); ${i === 0 ? 'nothing was changed' : 'the steps after it were not run'}`);
+    }
   }
   for (let i = 0; i < attempts; i++) {
     if (hasAddress() !== undo) return;

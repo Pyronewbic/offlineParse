@@ -12,6 +12,7 @@
     "qr": "node scripts/make-qr.js",
     "qr:show": "node scripts/make-qr.js --terminal",
     "booth-ip": "node scripts/booth-ip.js",
+    "booth-ip:undo": "node scripts/booth-ip.js --undo",
     "test": "node --test"
   },
   "dependencies": {
