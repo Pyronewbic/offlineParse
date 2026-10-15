@@ -1,8 +1,7 @@
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import http from 'node:http';
-import { leadsCsv } from './files.js';
+import { SOURCE_LABELS, leadsCsv, toIST } from './files.js';
 import { NAME_MAX, ValidationError, cleanName, normalizePhone } from './leads.js';
-import { socialsText, whatsappLink } from './payloads.js';
 import { themeCss } from './theme.js';
 
 export const MAX_BODY = 8 * 1024;
@@ -136,38 +135,23 @@ export function thanksPage(cfg, name, phone, brand = NO_BRAND) {
 }
 
 export function adminPage(cfg, leads, token, error = '', warnings = []) {
-  const pending = leads.filter((l) => !l.socialsSentAt).length;
-  const rows = leads.map((lead) => {
-    let action;
-    if (lead.socialsSentAt) {
-      action = `sent ${esc(lead.socialsSentAt)}`;
-    } else {
-      const link = whatsappLink(lead.phone.replace(/^\+/, ''), socialsText(cfg, firstName(lead.name)));
-      action =
-        `<a class="btn" href="${esc(link)}" target="_blank" rel="noopener noreferrer">Open WhatsApp</a> ` +
-        '<form class="inline" method="post" action="/admin/mark-sent">' +
-        `<input type="hidden" name="token" value="${esc(token)}">` +
-        `<input type="hidden" name="id" value="${esc(lead.id)}"><button>Mark sent</button></form>`;
-    }
-    return `<tr><td>${esc(lead.name)}</td><td>${esc(lead.phone)}</td><td>${esc(lead.source)}</td>` +
-      `<td>${esc(lead.createdAt)}</td><td>${action}</td></tr>`;
-  });
-  return page('Leads admin', `
+  const rows = leads.map((lead) =>
+    `<tr><td>${esc(lead.name)}</td><td class="nowrap">${esc(displayPhone(lead.phone))}</td>` +
+    `<td>${esc(SOURCE_LABELS[lead.source] ?? lead.source)}</td><td class="nowrap">${esc(toIST(lead.createdAt))}</td></tr>`);
+  return page('Registrations', `
 ${warnings.map((w) => `<p class="error" role="alert">${esc(w)}</p>`).join('')}
-<h1>Leads: ${leads.length} total, ${pending} waiting for socials</h1>
+<h1>Registrations: ${leads.length}</h1>
 <p><a href="/admin/export.csv">Download CSV</a></p>
-<div class="scroll"><table><thead><tr><th>Name</th><th>Phone</th><th>Source</th><th>Added (UTC)</th><th>Socials</th></tr></thead>
-<tbody>${rows.join('') || '<tr><td colspan="5">No leads yet.</td></tr>'}</tbody></table></div>
+<div class="scroll"><table><thead><tr><th>Name</th><th>Phone</th><th>Came in via</th><th>Signed up (IST)</th></tr></thead>
+<tbody>${rows.join('') || '<tr><td colspan="4">No registrations yet.</td></tr>'}</tbody></table></div>
 <h2>Add someone who messaged us on WhatsApp</h2>
 ${errorBlock(error)}
 <form method="post" action="/admin/add">
   <input type="hidden" name="token" value="${esc(token)}">
   <label for="name">Name</label><input id="name" name="name" type="text" maxlength="${NAME_MAX}" required>
-  <label for="phone">WhatsApp number</label><input id="phone" name="phone" type="tel" maxlength="20" required>
-  <button type="submit">Add lead</button>
-</form>
-<h2>Socials message to paste into WhatsApp replies</h2>
-<textarea readonly>${esc(socialsText(cfg, 'there'))}</textarea>`, true);
+  <label for="phone">Mobile number</label><input id="phone" name="phone" type="tel" maxlength="20" required>
+  <button type="submit">Add registration</button>
+</form>`, true);
 }
 
 const warningsOf = (store) => store.files?.warnings() ?? [];
@@ -289,12 +273,6 @@ export function createPortalServer(cfg, store, { laptopIp, quiet = false, brand 
   async function adminPost(req, res, path) {
     const fields = await readForm(req);
     if (!tokenMatches(fields.token, adminToken)) return plain(res, 403, 'bad or missing admin token; reload /admin');
-    if (path === '/admin/mark-sent') {
-      const id = Number(fields.id);
-      if (!Number.isSafeInteger(id)) return plain(res, 400, 'bad id');
-      store.markSent(id);
-      return redirect(res, '/admin', 303);
-    }
     if (path === '/admin/add') {
       let name;
       let phone;

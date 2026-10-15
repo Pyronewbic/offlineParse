@@ -88,7 +88,6 @@ export class LeadStore {
         ' VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(phone) DO NOTHING'),
       list: this.db.prepare(`SELECT ${cols} FROM leads ORDER BY id`),
       get: this.db.prepare(`SELECT ${cols} FROM leads WHERE id = ?`),
-      markSent: this.db.prepare('UPDATE leads SET socialsSentAt = ? WHERE id = ? AND socialsSentAt IS NULL'),
     };
     this.files?.sync(this.list());
   }
@@ -113,12 +112,6 @@ export class LeadStore {
   get(id) {
     const row = this.stmts.get.get(id);
     return row ? { ...row } : null;
-  }
-
-  markSent(id) {
-    const sent = this.stmts.markSent.run(now(), id).changes === 1;
-    if (sent) this.changed('socials.sent', id);
-    return sent;
   }
 
   changed(event, id) {

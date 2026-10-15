@@ -156,27 +156,26 @@ describe('portal server', () => {
     assert.equal(store.list().length, 0);
   });
 
-  test('admin lists leads with a prefilled WhatsApp link for each', async () => {
+  test('admin lists registrations in India time with no socials tools', async () => {
     await postForm(port, '/submit', VALID);
     const res = await request({ port, path: '/admin' });
     assert.equal(res.status, 200);
-    const href = res.body.match(/href="(https:\/\/wa\.me\/[^"]+)"/)[1].replaceAll('&amp;', '&');
-    const url = new URL(href);
-    assert.equal(url.pathname, '/919876543210');
-    assert.match(url.searchParams.get('text'), /^Hi Asha! Thanks for stopping by Daijobu/);
+    assert.match(res.body, /<h1>Registrations: 1<\/h1>/);
+    assert.match(res.body, /<td>Asha Rao<\/td><td class="nowrap">\+91 98765 43210<\/td><td>Wi-Fi form<\/td><td class="nowrap">\d{4}-\d\d-\d\d \d\d:\d\d IST<\/td>/);
+    assert.ok(!/wa\.me|Mark sent|Open WhatsApp|socials|Socials/.test(res.body));
+    const gone = await postForm(port, '/admin/mark-sent', { id: 1, token: await adminToken() });
+    assert.equal(gone.status, 404, 'the mark-sent endpoint no longer exists');
   });
 
   test('admin POSTs need the page token', async () => {
-    await postForm(port, '/submit', VALID);
-    const { id } = store.list()[0];
     for (const token of ['', 'wrong', '\u00FC'.repeat(43)]) {
-      const res = await postForm(port, '/admin/mark-sent', { id, token });
+      const res = await postForm(port, '/admin/add', { name: 'Ravi', phone: '9123456789', token });
       assert.equal(res.status, 403);
     }
-    assert.equal(store.get(id).socialsSentAt, null);
-    const ok = await postForm(port, '/admin/mark-sent', { id, token: await adminToken() });
-    assert.equal(ok.status, 303);
-    assert.ok(store.get(id).socialsSentAt);
+    assert.equal(store.list().length, 0);
+    const ok = await postForm(port, '/admin/add', { name: 'Ravi', phone: '9123456789', token: await adminToken() });
+    assert.equal(ok.status, 303, 'positive control: the real token works');
+    assert.equal(store.list().length, 1);
   });
 
   test('admin can add a WhatsApp lead and rejects a bad number', async () => {

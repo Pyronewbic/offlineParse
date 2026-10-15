@@ -3,7 +3,15 @@ import { closeSync, constants, mkdirSync, openSync, renameSync, unlinkSync, writ
 import { dirname, resolve } from 'node:path';
 
 const CSV_FORMULA_PREFIXES = ['=', '+', '-', '@', '\t', '\r'];
-const LOG_FIELDS = ['id', 'name', 'phone', 'source', 'eventCode', 'socialsSentAt'];
+const LOG_FIELDS = ['id', 'name', 'phone', 'source', 'eventCode'];
+const IST_OFFSET_MS = 330 * 60 * 1000; // India has no daylight saving, so a fixed +05:30 is exact
+
+/** "2026-10-15T13:48:30Z" -> "2026-10-15 19:18 IST"; anything unparseable is returned as-is. */
+export function toIST(iso) {
+  const t = Date.parse(iso);
+  if (Number.isNaN(t)) return iso ?? '';
+  return `${new Date(t + IST_OFFSET_MS).toISOString().slice(0, 16).replace('T', ' ')} IST`;
+}
 
 function csvCell(value) {
   if (value === null || value === undefined) return '';
@@ -11,17 +19,15 @@ function csvCell(value) {
   return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 
-const SOURCE_LABELS = { form: 'Wi-Fi form', whatsapp: 'WhatsApp message' };
+export const SOURCE_LABELS = { form: 'Wi-Fi form', whatsapp: 'WhatsApp message' };
 // Spreadsheet columns for people, not code: [header, value, guard against formula injection].
 const SHEET = [
   ['ID', (l) => l.id, false],
   ['Name', (l) => l.name, true],
   ['WhatsApp number', (l) => l.phone, false],
-  ['Socials sent?', (l) => (l.socialsSentAt ? 'yes' : 'no'), false],
-  ['Socials sent (UTC)', (l) => l.socialsSentAt, false],
   ['Came in via', (l) => SOURCE_LABELS[l.source] ?? l.source, true],
   ['Event', (l) => l.eventCode, true],
-  ['Signed up (UTC)', (l) => l.createdAt, false],
+  ['Signed up (IST)', (l) => toIST(l.createdAt), false],
   ['Notice version', (l) => l.noticeVersion, true],
 ];
 

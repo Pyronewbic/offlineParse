@@ -2,10 +2,10 @@
 
 Lead capture for a booth with no cell signal. Two ways in, one lead list:
 
-1. **WhatsApp QR (main).** Opens WhatsApp with a prefilled "Hi, I'm at <event> (<code>). My name is:" message to our number. WhatsApp holds the message until the guest gets signal, then it arrives with their real number. A staff member replies with the socials and adds them in the admin page.
+1. **WhatsApp QR (main).** Opens WhatsApp with a prefilled "Hi, I'm at <event> (<code>). My name is:" message to our number. WhatsApp holds the message until the guest gets signal, then it arrives with their real number. A staff member adds them in the admin page.
 2. **Wi-Fi QR (fallback).** Joins an offline router. Every DNS name points at this laptop, so the phone's sign-in sheet opens our registration form (name, mobile number, consent). Leads are stored in SQLite on the laptop. A staff-held tablet on the same Wi-Fi can use the same form.
 
-After the event, the admin page has an **Open WhatsApp** button per lead that opens a chat with the socials message prefilled (WhatsApp Desktop or Web on the laptop), and **Mark sent** to track it.
+The admin page on the laptop lists every registration with its sign-up time in India time, and downloads them all as a spreadsheet.
 
 Needs Node 22.13+ (built-in `node:sqlite`). The server has no dependencies; `qrcode` is only for generating the images.
 
@@ -16,7 +16,7 @@ npm install          # only for the QR script
 npm test
 ```
 
-Edit `config.json`: org name (shown in the consent line and WhatsApp messages; the logo replaces it as the page heading), event name, `eventCode` (shows up in WhatsApp messages so you can tell events apart), `whatsappNumber` (country code, no `+`), the real social links, and `wifiSsid` / `wifiPassword` (empty password = open network). `logoLight` / `logoDark` point at PNG logos for light and dark phones (checked at startup; empty shows the org name instead).
+Edit `config.json`: org name (shown in the consent line and WhatsApp messages; the logo replaces it as the page heading), event name, `eventCode` (shows up in WhatsApp messages so you can tell events apart), `whatsappNumber` (country code, no `+`), and `wifiSsid` / `wifiPassword` (empty password = open network). `logoLight` / `logoDark` point at PNG logos for light and dark phones (checked at startup; empty shows the org name instead).
 
 ### Router
 
@@ -31,7 +31,7 @@ The router must have **no internet** (nothing in the WAN port).
 
 ### Internet on the laptop during the event (optional)
 
-Nothing needs internet until you send the socials. If you want it anyway, keep Wi-Fi on the event router and add a second connection: USB tethering from a phone with signal, or Ethernet.
+Nothing needs internet. If you want it anyway, keep Wi-Fi on the event router and add a second connection: USB tethering from a phone with signal, or Ethernet.
 
 - Set `laptopIp` to the Wi-Fi adapter name (see above); `"auto"` will refuse because there are now two networks.
 - Give the laptop's own Wi-Fi a manual DNS server such as `1.1.1.1`, or exclude the laptop from the router's DNS setting. Otherwise the laptop asks its own catch-all DNS for every website and gets nowhere.
@@ -45,7 +45,6 @@ These behaviours could not be confirmed from documentation; check them before re
 
 1. With mobile data and Wi-Fi off, scan the WhatsApp QR with the stock camera. Does WhatsApp open with the text? Tap send, then turn data back on **without reopening WhatsApp**. Does the message arrive? If iPhones only send once WhatsApp is reopened, add "open WhatsApp once you have signal" to the poster.
 2. Join the booth Wi-Fi. Does the sign-in sheet open by itself? Submit the form, then disconnect.
-3. On the laptop, click **Open WhatsApp** in the admin page and confirm the chat opens prefilled.
 
 ## Event day
 
@@ -63,14 +62,12 @@ Keep the laptop awake and plugged in (macOS: `caffeinate -dims npm start`). The 
 - Admin, from the laptop only: `http://localhost/admin` (returns 404 to anyone on the Wi-Fi)
 - Data, all in `data/` and readable only by your user account (copy the whole folder to back up):
   - `leads.db`: the source of truth (SQLite).
-  - `leads.csv`: opens in Excel or Numbers. Rewritten after every sign-up, admin add, and Mark sent, so it always matches the database (one row per phone number). Excel does not refresh an open file: reopen it, or use the admin page for a live view. Rebuilt on startup if deleted.
-  - `leads.log`: append-only, one JSON line per event (`lead.created`, `socials.sent`). Never rewritten.
+  - `leads.csv`: opens in Excel or Numbers. Rewritten after every sign-up and admin add, so it always matches the database (one row per phone number). Excel does not refresh an open file: reopen it, or use the admin page for a live view. Rebuilt on startup if deleted.
+  - `leads.log`: append-only, one JSON line per registration (`lead.created`, UTC timestamps). Never rewritten.
   - If the CSV or log cannot be written, sign-ups still save to the database and the admin page shows a red warning.
 
 ## After the event
 
-- WhatsApp QR leads: reply with the message from the admin page's text box, then add them with **Add someone who messaged us**.
-- Form leads: **Open WhatsApp**, send, **Mark sent**.
+- WhatsApp QR registrations: search WhatsApp for the event code to find them, then add each one with **Add someone who messaged us**.
 - A phone number can register only once. A second attempt, on the form or the admin page, is refused with an error and the first registration is left as it was.
-- Sending to many new chats from a regular WhatsApp account can get it flagged for spam. Keep batches modest; everyone on the list opted in, which helps.
 - Honour deletion requests by deleting the row; the form promises this.

@@ -77,23 +77,12 @@ describe('LeadStore', () => {
   test('a number registers once; a repeat is refused and changes nothing', () => {
     assert.deepEqual(add(), { created: true });
     const { id } = store.list()[0];
-    assert.equal(store.markSent(id), true);
     const before = store.list();
     const repeat = add({ name: 'Someone Else', source: 'whatsapp', noticeVersion: 'v2' });
     assert.equal(repeat.created, false);
     assert.equal(repeat.existing.name, 'Asha');
     assert.equal(repeat.existing.id, id);
     assert.deepEqual(store.list(), before, 'existing row untouched');
-  });
-
-  test('markSent is idempotent and ignores unknown ids', () => {
-    add();
-    const { id } = store.list()[0];
-    assert.equal(store.markSent(id), true);
-    const first = store.get(id).socialsSentAt;
-    assert.equal(store.markSent(id), false);
-    assert.equal(store.get(id).socialsSentAt, first);
-    assert.equal(store.markSent(9999), false);
   });
 
   test('rejects an unknown source', () => {
