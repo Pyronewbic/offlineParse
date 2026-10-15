@@ -67,23 +67,23 @@ describe('cleanName', () => {
 
 describe('LeadStore', () => {
   let store;
-  const add = (overrides = {}) => store.upsert({
+  const add = (overrides = {}) => store.register({
     name: 'Asha', phone: '+919876543210', source: 'form', eventCode: 'EVT26', noticeVersion: 'v1', ...overrides,
   });
 
   beforeEach(() => { store = new LeadStore(':memory:'); });
   afterEach(() => store.close());
 
-  test('dedupes on phone, refreshes the name and keeps source and sent state', () => {
-    assert.equal(add(), true);
+  test('a number registers once; a repeat is refused and changes nothing', () => {
+    assert.deepEqual(add(), { created: true });
     const { id } = store.list()[0];
     assert.equal(store.markSent(id), true);
-    assert.equal(add({ name: 'Asha Rao', source: 'whatsapp' }), false);
-    const leads = store.list();
-    assert.equal(leads.length, 1);
-    assert.equal(leads[0].name, 'Asha Rao');
-    assert.equal(leads[0].source, 'form');
-    assert.ok(leads[0].socialsSentAt);
+    const before = store.list();
+    const repeat = add({ name: 'Someone Else', source: 'whatsapp', noticeVersion: 'v2' });
+    assert.equal(repeat.created, false);
+    assert.equal(repeat.existing.name, 'Asha');
+    assert.equal(repeat.existing.id, id);
+    assert.deepEqual(store.list(), before, 'existing row untouched');
   });
 
   test('markSent is idempotent and ignores unknown ids', () => {
@@ -106,7 +106,7 @@ describe('LeadStore', () => {
     try {
       const path = join(dir, 'nested', 'leads.db');
       const disk = new LeadStore(path);
-      disk.upsert({ name: 'Asha', phone: '+919876543210', source: 'form', eventCode: 'E', noticeVersion: 'v1' });
+      disk.register({ name: 'Asha', phone: '+919876543210', source: 'form', eventCode: 'E', noticeVersion: 'v1' });
       disk.close();
       const reopened = new LeadStore(path);
       assert.equal(reopened.list().length, 1);

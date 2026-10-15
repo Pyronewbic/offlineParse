@@ -34,7 +34,7 @@ describe('lead files', () => {
     files = new LeadFiles({ csvPath, logPath, onError: (m) => errors.push(m) });
     store = new LeadStore(join(dir, 'leads.db'), { files });
   };
-  const add = (overrides = {}) => store.upsert({
+  const add = (overrides = {}) => store.register({
     name: 'Asha', phone: '+919876543210', source: 'form', eventCode: 'EVT26', noticeVersion: 'v1', ...overrides,
   });
 
@@ -55,13 +55,13 @@ describe('lead files', () => {
     open();
     assert.deepEqual(csvRows(csvPath), [], 'header-only sheet exists from startup');
     add();
-    add({ name: 'Asha Rao' });
+    add({ name: 'Asha Again' });
     add({ name: 'Ravi', phone: '+919123456789', source: 'whatsapp' });
     store.markSent(1);
     assert.equal(readFileSync(csvPath, 'utf8'), leadsCsv(store.list()));
     const rows = csvRows(csvPath);
     assert.equal(rows.length, 2);
-    assert.match(rows[0], /^1,Asha Rao,\+919876543210,yes,\d{4}-\d\d-\d\dT[\d:]+Z,Wi-Fi form,/);
+    assert.match(rows[0], /^1,Asha,\+919876543210,yes,\d{4}-\d\d-\d\dT[\d:]+Z,Wi-Fi form,/);
     assert.match(rows[1], /^2,Ravi,\+919123456789,no,,WhatsApp message,/);
     assert.deepEqual(readdirSync(dir).filter((f) => f.endsWith('.tmp')), [], 'no temp files left behind');
   });
@@ -69,20 +69,20 @@ describe('lead files', () => {
   test('log appends one entry per real change and never rewrites', () => {
     open();
     add();
-    add({ name: 'Asha Rao' });
+    add({ name: 'Asha Again' });
     assert.equal(store.markSent(1), true);
     assert.equal(store.markSent(1), false, 'second markSent is a no-op');
     assert.equal(store.markSent(999), false);
     const entries = logEntries(logPath);
     assert.deepEqual(entries.map((e) => [e.event, e.id, e.name]),
-      [['lead.created', 1, 'Asha'], ['lead.updated', 1, 'Asha Rao'], ['socials.sent', 1, 'Asha Rao']]);
-    assert.ok(entries[2].socialsSentAt);
+      [['lead.created', 1, 'Asha'], ['socials.sent', 1, 'Asha']], 'the refused repeat logs nothing');
+    assert.ok(entries[1].socialsSentAt);
 
     store.close();
     files.close();
     open();
     add({ name: 'Ravi', phone: '+919123456789' });
-    assert.equal(logEntries(logPath).length, 4, 'reopening appends rather than truncating');
+    assert.equal(logEntries(logPath).length, 3, 'reopening appends rather than truncating');
   });
 
   test('a deleted CSV is rebuilt from the database on startup', () => {
@@ -118,7 +118,7 @@ describe('lead files', () => {
     csvPath = join(dir, 'missing-dir', 'leads.csv');
     open();
     assert.equal(errors.length, 1, 'startup sync failure reported');
-    assert.equal(add(), true);
+    assert.deepEqual(add(), { created: true });
     assert.equal(store.list().length, 1, 'lead still saved in the database');
     assert.equal(logEntries(logPath).length, 1, 'log still written');
     assert.match(files.warnings()[0], /missing-dir\/leads\.csv is not being updated/);
@@ -136,15 +136,16 @@ describe('lead files', () => {
       const same = Array.from({ length: 10 }, (_, i) =>
         postForm(port, '/submit', { name: `Twin ${i}`, phone: '9000000000', consent: 'yes' }));
       const results = await Promise.all([...distinct, ...same]);
-      assert.ok(results.every((r) => r.status === 200), 'positive control: every request was accepted');
+      assert.ok(results.slice(0, 40).every((r) => r.status === 200), 'positive control: every distinct number registered');
+      const twins = results.slice(40).map((r) => r.status).sort();
+      assert.deepEqual(twins, [200, ...Array(9).fill(409)], 'exactly one of the same-number submissions wins');
 
       assert.equal(store.list().length, 41);
       assert.equal(csvRows(csvPath).length, 41);
       assert.equal(readFileSync(csvPath, 'utf8'), leadsCsv(store.list()));
       const entries = logEntries(logPath);
-      assert.equal(entries.length, 50);
-      assert.equal(entries.filter((e) => e.phone === '+919000000000' && e.event === 'lead.created').length, 1);
-      assert.equal(entries.filter((e) => e.phone === '+919000000000' && e.event === 'lead.updated').length, 9);
+      assert.equal(entries.length, 41);
+      assert.equal(entries.filter((e) => e.phone === '+919000000000').length, 1);
 
       const admin = await request({ port, path: '/admin' });
       assert.ok(!admin.body.includes('is not being updated'), 'no warning when files are healthy');

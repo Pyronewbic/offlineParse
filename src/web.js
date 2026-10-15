@@ -7,6 +7,7 @@ import { themeCss } from './theme.js';
 
 export const MAX_BODY = 8 * 1024;
 const MAX_FIELDS = 20;
+const ALREADY_REGISTERED = 'This number is already registered. Reach out to us at the desk if you need to change your details.';
 export const BRAND_PATHS = { '/brand/logo-light.png': 'light', '/brand/logo-dark.png': 'dark' };
 const LOOPBACK = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
 const CSP = "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'";
@@ -274,8 +275,14 @@ export function createPortalServer(cfg, store, { laptopIp, quiet = false, brand 
         error: e.message, field: e.field, name: rawName.slice(0, NAME_MAX), phone: rawPhone.slice(0, 20), consent: fields.consent === 'yes',
       }, brand));
     }
-    const created = store.upsert({ name, phone, source: 'form', eventCode: cfg.eventCode, noticeVersion: cfg.noticeVersion });
-    log(`lead ${created ? 'added' : 'updated'} via form`);
+    const { created } = store.register({ name, phone, source: 'form', eventCode: cfg.eventCode, noticeVersion: cfg.noticeVersion });
+    if (!created) {
+      log('duplicate registration refused');
+      return html(res, 409, formPage(cfg, {
+        error: ALREADY_REGISTERED, field: 'phone', name: rawName.slice(0, NAME_MAX), phone: rawPhone.slice(0, 20), consent: true,
+      }, brand));
+    }
+    log('registration added via form');
     html(res, 200, thanksPage(cfg, name, phone, brand));
   }
 
@@ -298,7 +305,11 @@ export function createPortalServer(cfg, store, { laptopIp, quiet = false, brand 
         if (!(e instanceof ValidationError)) throw e;
         return html(res, 400, adminPage(cfg, store.list(), adminToken, e.message, warningsOf(store)));
       }
-      store.upsert({ name, phone, source: 'whatsapp', eventCode: cfg.eventCode, noticeVersion: cfg.noticeVersion });
+      const result = store.register({ name, phone, source: 'whatsapp', eventCode: cfg.eventCode, noticeVersion: cfg.noticeVersion });
+      if (!result.created) {
+        const message = `${displayPhone(phone)} is already registered, as ${result.existing.name}.`;
+        return html(res, 409, adminPage(cfg, store.list(), adminToken, message, warningsOf(store)));
+      }
       return redirect(res, '/admin', 303);
     }
     plain(res, 404, 'not found');

@@ -64,13 +64,13 @@ Keep the laptop awake and plugged in (macOS: `caffeinate -dims npm start`). The 
 - Data, all in `data/` and readable only by your user account (copy the whole folder to back up):
   - `leads.db`: the source of truth (SQLite).
   - `leads.csv`: opens in Excel or Numbers. Rewritten after every sign-up, admin add, and Mark sent, so it always matches the database (one row per phone number). Excel does not refresh an open file: reopen it, or use the admin page for a live view. Rebuilt on startup if deleted.
-  - `leads.log`: append-only, one JSON line per event (`lead.created`, `lead.updated`, `socials.sent`). Never rewritten, so it keeps every submission, including repeats.
+  - `leads.log`: append-only, one JSON line per event (`lead.created`, `socials.sent`). Never rewritten.
   - If the CSV or log cannot be written, sign-ups still save to the database and the admin page shows a red warning.
 
 ## After the event
 
 - WhatsApp QR leads: reply with the message from the admin page's text box, then add them with **Add someone who messaged us**.
 - Form leads: **Open WhatsApp**, send, **Mark sent**.
-- Leads are de-duplicated by phone number, so someone who did both appears once.
+- A phone number can register only once. A second attempt, on the form or the admin page, is refused with an error and the first registration is left as it was.
 - Sending to many new chats from a regular WhatsApp account can get it flagged for spam. Keep batches modest; everyone on the list opted in, which helps.
 - Honour deletion requests by deleting the row; the form promises this.

@@ -102,6 +102,26 @@ describe('portal server', () => {
     assert.equal(store.list().length, 0);
   });
 
+  test('a number that is already registered is refused under the phone field', async () => {
+    assert.equal((await postForm(port, '/submit', VALID)).status, 200);
+    for (const phone of ['98765 43210', '+91 98765 43210', '098765-43210']) {
+      const res = await postForm(port, '/submit', { name: 'Someone Else', phone, consent: 'yes' });
+      assert.equal(res.status, 409, phone);
+      assert.match(res.body, /<p class="field-error" id="phone-error" role="alert">This number is already registered\./);
+      assert.match(res.body, /value="Someone Else"/, 'what they typed is kept');
+      assert.ok(!res.body.includes('Asha'), 'the existing registration is not revealed');
+    }
+    assert.deepEqual(store.list().map((l) => [l.name, l.phone]), [['Asha Rao', '+919876543210']]);
+  });
+
+  test('admin add refuses an already-registered number and names who has it', async () => {
+    await postForm(port, '/submit', VALID);
+    const res = await postForm(port, '/admin/add', { name: 'Ravi', phone: '9876543210', token: await adminToken() });
+    assert.equal(res.status, 409);
+    assert.match(res.body, /\+91 98765 43210 is already registered, as Asha Rao\./);
+    assert.equal(store.list().length, 1);
+  });
+
   test('a re-rendered form keeps the consent tick only if it was given', async () => {
     const ticked = await postForm(port, '/submit', { ...VALID, phone: '12345' });
     assert.match(ticked.body, /name="consent" value="yes" required checked/);

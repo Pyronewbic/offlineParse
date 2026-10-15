@@ -82,12 +82,10 @@ export class LeadStore {
     this.db.exec(SCHEMA);
     const cols = COLUMNS.join(', ');
     this.stmts = {
-      byPhone: this.db.prepare('SELECT id FROM leads WHERE phone = ?'),
+      byPhone: this.db.prepare(`SELECT ${cols} FROM leads WHERE phone = ?`),
       insert: this.db.prepare(
         'INSERT INTO leads (phone, name, source, eventCode, consentAt, noticeVersion, createdAt, updatedAt)' +
-        ' VALUES (?, ?, ?, ?, ?, ?, ?, ?)'),
-      refresh: this.db.prepare(
-        'UPDATE leads SET name = ?, consentAt = ?, noticeVersion = ?, updatedAt = ? WHERE id = ?'),
+        ' VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(phone) DO NOTHING'),
       list: this.db.prepare(`SELECT ${cols} FROM leads ORDER BY id`),
       get: this.db.prepare(`SELECT ${cols} FROM leads WHERE id = ?`),
       markSent: this.db.prepare('UPDATE leads SET socialsSentAt = ? WHERE id = ? AND socialsSentAt IS NULL'),
@@ -95,19 +93,17 @@ export class LeadStore {
     this.files?.sync(this.list());
   }
 
-  /** Insert or refresh a lead keyed on phone. Returns true if it was new. */
-  upsert({ name, phone, source, eventCode, noticeVersion }) {
+  /**
+   * Register a phone number once. A number that is already registered is left untouched and
+   * reported as { created: false, existing }; the UNIQUE constraint decides, so there is no race.
+   */
+  register({ name, phone, source, eventCode, noticeVersion }) {
     if (!SOURCES.includes(source)) throw new Error(`unknown source ${source}`);
     const ts = now();
-    const existing = this.stmts.byPhone.get(phone);
-    if (existing) {
-      this.stmts.refresh.run(name, ts, noticeVersion, ts, existing.id);
-      this.changed('lead.updated', existing.id);
-      return false;
-    }
-    const { lastInsertRowid } = this.stmts.insert.run(phone, name, source, eventCode, ts, noticeVersion, ts, ts);
+    const { changes, lastInsertRowid } = this.stmts.insert.run(phone, name, source, eventCode, ts, noticeVersion, ts, ts);
+    if (changes === 0) return { created: false, existing: { ...this.stmts.byPhone.get(phone) } };
     this.changed('lead.created', Number(lastInsertRowid));
-    return true;
+    return { created: true };
   }
 
   list() {
