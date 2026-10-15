@@ -6,9 +6,13 @@ const AA = 0x0400;
 const RD = 0x0100;
 const RA = 0x0080;
 const FORMERR = 1;
+const NXDOMAIN = 3;
 const NOTIMP = 4;
 const TYPE_A = 1;
 const CLASS_IN = 1;
+// Apple asks networks to refuse these quickly so iCloud Private Relay gives up at once instead of
+// timing out: https://developer.apple.com/support/prepare-your-network-for-icloud-private-relay/
+const REFUSED_NAMES = new Set(['mask.icloud.com', 'mask-h2.icloud.com']);
 
 function header(id, flags, qd, an) {
   const h = Buffer.alloc(12);
@@ -51,6 +55,7 @@ export function buildResponse(query, answerIp, ttl = 0) {
   const question = query.subarray(12, pos + 4);
 
   if (opcode !== 0) return Buffer.concat([header(id, base | NOTIMP, 1, 0), question]);
+  if (REFUSED_NAMES.has(queryName(query).toLowerCase())) return Buffer.concat([header(id, base | NXDOMAIN, 1, 0), question]);
 
   if (qtype === TYPE_A && qclass === CLASS_IN) {
     const rr = Buffer.alloc(16);

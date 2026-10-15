@@ -37,6 +37,22 @@ describe('buildResponse', () => {
     }
   });
 
+  test('iCloud Private Relay names get NXDOMAIN for every type; other icloud.com names still point at the laptop', () => {
+    for (const name of ['mask.icloud.com', 'mask-h2.icloud.com', 'MASK.iCloud.com']) {
+      for (const qtype of [1, 28, 65]) {
+        const r = buildResponse(query(name, qtype), IP);
+        assert.equal(r.readUInt16BE(0), 0x1234, name);
+        assert.equal(r.readUInt16BE(2) & 0x000f, 3, `${name} type ${qtype}`);
+        assert.equal(r.readUInt16BE(6), 0);
+      }
+    }
+    for (const name of ['www.icloud.com', 'x.mask.icloud.com', 'mask.icloud.com.evil']) {
+      const r = buildResponse(query(name), IP);
+      assert.equal(r.readUInt16BE(2) & 0x000f, 0, name);
+      assert.deepEqual([...r.subarray(r.length - 4)], [10, 1, 2, 3], name);
+    }
+  });
+
   test('non-standard opcode gets NOTIMP, multi-question gets FORMERR', () => {
     assert.equal(buildResponse(query('a.b', 1, { flags: 0x2100 }), IP).readUInt16BE(2) & 0x000f, 4);
     assert.equal(buildResponse(query('a.b', 1, { qdcount: 2 }), IP).readUInt16BE(2) & 0x000f, 1);
