@@ -3,13 +3,21 @@ import { existsSync, lstatSync, mkdtempSync, readFileSync, readdirSync, rmSync, 
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, test } from 'node:test';
-import { LeadFiles, leadsCsv, toIST } from '../src/files.js';
+import { LeadFiles, leadsCsv, toIST, toISTShort } from '../src/files.js';
 import { LeadStore } from '../src/leads.js';
 import { createPortalServer } from '../src/web.js';
 import { makeConfig, postForm, request } from './helpers.js';
 
 const csvRows = (path) => readFileSync(path, 'utf8').replace(/^\uFEFF/, '').trimEnd().split('\r\n').slice(1);
 const logEntries = (path) => readFileSync(path, 'utf8').trimEnd().split('\n').filter(Boolean).map((l) => JSON.parse(l));
+
+test('toISTShort is a readable India-time stamp with 12-hour clock edges right', () => {
+  assert.equal(toISTShort('2026-10-15T13:48:30Z'), '15 Oct, 7:18 pm');
+  assert.equal(toISTShort('2026-10-15T18:30:00Z'), '16 Oct, 12:00 am');
+  assert.equal(toISTShort('2026-10-15T06:30:00Z'), '15 Oct, 12:00 pm');
+  assert.equal(toISTShort('2026-12-31T19:05:00Z'), '1 Jan, 12:35 am');
+  assert.equal(toISTShort('nope'), 'nope');
+});
 
 test('toIST converts UTC to India time, including across midnight', () => {
   assert.equal(toIST('2026-10-15T13:48:30Z'), '2026-10-15 19:18 IST');

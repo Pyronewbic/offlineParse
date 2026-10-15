@@ -156,15 +156,65 @@ describe('portal server', () => {
     assert.equal(store.list().length, 0);
   });
 
-  test('admin lists registrations in India time with no socials tools', async () => {
+  test('admin lists registrations newest first, numbered down, with stats and no socials tools', async () => {
     await postForm(port, '/submit', VALID);
+    await postForm(port, '/admin/add', { name: 'Ravi Kumar', phone: '91234 56789', token: await adminToken() });
+    await postForm(port, '/submit', { ...VALID, name: 'Meera', phone: '9000011111' });
     const res = await request({ port, path: '/admin' });
     assert.equal(res.status, 200);
-    assert.match(res.body, /<h1>Registrations: 1<\/h1>/);
-    assert.match(res.body, /<td>Asha Rao<\/td><td class="nowrap">\+91 98765 43210<\/td><td>Wi-Fi form<\/td><td class="nowrap">\d{4}-\d\d-\d\d \d\d:\d\d IST<\/td>/);
+    const order = [...res.body.matchAll(/<td class="num idx">(\d+)<\/td><th scope="row">([^<]+)<\/th>/g)].map((m) => `${m[1]} ${m[2]}`);
+    assert.deepEqual(order, ['3 Meera', '2 Ravi Kumar', '1 Asha Rao']);
+    assert.match(res.body, /<dt>Total<\/dt><dd>3<\/dd>/);
+    assert.match(res.body, /<dt>Wi-Fi form<\/dt><dd>2<\/dd>/);
+    assert.match(res.body, /<dt>WhatsApp<\/dt><dd>1<\/dd>/);
+    assert.match(res.body, /<dt>Last sign-up<\/dt><dd>\d{1,2} [A-Z][a-z]{2}, \d{1,2}:\d\d [ap]m<\/dd>/);
+    assert.match(res.body, /<span class="chip whatsapp">WhatsApp message<\/span>/);
+    assert.match(res.body, /<td class="num">\+91 98765 43210<\/td>/);
+    assert.match(res.body, /<button class="quiet" aria-label="Delete Asha Rao">Delete<\/button>/);
+    assert.match(res.body, /<caption class="sr-only">Registrations, newest first<\/caption>/);
     assert.ok(!/wa\.me|Mark sent|Open WhatsApp|socials|Socials/.test(res.body));
     const gone = await postForm(port, '/admin/mark-sent', { id: 1, token: await adminToken() });
     assert.equal(gone.status, 404, 'the mark-sent endpoint no longer exists');
+  });
+
+  test('admin search finds by name or any form of the number, and echoes the query safely', async () => {
+    await postForm(port, '/submit', VALID);
+    await postForm(port, '/submit', { ...VALID, name: 'Ravi Kumar', phone: '91234 56789' });
+    const names = async (q) => {
+      const res = await request({ port, path: `/admin?q=${encodeURIComponent(q)}` });
+      return [...res.body.matchAll(/<th scope="row">([^<]+)<\/th>/g)].map((m) => m[1]);
+    };
+    assert.deepEqual(await names('asha'), ['Asha Rao']);
+    assert.deepEqual(await names('KUMAR'), ['Ravi Kumar']);
+    for (const q of ['98765 43210', '+91 98765 43210', '098765-43210', '919876543210', '43210', '765']) {
+      assert.deepEqual(await names(q), ['Asha Rao'], q);
+    }
+    assert.deepEqual(await names('98'), [], 'fewer than 3 digits never matches a number');
+    assert.deepEqual(await names(''), ['Ravi Kumar', 'Asha Rao']);
+    const none = await request({ port, path: `/admin?q=${encodeURIComponent('<script>x</script>')}` });
+    assert.ok(!none.body.includes('<script>x</script>'), 'query is escaped');
+    assert.match(none.body, /No matches for "&lt;script&gt;x&lt;\/script&gt;"\./);
+    assert.match(none.body, /0 matches for .* out of 2\. <a href="\/admin">Clear search<\/a>/);
+    const csv = await request({ port, path: '/admin/export.csv?q=asha' });
+    assert.equal(csv.body.trim().split('\r\n').length, 3, 'the export ignores the search');
+  });
+
+  test('admin flash messages come from a fixed list; anything else in the URL is ignored', async () => {
+    const added = await postForm(port, '/admin/add', { name: 'Ravi', phone: '9123456789', token: await adminToken() });
+    assert.equal(added.headers.location, '/admin?msg=added');
+    assert.match((await request({ port, path: '/admin?msg=added' })).body, /<p class="flash" role="status">Registration added\.<\/p>/);
+    for (const msg of ['<b>hi</b>', 'constructor', 'toString', '__proto__']) {
+      const res = await request({ port, path: `/admin?msg=${encodeURIComponent(msg)}` });
+      assert.equal(res.status, 200, msg);
+      assert.ok(!res.body.includes('class="flash"'), msg);
+    }
+  });
+
+  test('a failed admin add keeps what was typed', async () => {
+    const res = await postForm(port, '/admin/add', { name: 'Ravi "R"', phone: '12345', token: await adminToken() });
+    assert.equal(res.status, 400);
+    assert.match(res.body, /value="Ravi &quot;R&quot;"/);
+    assert.match(res.body, /value="12345"/);
   });
 
   test('admin POSTs need the page token', async () => {
@@ -185,6 +235,7 @@ describe('portal server', () => {
     const confirm = await postForm(port, '/admin/delete', { id, token });
     assert.equal(confirm.status, 200);
     assert.match(confirm.body, /Delete this registration\?/);
+    assert.match(confirm.body, /<a class="btn secondary" href="\/admin" autofocus>Cancel<\/a>/);
     assert.match(confirm.body, /<strong>Asha &lt;b&gt;Rao&lt;\/b&gt;<\/strong>/);
     assert.match(confirm.body, /name="confirm" value="yes"/);
     assert.equal(store.list().length, 1, 'nothing deleted before confirming');
@@ -196,6 +247,7 @@ describe('portal server', () => {
 
     const done = await postForm(port, '/admin/delete', { id, token, confirm: 'yes' });
     assert.equal(done.status, 303);
+    assert.equal(done.headers.location, '/admin?msg=deleted');
     assert.equal(store.list().length, 0);
     assert.equal((await postForm(port, '/admin/delete', { id, token, confirm: 'yes' })).status, 404, 'second delete finds nothing');
     assert.equal((await postForm(port, '/admin/delete', { id: 'abc', token })).status, 404);

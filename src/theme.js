@@ -15,6 +15,8 @@ export const THEME = {
     errorBg: '#FDE7EC',
     danger: '#B3002D',
     onDanger: '#FFFFFF',
+    rule: '#DAD8D2',
+    hover: '#FFF0F6',
   },
   dark: {
     bg: '#1B1B1D',
@@ -30,6 +32,8 @@ export const THEME = {
     errorBg: '#3A1D24',
     danger: '#FF7A8A',
     onDanger: '#1B1B1D',
+    rule: '#3C3C42',
+    hover: '#33282E',
   },
 };
 

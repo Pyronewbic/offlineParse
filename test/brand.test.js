@@ -114,6 +114,11 @@ describe('logo routes', () => {
     assert.match(page.headers['content-security-policy'], /img-src 'self'/);
   });
 
+  test('the admin page carries the logo in its header', async () => {
+    const res = await request({ port, path: '/admin' });
+    assert.match(res.body, /<header class="topbar"><img src="\/brand\/logo-light.png" alt="[^"]+" width="1" height="1"><h1>Registrations<\/h1>/);
+  });
+
   test('a logo that is not configured, or any other path, is just a portal redirect', async () => {
     for (const path of ['/brand/logo-dark.png', '/brand/../config.json', '/brand/logo-light.png/x', '/assets/x.png']) {
       const res = await request({ port, path });

@@ -59,7 +59,7 @@ Keep the laptop awake and plugged in (macOS: `caffeinate -dims npm start`). The 
 - **Linux:** ports below 1024 need root, or once: `sudo setcap cap_net_bind_service=+ep "$(readlink -f "$(command -v node)")"`. Allow 80/tcp and 53/udp in the firewall (for example `ufw`). If systemd-resolved already holds port 53 on loopback, the DNS helper binds to the Wi-Fi address instead, automatically.
 
 - Form: `http://<laptop address>/` (print this on the poster as a fallback)
-- Admin, from the laptop only: `http://localhost/admin` (returns 404 to anyone on the Wi-Fi)
+- Admin, from the laptop only: `http://localhost/admin` (returns 404 to anyone on the Wi-Fi). Newest registrations first, totals by source, search by name or any part of the number, manual add, and per-row delete. Use **Refresh** to see new sign-ups; it does not auto-refresh, so typing is never wiped.
 - Data, all in `data/` and readable only by your user account (copy the whole folder to back up):
   - `leads.db`: the source of truth (SQLite).
   - `leads.csv`: opens in Excel or Numbers. Rewritten after every sign-up and admin add, so it always matches the database (one row per phone number). Excel does not refresh an open file: reopen it, or use the admin page for a live view. Rebuilt on startup if deleted.

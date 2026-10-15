@@ -1,6 +1,6 @@
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import http from 'node:http';
-import { SOURCE_LABELS, leadsCsv, toIST } from './files.js';
+import { SOURCE_LABELS, leadsCsv, toISTShort } from './files.js';
 import { NAME_MAX, ValidationError, cleanName, normalizePhone } from './leads.js';
 import { themeCss } from './theme.js';
 
@@ -16,7 +16,8 @@ const CSS = `${themeCss()}
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--text);font:500 17px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;-webkit-text-size-adjust:100%}
 main{max-width:28rem;margin:0 auto;padding:14px 16px 40px}
-main.wide{max-width:64rem}
+main.admin{max-width:72rem;padding:16px 20px 48px}
+html{scroll-padding-top:64px}
 a{color:inherit}
 .brand{margin:0 0 14px}
 .brand img{display:block;width:100%;max-width:250px;height:auto;margin:0 auto}
@@ -43,18 +44,50 @@ form:not(.inline) > button:not(.primary){margin-top:1rem}
 .small{font-size:.85rem;color:var(--muted)}
 .nowrap{white-space:nowrap}
 button.danger{color:var(--onDanger);background:var(--danger)}
-button.danger + a{margin-left:1.25rem}
 .error{border:3px solid var(--error);background:var(--errorBg);color:var(--text);border-radius:10px;padding:.75rem;font-weight:600}
 .confetti{position:absolute;pointer-events:none;overflow:visible}
 .confetti path{fill:var(--pink);stroke:var(--line);stroke-width:2.5;stroke-linejoin:round}
 .confetti.tr{top:-24px;right:-8px;width:58px}
 .confetti.bl{bottom:-20px;left:-12px;width:38px}
-.scroll{overflow-x:auto}
-table{width:100%;border-collapse:collapse;font-size:.9rem}
-th,td{text-align:left;padding:.5rem;border-bottom:1px solid var(--muted);vertical-align:top}
-td button,td .btn{margin:0;padding:.4rem .7rem;font-size:.85rem;box-shadow:2px 2px 0 var(--shadow)}
 form.inline{display:inline}
-textarea{width:100%;min-height:9rem;font:inherit;padding:.5rem;color:var(--text);background:var(--surface);border:2px solid var(--line);border-radius:8px}
+.topbar{display:flex;align-items:center;gap:14px 18px;flex-wrap:wrap;padding:0 0 14px;margin:0 0 18px;border-bottom:3px solid var(--line)}
+.topbar img{display:block;height:58px;width:auto}
+.topbar .wordmark{margin:0;font-size:1.4rem}
+.topbar h1{margin:0;font:900 1.6rem/1 ${HEAVY};text-transform:uppercase;letter-spacing:.02em}
+.topbar .actions{margin-left:auto;display:flex;gap:14px;align-items:center}
+.btn.secondary,button.secondary{color:var(--text);background:var(--surface);box-shadow:none}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin:0 0 18px}
+.stat{border:3px solid var(--line);border-radius:12px;background:var(--surface);padding:10px 14px}
+.stat dt{font:900 .8rem/1.2 ${HEAVY};text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
+.stat dd{margin:4px 0 0;font-size:clamp(1.15rem,2.2vw,1.55rem);font-weight:800;font-variant-numeric:tabular-nums;white-space:nowrap}
+.flash{margin:0 0 16px;padding:.7rem .9rem;border:3px solid var(--line);border-left:12px solid var(--pink);border-radius:10px;background:var(--surface);font-weight:700}
+.panels{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:16px;margin:0 0 22px}
+.panel{border:3px solid var(--line);border-radius:14px;background:var(--surface);padding:14px 18px 18px}
+.panel h2{margin:0 0 .2rem;font:900 1.1rem/1.2 ${HEAVY};text-transform:uppercase;letter-spacing:.03em}
+.panel .fields{display:flex;gap:10px 12px;align-items:flex-end;flex-wrap:wrap}
+.panel .fields > div{flex:1 1 170px}
+.panel label{margin:.6rem 0 .3rem}
+.panel input[type=text],.panel input[type=tel],.panel input[type=search]{min-height:46px;font-size:16px}
+.panel input[type=search]{width:100%;padding:.6rem .85rem;font-family:inherit;color:var(--text);background:var(--surface);border:3px solid var(--line);border-radius:10px;-webkit-appearance:none;appearance:none}
+.panel button,.panel .btn{min-height:46px}
+.showing{margin:0 0 8px;color:var(--muted);font-weight:600}
+table.reg{width:100%;border-collapse:separate;border-spacing:0;font-size:15px;background:var(--surface);border:3px solid var(--line);border-radius:14px}
+.reg th,.reg td{padding:10px 14px;text-align:left;vertical-align:middle;border-bottom:1px solid var(--rule)}
+.reg thead th{position:sticky;top:0;z-index:1;background:var(--surface);border-bottom:3px solid var(--line);font:800 .78rem/1.2 system-ui,sans-serif;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
+.reg thead th:first-child{border-top-left-radius:11px}
+.reg thead th:last-child{border-top-right-radius:11px}
+.reg tbody th{font-weight:700}
+.reg tbody tr:hover{background:var(--hover)}
+.reg tbody tr:last-child > *{border-bottom:0}
+.reg .num{font-variant-numeric:tabular-nums;white-space:nowrap}
+.reg .idx{color:var(--muted);width:3.5rem}
+.reg .act{width:1%;text-align:right}
+.chip{display:inline-block;padding:2px 10px;border:2px solid var(--line);border-radius:999px;font-size:.8rem;font-weight:700;white-space:nowrap}
+.chip.whatsapp{background:var(--pink);color:var(--onPink)}
+button.quiet{min-height:40px;padding:.4rem .8rem;font-size:.85rem;color:var(--error);background:transparent;border:2px solid var(--error);box-shadow:none}
+.empty{padding:28px 14px;text-align:center;color:var(--muted)}
+.confirm{max-width:36rem}
+.confirm .buttons{display:flex;gap:14px;flex-wrap:wrap;margin-top:1.2rem}
 @media (prefers-reduced-motion: reduce){button:active,.btn:active{transform:none}}
 `;
 
@@ -63,11 +96,11 @@ export const esc = (value) => String(value).replace(/[&<>"']/g, (ch) => ESCAPES[
 const firstName = (name) => name.split(' ')[0];
 export const displayPhone = (phone) => phone.replace(/^\+91(\d{5})(\d{5})$/, '+91 $1 $2');
 
-function page(title, body, wide = false) {
+function page(title, body, mainClass = '') {
   return '<!doctype html><html lang="en"><head><meta charset="utf-8">' +
     '<meta name="viewport" content="width=device-width,initial-scale=1">' +
     `<title>${esc(title)}</title><style>${CSS}</style></head>` +
-    `<body><main${wide ? ' class="wide"' : ''}>${body}</main></body></html>`;
+    `<body><main${mainClass ? ` class="${mainClass}"` : ''}>${body}</main></body></html>`;
 }
 
 const errorBlock = (error) => (error ? `<p class="error" role="alert">${esc(error)}</p>` : '');
@@ -136,39 +169,103 @@ export function thanksPage(cfg, name, phone, brand = NO_BRAND) {
 <p class="notice">Changed your mind? Reach out to us at the desk and we'll delete your details.</p>`);
 }
 
-export function adminPage(cfg, leads, token, error = '', warnings = []) {
-  const rows = leads.map((lead) =>
-    `<tr><td>${esc(lead.name)}</td><td class="nowrap">${esc(displayPhone(lead.phone))}</td>` +
-    `<td>${esc(SOURCE_LABELS[lead.source] ?? lead.source)}</td><td class="nowrap">${esc(toIST(lead.createdAt))}</td>` +
-    `<td><form class="inline" method="post" action="/admin/delete">${hidden(token, lead.id)}` +
-    '<button class="danger">Delete</button></form></td></tr>');
-  return page('Registrations', `
-${warnings.map((w) => `<p class="error" role="alert">${esc(w)}</p>`).join('')}
-<h1>Registrations: ${leads.length}</h1>
-<p><a href="/admin/export.csv">Download CSV</a></p>
-<div class="scroll"><table><thead><tr><th>Name</th><th>Phone</th><th>Came in via</th><th>Signed up (IST)</th><th></th></tr></thead>
-<tbody>${rows.join('') || '<tr><td colspan="5">No registrations yet.</td></tr>'}</tbody></table></div>
-<h2>Add someone who messaged us on WhatsApp</h2>
-${errorBlock(error)}
-<form method="post" action="/admin/add">
-  <input type="hidden" name="token" value="${esc(token)}">
-  <label for="name">Name</label><input id="name" name="name" type="text" maxlength="${NAME_MAX}" required>
-  <label for="phone">Mobile number</label><input id="phone" name="phone" type="tel" maxlength="20" required>
-  <button type="submit">Add registration</button>
-</form>`, true);
-}
+const FLASH = {
+  added: 'Registration added.',
+  deleted: 'Registration deleted from the database, the spreadsheet and the log.',
+};
 
 const hidden = (token, id) =>
   `<input type="hidden" name="token" value="${esc(token)}"><input type="hidden" name="id" value="${esc(id)}">`;
 
-export function confirmDeletePage(lead, token) {
+const phoneDigits = (phone) => phone.replace(/\D/g, '');
+
+/** Case-insensitive name match, or 3+ digits found anywhere in the stored +91 number (a leading 0 is dropped). */
+export function matchesSearch(lead, q) {
+  const query = q.trim().toLocaleLowerCase();
+  if (!query) return true;
+  if (lead.name.toLocaleLowerCase().includes(query)) return true;
+  let digits = query.replace(/\D/g, '');
+  if (digits.length === 11 && digits.startsWith('0')) digits = digits.slice(1);
+  return digits.length >= 3 && phoneDigits(lead.phone).includes(digits);
+}
+
+function adminHeader(cfg, brand, title, actions = '') {
+  return `<header class="topbar">${logoMarkup(cfg, brand)}<h1>${esc(title)}</h1>` +
+    (actions ? `<div class="actions">${actions}</div>` : '') + '</header>';
+}
+
+export function adminPage(cfg, { leads, token, brand = NO_BRAND, q = '', msg = '', error = '', warnings = [], form = {} }) {
+  const newestFirst = [...leads].reverse();
+  const shown = newestFirst.filter((lead) => matchesSearch(lead, q));
+  const bySource = (source) => leads.filter((l) => l.source === source).length;
+  const last = newestFirst[0];
+  const rows = shown.map((lead) => {
+    const n = leads.length - newestFirst.indexOf(lead);
+    return `<tr><td class="num idx">${n}</td><th scope="row">${esc(lead.name)}</th>` +
+      `<td class="num">${esc(displayPhone(lead.phone))}</td>` +
+      `<td><span class="chip ${lead.source === 'whatsapp' ? 'whatsapp' : 'form'}">${esc(SOURCE_LABELS[lead.source] ?? lead.source)}</span></td>` +
+      `<td class="num">${esc(toISTShort(lead.createdAt))}</td>` +
+      `<td class="act"><form class="inline" method="post" action="/admin/delete">${hidden(token, lead.id)}` +
+      `<button class="quiet" aria-label="Delete ${esc(lead.name)}">Delete</button></form></td></tr>`;
+  });
+  const empty = leads.length === 0
+    ? 'No registrations yet. They will appear here as people sign up.'
+    : `No matches for "${esc(q.trim())}".`;
+  const showing = q.trim()
+    ? `${shown.length} ${shown.length === 1 ? 'match' : 'matches'} for "${esc(q.trim())}" out of ${leads.length}. <a href="/admin">Clear search</a>`
+    : `Showing all ${leads.length}, newest first.`;
+  return page('Registrations', `
+${adminHeader(cfg, brand, 'Registrations',
+    '<a href="/admin">Refresh</a><a class="btn secondary" href="/admin/export.csv">Download CSV</a>')}
+${warnings.map((w) => `<p class="error" role="alert">${esc(w)}</p>`).join('')}
+${Object.hasOwn(FLASH, msg) ? `<p class="flash" role="status">${FLASH[msg]}</p>` : ''}
+<dl class="stats">
+  <div class="stat"><dt>Total</dt><dd>${leads.length}</dd></div>
+  <div class="stat"><dt>Wi-Fi form</dt><dd>${bySource('form')}</dd></div>
+  <div class="stat"><dt>WhatsApp</dt><dd>${bySource('whatsapp')}</dd></div>
+  <div class="stat"><dt>Last sign-up</dt><dd>${last ? esc(toISTShort(last.createdAt)) : '-'}</dd></div>
+</dl>
+<div class="panels">
+  <section class="panel" aria-labelledby="add-title">
+    <h2 id="add-title">Add a registration</h2>
+    <p class="hint">For people who registered by WhatsApp message.</p>
+    ${errorBlock(error)}
+    <form method="post" action="/admin/add" class="fields">
+      <input type="hidden" name="token" value="${esc(token)}">
+      <div><label for="name">Name</label><input id="name" name="name" type="text" maxlength="${NAME_MAX}" required value="${esc(form.name ?? '')}"></div>
+      <div><label for="phone">Mobile number</label><input id="phone" name="phone" type="tel" maxlength="20" required value="${esc(form.phone ?? '')}"></div>
+      <button type="submit">Add registration</button>
+    </form>
+  </section>
+  <section class="panel" aria-labelledby="find-title">
+    <h2 id="find-title">Find someone</h2>
+    <p class="hint">Search by name or any part of the number.</p>
+    <form method="get" action="/admin" class="fields" role="search">
+      <div><label for="q">Name or number</label><input id="q" name="q" type="search" maxlength="60" value="${esc(q)}"></div>
+      <button class="secondary" type="submit">Search</button>
+    </form>
+  </section>
+</div>
+<p class="showing">${showing}</p>
+<table class="reg">
+<caption class="sr-only">Registrations, newest first</caption>
+<thead><tr><th scope="col">#</th><th scope="col">Name</th><th scope="col">Mobile</th><th scope="col">Came in via</th><th scope="col">Signed up (IST)</th><th scope="col"><span class="sr-only">Actions</span></th></tr></thead>
+<tbody>${rows.join('') || `<tr><td colspan="6" class="empty">${empty}</td></tr>`}</tbody>
+</table>`, 'admin');
+}
+
+export function confirmDeletePage(cfg, lead, token, brand = NO_BRAND) {
   return page('Delete registration', `
-<h1>Delete this registration?</h1>
-<p><strong>${esc(lead.name)}</strong>, <span class="nowrap">${esc(displayPhone(lead.phone))}</span>, signed up ${esc(toIST(lead.createdAt))}.</p>
+${adminHeader(cfg, brand, 'Delete registration')}
+<section class="panel confirm">
+<h2>Delete this registration?</h2>
+<p><strong>${esc(lead.name)}</strong>, <span class="nowrap">${esc(displayPhone(lead.phone))}</span>, signed up ${esc(toISTShort(lead.createdAt))} IST.</p>
 <p>This removes them from the database, the spreadsheet and the log. It cannot be undone. Spreadsheets you
 already downloaded or copied are not changed.</p>
 <form method="post" action="/admin/delete">${hidden(token, lead.id)}<input type="hidden" name="confirm" value="yes">
-<button class="danger" type="submit">Yes, delete</button> <a href="/admin">Cancel</a></form>`, true);
+<div class="buttons"><a class="btn secondary" href="/admin" autofocus>Cancel</a>
+<button class="danger" type="submit">Delete registration</button></div></form>
+</section>`, 'admin');
 }
 
 const warningsOf = (store) => store.files?.warnings() ?? [];
@@ -294,10 +391,10 @@ export function createPortalServer(cfg, store, { laptopIp, quiet = false, brand 
       const id = Number(fields.id);
       const lead = Number.isSafeInteger(id) ? store.get(id) : null;
       if (!lead) return plain(res, 404, 'registration not found; it may already be deleted');
-      if (fields.confirm !== 'yes') return html(res, 200, confirmDeletePage(lead, adminToken));
+      if (fields.confirm !== 'yes') return html(res, 200, confirmDeletePage(cfg, lead, adminToken, brand));
       store.remove(id);
       log('registration deleted');
-      return redirect(res, '/admin', 303);
+      return redirect(res, '/admin?msg=deleted', 303);
     }
     if (path === '/admin/add') {
       let name;
@@ -307,14 +404,20 @@ export function createPortalServer(cfg, store, { laptopIp, quiet = false, brand 
         phone = normalizePhone(fields.phone);
       } catch (e) {
         if (!(e instanceof ValidationError)) throw e;
-        return html(res, 400, adminPage(cfg, store.list(), adminToken, e.message, warningsOf(store)));
+        return html(res, 400, adminPage(cfg, {
+          leads: store.list(), token: adminToken, brand, error: e.message, warnings: warningsOf(store),
+          form: { name: String(fields.name ?? '').slice(0, NAME_MAX), phone: String(fields.phone ?? '').slice(0, 20) },
+        }));
       }
       const result = store.register({ name, phone, source: 'whatsapp', eventCode: cfg.eventCode, noticeVersion: cfg.noticeVersion });
       if (!result.created) {
         const message = `${displayPhone(phone)} is already registered, as ${result.existing.name}.`;
-        return html(res, 409, adminPage(cfg, store.list(), adminToken, message, warningsOf(store)));
+        return html(res, 409, adminPage(cfg, {
+          leads: store.list(), token: adminToken, brand, error: message, warnings: warningsOf(store),
+          form: { name: String(fields.name ?? '').slice(0, NAME_MAX), phone: String(fields.phone ?? '').slice(0, 20) },
+        }));
       }
-      return redirect(res, '/admin', 303);
+      return redirect(res, '/admin?msg=added', 303);
     }
     plain(res, 404, 'not found');
   }
@@ -331,7 +434,13 @@ export function createPortalServer(cfg, store, { laptopIp, quiet = false, brand 
 
     if (isAdmin) {
       if (!LOOPBACK.has(req.socket.remoteAddress)) return plain(res, 404, 'not found', { Connection: 'close' });
-      if (method === 'GET' && path === '/admin') return html(res, 200, adminPage(cfg, store.list(), adminToken, '', warningsOf(store)));
+      if (method === 'GET' && path === '/admin') {
+        const params = new URL(req.url, 'http://x').searchParams;
+        return html(res, 200, adminPage(cfg, {
+          leads: store.list(), token: adminToken, brand, warnings: warningsOf(store),
+          q: (params.get('q') ?? '').slice(0, 60), msg: params.get('msg') ?? '',
+        }));
+      }
       if (method === 'GET' && path === '/admin/export.csv') {
         return send(res, 200, 'text/csv; charset=utf-8', leadsCsv(store.list()),
           { 'Content-Disposition': 'attachment; filename="leads.csv"' });

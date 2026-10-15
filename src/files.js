@@ -20,6 +20,18 @@ function mentionsPhone(line, phone) {
 }
 const IST_OFFSET_MS = 330 * 60 * 1000; // India has no daylight saving, so a fixed +05:30 is exact
 
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+/** "2026-10-15T13:48:30Z" -> "15 Oct, 7:18 pm" in India time, for people reading a table. */
+export function toISTShort(iso) {
+  const t = Date.parse(iso);
+  if (Number.isNaN(t)) return iso ?? '';
+  const d = new Date(t + IST_OFFSET_MS);
+  const h = d.getUTCHours();
+  const mm = String(d.getUTCMinutes()).padStart(2, '0');
+  return `${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]}, ${h % 12 || 12}:${mm} ${h < 12 ? 'am' : 'pm'}`;
+}
+
 /** "2026-10-15T13:48:30Z" -> "2026-10-15 19:18 IST"; anything unparseable is returned as-is. */
 export function toIST(iso) {
   const t = Date.parse(iso);
