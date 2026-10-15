@@ -24,6 +24,8 @@ a{color:inherit}
 .card{position:relative;background:var(--surface);border:3px solid var(--line);border-radius:14px;box-shadow:6px 6px 0 var(--pink);padding:20px 18px 24px}
 .card h1{margin:0 0 .35rem;font:900 1.7rem/1.1 ${HEAVY};text-transform:uppercase;letter-spacing:.02em}
 .lede{margin:0 0 .5rem;color:var(--muted)}
+.sr-only{position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
+.card form > label:first-of-type{margin-top:0}
 label{display:block;font-weight:700;margin:1rem 0 .35rem}
 input[type=text],input[type=tel]{width:100%;min-height:52px;padding:.7rem .85rem;font-size:17px;font-family:inherit;color:var(--text);background:var(--surface);border:3px solid var(--line);border-radius:10px;-webkit-appearance:none;appearance:none}
 input[aria-invalid=true]{border-color:var(--error)}
@@ -104,33 +106,32 @@ export function formPage(cfg, { error = '', field = null, name = '', phone = '',
     return (describedBy ? ` aria-describedby="${describedBy}"` : '') +
       (inline && field === id ? ' aria-invalid="true" autofocus' : '');
   };
-  return portalPage(cfg, brand, `${cfg.orgName} sign-up`, `
-<h1>Get the links</h1>
-<p class="lede">Get our Instagram, YouTube and Discord on WhatsApp.</p>
+  return portalPage(cfg, brand, `${cfg.orgName} registration`, `
+<h1 class="sr-only">Register for ${esc(cfg.orgName)}</h1>
 ${inline ? '' : errorBlock(error)}
 <form method="post" action="/submit">
   <label for="name">Your name</label>
   <input id="name" name="name" type="text" autocomplete="name" autocapitalize="words" maxlength="${NAME_MAX}" required value="${esc(name)}"${attrs('name')}>
   ${fieldError('name')}
-  <label for="phone">WhatsApp number</label>
+  <label for="phone">Mobile number</label>
   <input id="phone" name="phone" type="tel" inputmode="tel" autocomplete="tel" maxlength="20" placeholder="98765 43210" required value="${esc(phone)}"${attrs('phone', 'phone-hint')}>
   <p class="hint" id="phone-hint">10-digit mobile number, or start with + and your country code.</p>
   ${fieldError('phone')}
   <label class="check"><input type="checkbox" name="consent" value="yes" required${consent ? ' checked' : ''}${attrs('consent')}>
-    <span>I agree to get WhatsApp messages from ${esc(cfg.orgName)}.</span></label>
+    <span>I agree to ${esc(cfg.orgName)} keeping my name and number for this event's registration.</span></label>
   ${fieldError('consent')}
-  <button class="primary" type="submit">Send me the links</button>
+  <button class="primary" type="submit">Register</button>
 </form>`, `
-<p class="notice">${esc(cfg.orgName)} uses your name and number only to send you our social links and news about
-our events. Reply STOP on WhatsApp any time to opt out or have your details deleted.</p>`);
+<p class="notice">${esc(cfg.orgName)} uses your name and number only for this event's registration.
+Ask us at the desk any time to have your details deleted.</p>`);
 }
 
 export function thanksPage(cfg, name, phone, brand = NO_BRAND) {
-  return portalPage(cfg, brand, "You're in!", `
-<h1>You're in, ${esc(firstName(name))}!</h1>
-<p class="lede">Our Instagram, YouTube and Discord links are on their way to WhatsApp <strong class="nowrap">${esc(displayPhone(phone))}</strong>.</p>
+  return portalPage(cfg, brand, "You're registered", `
+<h1>You're registered, ${esc(firstName(name))}!</h1>
+<p class="lede">We've got you down as <strong>${esc(name)}</strong> on <strong class="nowrap">${esc(displayPhone(phone))}</strong>.</p>
 <p>You can disconnect from this Wi-Fi now so your phone goes back to mobile data.</p>`, `
-<p class="notice">Changed your mind? Reply STOP on WhatsApp and we'll delete your details.</p>`);
+<p class="notice">Changed your mind? Ask us at the desk and we'll delete your details.</p>`);
 }
 
 export function adminPage(cfg, leads, token, error = '', warnings = []) {
@@ -266,7 +267,7 @@ export function createPortalServer(cfg, store, { laptopIp, quiet = false, brand 
     try {
       name = cleanName(rawName);
       phone = normalizePhone(rawPhone);
-      if (fields.consent !== 'yes') throw new ValidationError("Please tick the box so we're allowed to message you.", 'consent');
+      if (fields.consent !== 'yes') throw new ValidationError('Please tick the box to register.', 'consent');
     } catch (e) {
       if (!(e instanceof ValidationError)) throw e;
       return html(res, 400, formPage(cfg, {

@@ -3,7 +3,7 @@
 Lead capture for a booth with no cell signal. Two ways in, one lead list:
 
 1. **WhatsApp QR (main).** Opens WhatsApp with a prefilled "Hi, I'm at <event> (<code>). My name is:" message to our number. WhatsApp holds the message until the guest gets signal, then it arrives with their real number. A staff member replies with the socials and adds them in the admin page.
-2. **Wi-Fi QR (fallback).** Joins an offline router. Every DNS name points at this laptop, so the phone's sign-in sheet opens our form (name, WhatsApp number, consent). Leads are stored in SQLite on the laptop. A staff-held tablet on the same Wi-Fi can use the same form.
+2. **Wi-Fi QR (fallback).** Joins an offline router. Every DNS name points at this laptop, so the phone's sign-in sheet opens our registration form (name, mobile number, consent). Leads are stored in SQLite on the laptop. A staff-held tablet on the same Wi-Fi can use the same form.
 
 After the event, the admin page has an **Open WhatsApp** button per lead that opens a chat with the socials message prefilled (WhatsApp Desktop or Web on the laptop), and **Mark sent** to track it.
 

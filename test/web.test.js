@@ -58,6 +58,18 @@ describe('portal server', () => {
     assert.equal((await request({ port, headers: { Host: '10.9.9.9' } })).status, 302, 'old address no longer served');
   });
 
+  test('the form and thank-you pages are registration-only: no socials or link promises', async () => {
+    const form = (await request({ port, headers: { Host: '127.0.0.1' } })).body;
+    const thanks = (await postForm(port, '/submit', VALID)).body;
+    for (const [label, html] of [['form', form], ['thanks', thanks]]) {
+      const text = html.replace(/<style>[\s\S]*?<\/style>/, '');
+      assert.ok(!/Get the links|Instagram|YouTube|Discord|social|on their way|Reply STOP/i.test(text), `${label} page mentions socials`);
+    }
+    assert.match(form, /<button class="primary" type="submit">Register<\/button>/);
+    assert.match(form, /<h1 class="sr-only">Register for /);
+    assert.match(form, /<label for="phone">Mobile number<\/label>/);
+  });
+
   test('the portal host serves the form', async () => {
     const res = await request({ port, headers: { Host: `127.0.0.1:${port}` } });
     assert.equal(res.status, 200);
@@ -68,7 +80,7 @@ describe('portal server', () => {
   test('a valid submission is stored normalized', async () => {
     const res = await postForm(port, '/submit', VALID);
     assert.equal(res.status, 200);
-    assert.match(res.body, /You're in, Asha!/);
+    assert.match(res.body, /You're registered, Asha!/);
     const leads = store.list();
     assert.equal(leads.length, 1);
     assert.deepEqual([leads[0].name, leads[0].phone, leads[0].source, leads[0].eventCode],
