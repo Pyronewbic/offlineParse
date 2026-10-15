@@ -1,51 +1,49 @@
 # offlineParse
 
-Lead capture for a booth with no cell signal. Two ways in, one lead list:
+On-the-spot event registration for a venue with no cell signal. Guests join an offline Wi-Fi and register (name, mobile number, consent) on a form served from a laptop; staff manage registrations on a laptop-only admin page.
 
-1. **WhatsApp QR (main).** Opens WhatsApp with a prefilled "Hi, I'm at <event> (<code>). My name is:" message to our number. WhatsApp holds the message until the guest gets signal, then it arrives with their real number. A staff member adds them in the admin page.
-2. **Wi-Fi QR (fallback).** Joins an offline router. Every DNS name points at this laptop, so the phone's sign-in sheet opens our registration form (name, mobile number, consent). Leads are stored in SQLite on the laptop. A staff-held tablet on the same Wi-Fi can use the same form.
+## How it works
 
-The admin page on the laptop lists every registration with its sign-up time in India time, and downloads them all as a spreadsheet.
+- **Wi-Fi QR:** joins a router with no internet. The router hands out the laptop's booth address as DNS, so the phone's sign-in sheet opens the registration form.
+- **WhatsApp QR (optional):** opens WhatsApp with a prefilled message containing the event code; it sends once the guest has signal. Staff add these people on the admin page.
+- **Storage:** everything stays on the laptop in `data/` (SQLite plus a synced spreadsheet and a log).
 
-Needs Node 22.13+ (built-in `node:sqlite`). The server has no dependencies; `qrcode` is only for generating the images.
+Node 22.13+. The server has no dependencies; `qrcode` is only for the QR scripts.
 
-## Before the event (needs internet once)
+## Setup (once)
 
 ```sh
-npm install          # only for the QR script
+npm install   # needs internet once, for the QR scripts
 npm test
 ```
 
-Edit `config.json`: org name (shown in the consent line and WhatsApp messages; the logo replaces it as the page heading), event name, `eventCode` (shows up in WhatsApp messages so you can tell events apart), `whatsappNumber` (country code, no `+`), and `wifiSsid` / `wifiPassword` (empty password = open network). `logoLight` / `logoDark` point at PNG logos for light and dark phones (checked at startup; empty shows the org name instead).
+### config.json
 
-### Router (once)
+| Key | Meaning |
+|---|---|
+| `orgName` | Consent line, privacy note and the logo's alt text |
+| `eventName`, `eventCode` | WhatsApp prefilled message; `eventCode` also tags each registration |
+| `whatsappNumber` | For the WhatsApp QR, country code and no `+` (e.g. `919876543210`) |
+| `wifiSsid`, `wifiPassword` | Must match the router; empty password = open network |
+| `laptopIp` | The booth address, `"192.168.0.2"` |
+| `logoLight`, `logoDark` | PNG logos for light and dark phones; empty shows `orgName` |
+| `noticeVersion` | Recorded with each registration; change it when the consent wording changes |
 
-The router must have **no internet** (nothing in the WAN port). Menu names below are from a TP-Link TL-WR845N; other routers have the same settings under similar names.
+### Router (TP-Link TL-WR845N; other routers have the same settings)
 
-1. **Network > LAN:** leave the router at its default address, `192.168.0.1` (its admin page; join its Wi-Fi first).
-2. **Wireless:** SSID and password to match `config.json`.
-3. **DHCP > DHCP Settings:** start `192.168.0.100`, end `192.168.0.199` (keeps the booth address `.2` out of the pool), **Primary DNS `192.168.0.2`**, Secondary DNS `0.0.0.0`. Save.
-4. Turn IPv6 off if the router has it, then **System Tools > Reboot**.
+Nothing in the WAN port. Join its Wi-Fi, open `http://192.168.0.1`, then:
 
-That is all the router ever needs: no per-laptop reservation. Whichever laptop runs the booth takes the booth address, `laptopIp` in `config.json` (`"192.168.0.2"`), with `npm run booth-ip` (see Event day). Every phone asks that address for DNS, which makes the sign-in sheet open the form.
+1. **Wireless:** SSID and password as in `config.json`.
+2. **DHCP > DHCP Settings:** start `192.168.0.100`, end `192.168.0.199`, **Primary DNS `192.168.0.2`**, Secondary DNS `0.0.0.0`. Save.
+3. Turn IPv6 off if there is a menu for it, then **System Tools > Reboot**.
 
-`laptopIp` can instead be `"auto"` or an adapter name such as `"en0"` / `"Wi-Fi"`, for a setup where the router's DNS points at one particular laptop's own address; `npm start -- --ip <address or name>` overrides it for one run.
+After step 2, reach the router by `http://192.168.0.1` only; `tplinkwifi.net` will open the form instead.
 
-### Internet on the laptop during the event (optional)
+### QR codes
 
-Nothing needs internet. If you want it anyway, keep Wi-Fi on the event router and add a second connection: USB tethering from a phone with signal, or Ethernet.
-
-- Give the laptop's own Wi-Fi a manual DNS server such as `1.1.1.1`, or exclude the laptop from the router's DNS setting. Otherwise the laptop asks its own catch-all DNS for every website and gets nowhere.
-- Put the tether or Ethernet above Wi-Fi in the network order (macOS: Network settings, Set Service Order; Windows does this automatically; Linux: lower route metric) so internet traffic leaves that way. Traffic to the booth Wi-Fi's own address range still uses Wi-Fi.
-
-Then `npm run qr` writes `qr/whatsapp.{svg,png}` and `qr/wifi.{svg,png}` and prints the fallback URL for the poster. `npm run qr:show` draws both codes in the terminal instead, to scan straight off the laptop screen (if a scan fails, zoom the terminal out or reduce its line spacing).
-
-### Test on real phones (one iPhone, one Android)
-
-These behaviours could not be confirmed from documentation; check them before relying on them:
-
-1. With mobile data and Wi-Fi off, scan the WhatsApp QR with the stock camera. Does WhatsApp open with the text? Tap send, then turn data back on **without reopening WhatsApp**. Does the message arrive? If iPhones only send once WhatsApp is reopened, add "open WhatsApp once you have signal" to the poster.
-2. Join the booth Wi-Fi. Does the sign-in sheet open by itself? Submit the form, then disconnect.
+- `npm run qr` writes `qr/wifi.{svg,png}` and `qr/whatsapp.{svg,png}` for the poster.
+- `npm run qr:show` draws them in the terminal to scan off the screen (if a scan fails, zoom the terminal out).
+- Print `http://192.168.0.2/` on the poster too, for phones where the sign-in sheet does not open.
 
 ## Event day
 
@@ -56,26 +54,32 @@ npm run booth-ip   # gives this laptop 192.168.0.2; asks for the admin password
 npm start
 ```
 
-- **macOS / Linux:** the booth address is temporary and disappears on reboot or Wi-Fi reconnect, so nothing needs undoing. If the laptop reconnects mid-event, `npm start` starts warning; run `npm run booth-ip` again.
-- **Windows:** run both in a terminal opened with **Run as administrator**. Windows cannot add a second address to an automatic adapter, so the Wi-Fi adapter is switched to the booth address. **After the event run `npm run booth-ip -- --undo`** (as administrator), or the laptop stays on that address on every network.
-- `npm run booth-ip -- --dry-run` prints the exact command without running it.
+- **Windows:** run `booth-ip` in a terminal opened with **Run as administrator**, allow Node.js through the firewall, and set the booth Wi-Fi to a **Private** network.
+- **macOS:** allow incoming connections for `node` when asked. Keep it awake with `caffeinate -dims npm start`.
+- **Linux:** ports 80 and 53 need root or `sudo setcap cap_net_bind_service=+ep "$(readlink -f "$(command -v node)")"`; open 80/tcp and 53/udp in the firewall.
+- `npm run booth-ip -- --dry-run` shows the command without running it. If `npm start` warns that the booth address is gone, run `npm run booth-ip` again.
 
-Keep the laptop awake and plugged in (macOS: `caffeinate -dims npm start`). The server re-checks its address every 5 seconds and warns if the booth address goes away.
+**Admin:** `http://localhost/admin` on the laptop only. Newest first, search by name or any part of the number, add, delete, and **Download CSV**. Press **Refresh** for new sign-ups.
 
-- **macOS:** allow incoming connections for `node` when asked. Ports 80 and 53 need no `sudo`.
-- **Windows:** allow Node.js through the firewall when asked, and set the event Wi-Fi to a **Private** network (Windows blocks incoming connections on Public ones). Ports 80 and 53 need no admin rights.
-- **Linux:** ports below 1024 need root, or once: `sudo setcap cap_net_bind_service=+ep "$(readlink -f "$(command -v node)")"`. Allow 80/tcp and 53/udp in the firewall (for example `ufw`). The DNS helper listens only on the booth address, so systemd-resolved holding port 53 on loopback does not conflict.
-
-- Form: `http://192.168.0.2/` (print this on the poster as a fallback)
-- Admin, from the laptop only: `http://localhost/admin` (returns 404 to anyone on the Wi-Fi). Newest registrations first, totals by source, search by name or any part of the number, manual add, and per-row delete. Use **Refresh** to see new sign-ups; it does not auto-refresh, so typing is never wiped.
-- Data, all in `data/` and readable only by your user account (copy the whole folder to back up):
-  - `leads.db`: the source of truth (SQLite).
-  - `leads.csv`: opens in Excel or Numbers. Rewritten after every sign-up and admin add, so it always matches the database (one row per phone number). Excel does not refresh an open file: reopen it, or use the admin page for a live view. Rebuilt on startup if deleted.
-  - `leads.log`: append-only, one JSON line per registration (`lead.created`) or deletion (`lead.deleted`, id only), with UTC timestamps. Only ever appended to, except when a registration is deleted.
-  - If the CSV or log cannot be written, sign-ups still save to the database and the admin page shows a red warning.
+**Check on real phones first** (one iPhone, one Android): the sign-in sheet opens by itself on joining, and the WhatsApp QR opens a prefilled chat with mobile data off.
 
 ## After the event
 
-- WhatsApp QR registrations: search WhatsApp for the event code to find them, then add each one with **Add someone who messaged us**.
-- A phone number can register only once. A second attempt, on the form or the admin page, is refused with an error and the first registration is left as it was.
-- Deletion requests (the form promises them): use **Delete** next to the person on the admin page and confirm. It removes them from the database (overwriting the old bytes), the spreadsheet and the log, and frees the number to register again. Spreadsheets already downloaded or copied elsewhere are not touched.
+1. Stop the server (Ctrl+C).
+2. Remove the booth address: `npm run booth-ip -- --undo`. **Required on Windows** (as administrator), or the laptop keeps `192.168.0.2` on every network. Do it on macOS and Linux too; a reboot also clears it there.
+3. Add anyone who registered by WhatsApp: search WhatsApp for the event code, then **Add a registration** on the admin page.
+
+## Data
+
+All in `data/`, readable only by your user account. Copy the folder to back up.
+
+- `leads.db`: the source of truth.
+- `leads.csv`: rewritten after every change, one row per number, sign-up time in IST. Excel does not refresh an open file; reopen it.
+- `leads.log`: one JSON line per registration or deletion, UTC timestamps.
+- A number registers once; repeats are refused.
+- **Delete** on the admin page erases a person from all three files and frees the number. Spreadsheets already copied elsewhere are not touched.
+
+## Other setups
+
+- **Laptop on another network too** (tether or Ethernet for internet): give the laptop's Wi-Fi a manual DNS such as `1.1.1.1`, and put the other connection first in the network order.
+- **No booth-ip:** set `laptopIp` to `"auto"` or an adapter name (`"en0"`, `"Wi-Fi"`) and point the router's DNS at that laptop's own reserved address. `npm start -- --ip <address or name>` overrides it for one run.
