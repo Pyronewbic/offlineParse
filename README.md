@@ -65,7 +65,7 @@ npm start
 - Nothing printed: the phone is not asking the laptop. Check the router's DHCP Primary DNS is `100.64.0.2` (saved, router rebooted) and the phone's Private DNS is Off or Automatic.
 - `dns` lines but no `http` lines: the phone resolved to the laptop but could not connect; check the laptop firewall allows `node`.
 
-**Check on real phones first** (one iPhone, one Android): the sign-in sheet opens by itself on joining, and the WhatsApp QR opens a prefilled chat with mobile data off.
+**Do a dry run first** with [CHECKLIST.md](CHECKLIST.md), the one-page list for whoever runs the booth.
 
 ## After the event
 
