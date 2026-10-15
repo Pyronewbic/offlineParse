@@ -11,6 +11,7 @@
     "start": "node src/main.js",
     "qr": "node scripts/make-qr.js",
     "qr:show": "node scripts/make-qr.js --terminal",
+    "booth-ip": "node scripts/booth-ip.js",
     "test": "node --test"
   },
   "dependencies": {

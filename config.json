@@ -5,7 +5,7 @@
   "whatsappNumber": "919999999999",
   "wifiSsid": "Daijobu Sign-up",
   "wifiPassword": "",
-  "laptopIp": "auto",
+  "laptopIp": "192.168.88.2",
   "httpPort": 80,
   "dnsPort": 53,
   "dbPath": "data/leads.db",

@@ -18,22 +18,23 @@ npm test
 
 Edit `config.json`: org name (shown in the consent line and WhatsApp messages; the logo replaces it as the page heading), event name, `eventCode` (shows up in WhatsApp messages so you can tell events apart), `whatsappNumber` (country code, no `+`), and `wifiSsid` / `wifiPassword` (empty password = open network). `logoLight` / `logoDark` point at PNG logos for light and dark phones (checked at startup; empty shows the org name instead).
 
-### Router
+### Router (once)
 
-The router must have **no internet** (nothing in the WAN port).
+The router must have **no internet** (nothing in the WAN port). Menu names below are from a TP-Link TL-WR845N; other routers have the same settings under similar names.
 
-1. Set the SSID (and password if any) to match `config.json`.
-2. Join the laptop to it and run `npm start`; the first line shows the address it picked. Reserve that address for the laptop in the router (DHCP reservation) so the poster URL stays valid.
-3. In the router's DHCP settings, set the **DNS server handed to clients** to that address, and nothing else. This makes the sign-in sheet pop up. If the router can't do this, the form still works at the printed URL, it just won't pop up.
-4. Turn off IPv6 on the router (or its IPv6 DNS advertisement); otherwise phones can ask the router's IPv6 DNS and skip the laptop.
+1. **Network > LAN:** router address `192.168.88.1`.
+2. **Wireless:** SSID and password to match `config.json`.
+3. **DHCP > DHCP Settings:** start `192.168.88.100`, end `192.168.88.199` (keeps the booth address `.2` out of the pool), **Primary DNS `192.168.88.2`**, Secondary DNS `0.0.0.0`. Save.
+4. Turn IPv6 off if the router has it, then **System Tools > Reboot**.
 
-`laptopIp` is `"auto"` by default, which works when the laptop is on exactly one network: it uses that network's address, ignoring loopback, link-local and virtual adapters (Docker, WSL/Hyper-V, VirtualBox, VMware, VPNs). On two or more networks it refuses to guess and lists them, marking the default route (usually the internet one). Then set `laptopIp` to the event Wi-Fi adapter's name, which keeps working if its address changes: `"en0"` on most Macs, `"Wi-Fi"` on Windows, `"wlan0"` or similar on Linux. A fixed address also works. `npm start -- --ip <name or address>` overrides it for one run.
+That is all the router ever needs: no per-laptop reservation. Whichever laptop runs the booth takes the booth address, `laptopIp` in `config.json` (`"192.168.88.2"`), with `npm run booth-ip` (see Event day). Every phone asks that address for DNS, which makes the sign-in sheet open the form.
+
+`laptopIp` can instead be `"auto"` or an adapter name such as `"en0"` / `"Wi-Fi"`, for a setup where the router's DNS points at one particular laptop's own address; `npm start -- --ip <address or name>` overrides it for one run.
 
 ### Internet on the laptop during the event (optional)
 
 Nothing needs internet. If you want it anyway, keep Wi-Fi on the event router and add a second connection: USB tethering from a phone with signal, or Ethernet.
 
-- Set `laptopIp` to the Wi-Fi adapter name (see above); `"auto"` will refuse because there are now two networks.
 - Give the laptop's own Wi-Fi a manual DNS server such as `1.1.1.1`, or exclude the laptop from the router's DNS setting. Otherwise the laptop asks its own catch-all DNS for every website and gets nowhere.
 - Put the tether or Ethernet above Wi-Fi in the network order (macOS: Network settings, Set Service Order; Windows does this automatically; Linux: lower route metric) so internet traffic leaves that way. Traffic to the booth Wi-Fi's own address range still uses Wi-Fi.
 
@@ -48,17 +49,24 @@ These behaviours could not be confirmed from documentation; check them before re
 
 ## Event day
 
+Join the booth Wi-Fi, then:
+
 ```sh
+npm run booth-ip   # gives this laptop 192.168.88.2; asks for the admin password
 npm start
 ```
 
-Keep the laptop awake and plugged in (macOS: `caffeinate -dims npm start`). The server re-checks its address every 5 seconds: with `"auto"` it follows a changed address (and says so), with a fixed `laptopIp` it prints a warning until the address is back.
+- **macOS / Linux:** the booth address is temporary and disappears on reboot or Wi-Fi reconnect, so nothing needs undoing. If the laptop reconnects mid-event, `npm start` starts warning; run `npm run booth-ip` again.
+- **Windows:** run both in a terminal opened with **Run as administrator**. Windows cannot add a second address to an automatic adapter, so the Wi-Fi adapter is switched to the booth address. **After the event run `npm run booth-ip -- --undo`** (as administrator), or the laptop stays on that address on every network.
+- `npm run booth-ip -- --dry-run` prints the exact command without running it.
+
+Keep the laptop awake and plugged in (macOS: `caffeinate -dims npm start`). The server re-checks its address every 5 seconds and warns if the booth address goes away.
 
 - **macOS:** allow incoming connections for `node` when asked. Ports 80 and 53 need no `sudo`.
 - **Windows:** allow Node.js through the firewall when asked, and set the event Wi-Fi to a **Private** network (Windows blocks incoming connections on Public ones). Ports 80 and 53 need no admin rights.
-- **Linux:** ports below 1024 need root, or once: `sudo setcap cap_net_bind_service=+ep "$(readlink -f "$(command -v node)")"`. Allow 80/tcp and 53/udp in the firewall (for example `ufw`). If systemd-resolved already holds port 53 on loopback, the DNS helper binds to the Wi-Fi address instead, automatically.
+- **Linux:** ports below 1024 need root, or once: `sudo setcap cap_net_bind_service=+ep "$(readlink -f "$(command -v node)")"`. Allow 80/tcp and 53/udp in the firewall (for example `ufw`). The DNS helper listens only on the booth address, so systemd-resolved holding port 53 on loopback does not conflict.
 
-- Form: `http://<laptop address>/` (print this on the poster as a fallback)
+- Form: `http://192.168.88.2/` (print this on the poster as a fallback)
 - Admin, from the laptop only: `http://localhost/admin` (returns 404 to anyone on the Wi-Fi). Newest registrations first, totals by source, search by name or any part of the number, manual add, and per-row delete. Use **Refresh** to see new sign-ups; it does not auto-refresh, so typing is never wiped.
 - Data, all in `data/` and readable only by your user account (copy the whole folder to back up):
   - `leads.db`: the source of truth (SQLite).

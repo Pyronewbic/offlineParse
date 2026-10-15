@@ -75,6 +75,7 @@ describe('entry point', () => {
     const { outcome, err } = await start({ laptopIp: '127.0.0.1' }, ['--ip', '203.0.113.7']);
     assert.equal(outcome, 'exit 2');
     assert.match(err(), /203\.0\.113\.7 is not an address of this machine/);
+    assert.match(err(), /run "npm run booth-ip" first/);
   });
 
   test('DNS listens on the booth address itself, not on every address', async () => {

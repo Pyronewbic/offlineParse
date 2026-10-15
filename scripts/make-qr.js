@@ -1,6 +1,7 @@
 // Writes the two booth QR codes (WhatsApp chat + Wi-Fi join) to qr/, or with --terminal draws them in the
 // terminal to scan straight off the screen. Needs `npm install` once, with internet.
 import { mkdirSync } from 'node:fs';
+import { isIPv4 } from 'node:net';
 import { join } from 'node:path';
 import { parseArgs } from 'node:util';
 import { ConfigError, loadConfig } from '../src/config.js';
@@ -33,11 +34,15 @@ const labels = {
   wifi: `Wi-Fi: join "${cfg.wifiSsid}"${cfg.wifiPassword ? '' : ' (open network)'}`,
 };
 if (!values.terminal) for (const [name, payload] of Object.entries(payloads)) console.log(`${name}: ${payload}`);
-try {
-  const { ip, how } = await detectAddress(cfg.laptopIp);
-  console.log(`form fallback URL to print on the poster: http://${ip}/ (${how}; reserve this address in the router so it stays put)`);
-} catch (e) {
-  console.log(`form fallback URL: unknown until the laptop is on the event Wi-Fi (${e.message})`);
+if (isIPv4(cfg.laptopIp)) {
+  console.log(`form fallback URL to print on the poster: http://${cfg.laptopIp}/ (the booth address)`);
+} else {
+  try {
+    const { ip, how } = await detectAddress(cfg.laptopIp);
+    console.log(`form fallback URL to print on the poster: http://${ip}/ (${how}; reserve this address in the router so it stays put)`);
+  } catch (e) {
+    console.log(`form fallback URL: unknown until the laptop is on the event Wi-Fi (${e.message})`);
+  }
 }
 
 let QRCode;

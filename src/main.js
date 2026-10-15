@@ -1,4 +1,5 @@
 import { dirname, join } from 'node:path';
+import { isIPv4 } from 'node:net';
 import { parseArgs } from 'node:util';
 import { BrandError, loadBrand } from './brand.js';
 import { ConfigError, loadConfig } from './config.js';
@@ -61,6 +62,7 @@ async function main(argv) {
   } catch (e) {
     if (!(e instanceof AddressError)) throw e;
     console.error(`laptop address: ${e.message}`);
+    if (isIPv4(configured)) console.error(`If ${configured} is the booth address, run "npm run booth-ip" first.`);
     return 2;
   }
 
