@@ -17,9 +17,9 @@ test('leadsCsv has readable headers and an explicit sent yes/no', () => {
   const csv = leadsCsv([lead, { ...lead, id: 2, source: 'whatsapp', socialsSentAt: '2026-10-15T09:00:00Z' }]);
   const [header, unsent, sent] = csv.replace(/^\uFEFF/, '').split('\r\n');
   assert.equal(header, 'ID,Name,WhatsApp number,Socials sent?,Socials sent (UTC),Came in via,Event,' +
-    'Signed up (UTC),Last updated (UTC),Consent given (UTC),Notice version');
-  assert.equal(unsent, '1,A,+919876543210,no,,Wi-Fi form,E,t,t,t,v');
-  assert.equal(sent, '2,A,+919876543210,yes,2026-10-15T09:00:00Z,WhatsApp message,E,t,t,t,v');
+    'Signed up (UTC),Notice version');
+  assert.equal(unsent, '1,A,+919876543210,no,,Wi-Fi form,E,t,v');
+  assert.equal(sent, '2,A,+919876543210,yes,2026-10-15T09:00:00Z,WhatsApp message,E,t,v');
   assert.ok(!/socialsSentAt/.test(csv), 'no internal field names in the sheet');
 });
 

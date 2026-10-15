@@ -22,8 +22,6 @@ const SHEET = [
   ['Came in via', (l) => SOURCE_LABELS[l.source] ?? l.source, true],
   ['Event', (l) => l.eventCode, true],
   ['Signed up (UTC)', (l) => l.createdAt, false],
-  ['Last updated (UTC)', (l) => l.updatedAt, false],
-  ['Consent given (UTC)', (l) => l.consentAt, false],
   ['Notice version', (l) => l.noticeVersion, true],
 ];
 
