@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { detectAddress, localAddresses } from '../src/netaddr.js';
-import { postForm, rawConfig } from './helpers.js';
+import { postForm, rawConfig, request } from './helpers.js';
 
 const MAIN = fileURLToPath(new URL('../src/main.js', import.meta.url));
 
@@ -83,6 +83,28 @@ describe('entry point', () => {
     const { outcome, out, err } = await start({ laptopIp: '127.0.0.1', dnsPort }, ['--dns']);
     assert.equal(outcome, 'ready', err());
     assert.ok(out().includes(`DNS:                 answering every name with 127.0.0.1 on 127.0.0.1:${dnsPort}`), out());
+  });
+
+  test('--verbose traces DNS questions and web requests, with hostile bytes made printable', async () => {
+    const dnsPort = await freePort();
+    const { port, outcome, out, err } = await start({ laptopIp: '127.0.0.1', dnsPort }, ['--dns', '--verbose']);
+    assert.equal(outcome, 'ready', err());
+    await request({ port, path: '/generate_204', headers: { Host: 'connectivitycheck.gstatic.com' } });
+    const dgram = (await import('node:dgram')).default;
+    const sock = dgram.createSocket('udp4');
+    const ask = (labels) => new Promise((r) => {
+      const name = Buffer.concat(labels.flatMap((l) => [Buffer.from([l.length]), Buffer.from(l, 'latin1')]));
+      sock.once('message', r);
+      sock.send(Buffer.concat([Buffer.from([0x12, 0x34, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0]), name, Buffer.from([0, 0, 1, 0, 1])]), dnsPort, '127.0.0.1');
+    });
+    await ask(['captive', 'apple', 'com']);
+    await ask(['evil\u001b[2J\u0007', 'example']);
+    sock.close();
+    await new Promise((r) => setTimeout(r, 100));
+    assert.match(out(), /http 127\.0\.0\.1 GET connectivitycheck\.gstatic\.com\/generate_204/);
+    assert.match(out(), /dns  127\.0\.0\.1 asked captive\.apple\.com/);
+    assert.match(out(), /dns  127\.0\.0\.1 asked evil\?\[2J\?\.example/, 'positive control: the hostile query was logged');
+    assert.ok(!/[\u0000-\u001f\u007f]/.test(out().replace(/\n/g, '')), 'no control bytes reach the terminal');
   });
 
   test('--ip with an adapter name serves on that adapter; an unknown name is refused', async (t) => {

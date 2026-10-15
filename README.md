@@ -61,6 +61,10 @@ npm start
 
 **Admin:** `http://localhost/admin` on the laptop only. Newest first, search by name or any part of the number, add, delete, and **Download CSV**. Press **Refresh** for new sign-ups.
 
+**Phone says "no internet" instead of opening the form:** run `npm start -- --verbose`, then forget and rejoin the Wi-Fi on the phone. Each DNS question and web request is printed.
+- Nothing printed: the phone is not asking the laptop. Check the router's DHCP Primary DNS is `192.168.0.2` (saved, router rebooted) and the phone's Private DNS is Off or Automatic.
+- `dns` lines but no `http` lines: the phone resolved to the laptop but could not connect; check the laptop firewall allows `node`.
+
 **Check on real phones first** (one iPhone, one Android): the sign-in sheet opens by itself on joining, and the WhatsApp QR opens a prefilled chat with mobile data off.
 
 ## After the event

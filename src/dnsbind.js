@@ -5,13 +5,13 @@ import { startCatchAllDns } from './dns.js';
  * macOS refuses a normal user port 53 on one address (EACCES) but allows it on all addresses; that is
  * only correct when the booth address is the adapter's sole address, which booth-ip arranges there.
  */
-export async function startDnsOn(ip, port, start = startCatchAllDns) {
+export async function startDnsOn(ip, port, start = startCatchAllDns, onQuery = null) {
   try {
-    return { sock: await start({ answerIp: ip, host: ip, port }), host: ip };
+    return { sock: await start({ answerIp: ip, host: ip, port, onQuery }), host: ip };
   } catch (e) {
     if (e.code !== 'EACCES') throw e;
   }
-  return { sock: await start({ answerIp: ip, host: '0.0.0.0', port }), host: '0.0.0.0' };
+  return { sock: await start({ answerIp: ip, host: '0.0.0.0', port, onQuery }), host: '0.0.0.0' };
 }
 
 /** Other addresses on the booth address's /24: with a wildcard DNS socket, replies may leave from one. */

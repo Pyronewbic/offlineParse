@@ -65,12 +65,27 @@ export function buildResponse(query, answerIp, ttl = 0) {
   return Buffer.concat([header(id, base, 1, 0), question]);
 }
 
+/** The queried name as dotted text, or null if the packet has no well-formed question. */
+export function queryName(query) {
+  if (query.length < 13) return null;
+  const labels = [];
+  let pos = 12;
+  for (;;) {
+    if (pos >= query.length) return null;
+    const len = query[pos];
+    if (len === 0) return labels.join('.') || '.';
+    if (len & 0xc0 || len > 63 || pos + 1 + len > query.length) return null;
+    labels.push(query.toString('latin1', pos + 1, pos + 1 + len));
+    pos += 1 + len;
+  }
+}
+
 export function ipv4Bytes(ip) {
   return Buffer.from(ip.split('.').map(Number));
 }
 
 /** Resolves once bound to a socket that answers until closed; `sock.setAnswerIp` retargets it. */
-export function startCatchAllDns({ answerIp, host = '0.0.0.0', port = 53, ttl = 0 }) {
+export function startCatchAllDns({ answerIp, host = '0.0.0.0', port = 53, ttl = 0, onQuery = null }) {
   let ipBytes = ipv4Bytes(answerIp);
   const sock = dgram.createSocket('udp4');
   sock.setAnswerIp = (ip) => {
@@ -78,6 +93,7 @@ export function startCatchAllDns({ answerIp, host = '0.0.0.0', port = 53, ttl = 
   };
   sock.on('message', (msg, rinfo) => {
     const response = buildResponse(msg, ipBytes, ttl);
+    if (onQuery) onQuery(queryName(msg), rinfo.address, Boolean(response));
     if (response) sock.send(response, rinfo.port, rinfo.address, () => {});
   });
   return new Promise((resolvePromise, reject) => {

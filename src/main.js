@@ -7,7 +7,7 @@ import { rivalAddresses, startDnsOn as startDns } from './dnsbind.js';
 import { LeadFiles } from './files.js';
 import { LeadStore } from './leads.js';
 import { AddressError, addressFollower, detectAddress, localAddresses } from './netaddr.js';
-import { createPortalServer } from './web.js';
+import { createPortalServer, printable } from './web.js';
 
 const ADDRESS_CHECK_MS = 5000;
 
@@ -29,6 +29,7 @@ async function main(argv) {
       ip: { type: 'string' },
       'no-dns': { type: 'boolean', default: false },
       quiet: { type: 'boolean', default: false },
+      verbose: { type: 'boolean', default: false },
     },
   });
 
@@ -70,11 +71,14 @@ async function main(argv) {
     return 1;
   }
   const store = new LeadStore(cfg.dbPath, { files });
-  const server = createPortalServer(cfg, store, { laptopIp: address.ip, quiet: values.quiet, brand });
+  const trace = values.verbose ? (line) => console.log(`${new Date().toISOString().slice(11, 19)} ${line}`) : null;
+  const onQuery = trace && ((name, from, answered) => trace(`dns  ${printable(from)} asked ${printable(name ?? '(malformed)')}${answered ? '' : ' (no answer)'}`));
+  const onRequest = trace && ((from, method, host, url) => trace(`http ${printable(from)} ${printable(method)} ${printable(host)}${printable(url)}`));
+  const server = createPortalServer(cfg, store, { laptopIp: address.ip, quiet: values.quiet, brand, onRequest });
   let dns = null;
   try {
     await listen(server, cfg.httpPort, '0.0.0.0');
-    if (!values['no-dns']) dns = await startDns(address.ip, cfg.dnsPort);
+    if (!values['no-dns']) dns = await startDns(address.ip, cfg.dnsPort, undefined, onQuery);
   } catch (e) {
     console.error(`cannot open port: ${e.message}`);
     server.close();
@@ -95,7 +99,7 @@ async function main(argv) {
       if (dns) {
         dns.sock.close();
         try {
-          dns = await startDns(next.ip, cfg.dnsPort);
+          dns = await startDns(next.ip, cfg.dnsPort, undefined, onQuery);
         } catch (e) {
           dns = null;
           console.error(`WARNING DNS could not move to ${next.ip}: ${e.message}`);

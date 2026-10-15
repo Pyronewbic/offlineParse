@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import dgram from 'node:dgram';
 import { networkInterfaces } from 'node:os';
 import { after, before, describe, test } from 'node:test';
-import { buildResponse, ipv4Bytes, startCatchAllDns } from '../src/dns.js';
+import { buildResponse, ipv4Bytes, queryName, startCatchAllDns } from '../src/dns.js';
 
 const IP = ipv4Bytes('10.1.2.3');
 
@@ -115,5 +115,33 @@ describe('catch-all DNS server', () => {
     client.send(Buffer.alloc(0), server.address().port, '127.0.0.1');
     const r = await ask(query('www.instagram.com'));
     assert.deepEqual([...r.subarray(r.length - 4)], [10, 1, 2, 3]);
+  });
+});
+
+describe('queryName', () => {
+  test('returns the dotted name, or null for malformed packets', () => {
+    assert.equal(queryName(query('connectivitycheck.gstatic.com')), 'connectivitycheck.gstatic.com');
+    assert.equal(queryName(Buffer.alloc(5)), null);
+    const good = query('example.com');
+    assert.equal(queryName(good.subarray(0, 16)), null, 'truncated label');
+    assert.equal(queryName(Buffer.concat([good.subarray(0, 12), Buffer.from([0xc0, 0x0c])])), null, 'compression pointer');
+  });
+
+  test('onQuery reports each question and whether it was answered', async () => {
+    const seen = [];
+    const server = await startCatchAllDns({ answerIp: '10.1.2.3', host: '127.0.0.1', port: 0, onQuery: (...a) => seen.push(a) });
+    const client = dgram.createSocket('udp4');
+    try {
+      await new Promise((resolvePromise) => {
+        client.once('message', () => resolvePromise());
+        client.send(query('captive.apple.com'), server.address().port, '127.0.0.1');
+      });
+      client.send(Buffer.from('junk'), server.address().port, '127.0.0.1');
+      await new Promise((r) => setTimeout(r, 100));
+      assert.deepEqual(seen, [['captive.apple.com', '127.0.0.1', true], [null, '127.0.0.1', false]]);
+    } finally {
+      server.close();
+      client.close();
+    }
   });
 });

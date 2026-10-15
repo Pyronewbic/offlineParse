@@ -93,6 +93,8 @@ button.quiet{min-height:40px;padding:.4rem .8rem;font-size:.85rem;color:var(--er
 
 const ESCAPES = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#x27;' };
 export const esc = (value) => String(value).replace(/[&<>"']/g, (ch) => ESCAPES[ch]);
+// Network-supplied text bound for the operator's terminal: printable ASCII only, and short.
+export const printable = (s) => String(s).replace(/[^\x20-\x7e]/g, '?').slice(0, 200);
 const firstName = (name) => name.split(' ')[0];
 export const displayPhone = (phone) => phone.replace(/^\+91(\d{5})(\d{5})$/, '+91 $1 $2');
 
@@ -345,7 +347,7 @@ function tokenMatches(given, expected) {
   return a.length === b.length && timingSafeEqual(a, b);
 }
 
-export function createPortalServer(cfg, store, { laptopIp, quiet = false, brand = { light: null, dark: null } }) {
+export function createPortalServer(cfg, store, { laptopIp, quiet = false, brand = { light: null, dark: null }, onRequest = null }) {
   const adminToken = randomBytes(32).toString('base64url');
   let portalHosts;
   let portalUrl;
@@ -459,6 +461,7 @@ export function createPortalServer(cfg, store, { laptopIp, quiet = false, brand 
   }
 
   const server = http.createServer((req, res) => {
+    if (onRequest) onRequest(req.socket.remoteAddress, req.method, req.headers.host ?? '', req.url);
     handle(req, res).catch((e) => {
       if (res.headersSent) return res.destroy();
       if (e instanceof HttpError) return plain(res, e.status, e.message, { Connection: 'close' });
