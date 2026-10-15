@@ -41,9 +41,8 @@ After step 2, reach the router by `http://192.168.0.1` only; `tplinkwifi.net` wi
 
 ### QR codes
 
-- `npm run qr` writes `qr/wifi`, `qr/register` and `qr/whatsapp` (`.svg` and `.png`) for the poster. The Register code opens the form directly, for phones where the sign-in sheet does not open.
+- `npm run qr` writes `qr/wifi` and `qr/whatsapp` (`.svg` and `.png`) for the poster.
 - `npm run qr:show` draws them in the terminal to scan off the screen (if a scan fails, zoom the terminal out).
-- Print `http://192.168.0.2/` under the Register code too.
 
 ## Event day
 

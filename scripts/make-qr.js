@@ -1,4 +1,4 @@
-// Writes the two booth QR codes (WhatsApp chat + Wi-Fi join) to qr/, or with --terminal draws them in the
+// Writes the two booth QR codes (Wi-Fi join + WhatsApp chat) to qr/, or with --terminal draws them in the
 // terminal to scan straight off the screen. Needs `npm install` once, with internet.
 import { mkdirSync } from 'node:fs';
 import { isIPv4 } from 'node:net';
@@ -25,16 +25,12 @@ try {
   process.exit(2);
 }
 
-// The register code opens the form directly, for phones where the sign-in sheet does not appear.
-const formUrl = isIPv4(cfg.laptopIp) ? `http://${cfg.laptopIp}/` : null;
 const payloads = {
   wifi: wifiPayload(cfg.wifiSsid, cfg.wifiPassword),
-  ...(formUrl ? { register: formUrl } : {}),
   whatsapp: whatsappLink(cfg.whatsappNumber, prefillText(cfg)),
 };
 const labels = {
   wifi: `Wi-Fi: join "${cfg.wifiSsid}"${cfg.wifiPassword ? '' : ' (open network)'}`,
-  register: `Register: open ${formUrl} after joining the Wi-Fi`,
   whatsapp: `WhatsApp: message ${cfg.orgName}`,
 };
 if (!values.terminal) for (const [name, payload] of Object.entries(payloads)) console.log(`${name}: ${payload}`);
