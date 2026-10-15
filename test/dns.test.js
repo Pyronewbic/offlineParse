@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import dgram from 'node:dgram';
+import { networkInterfaces } from 'node:os';
 import { after, before, describe, test } from 'node:test';
 import { buildResponse, ipv4Bytes, startCatchAllDns } from '../src/dns.js';
 
@@ -54,6 +55,28 @@ describe('buildResponse', () => {
     };
     for (const [label, packet] of Object.entries(cases)) assert.equal(buildResponse(packet, IP), null, label);
   });
+});
+
+const lanAddress = Object.values(networkInterfaces()).flat().find((a) => a && a.family === 'IPv4' && !a.internal)?.address;
+
+test('bound to one address, replies come from that address', { skip: !lanAddress && 'no LAN address' }, async () => {
+  const server = await startCatchAllDns({ answerIp: lanAddress, host: lanAddress, port: 0 });
+  const client = dgram.createSocket('udp4');
+  try {
+    const rinfo = await new Promise((resolvePromise, reject) => {
+      const timer = setTimeout(() => reject(new Error('no answer')), 2000);
+      client.once('message', (_msg, info) => {
+        clearTimeout(timer);
+        resolvePromise(info);
+      });
+      client.send(query('captive.apple.com'), server.address().port, lanAddress);
+    });
+    assert.equal(rinfo.address, lanAddress);
+    assert.equal(server.address().address, lanAddress, 'not a wildcard socket');
+  } finally {
+    server.close();
+    client.close();
+  }
 });
 
 describe('catch-all DNS server', () => {

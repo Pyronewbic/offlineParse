@@ -20,13 +20,10 @@ function listen(server, port, host) {
   });
 }
 
+// Bind DNS to the booth address itself: on a laptop with a second address, a wildcard socket can
+// answer from the other one, and phones drop replies from an address they did not ask. This also
+// sidesteps systemd-resolved, which holds 127.0.0.53:53 on Linux.
 async function startDns(ip, port) {
-  try {
-    return { sock: await startCatchAllDns({ answerIp: ip, port }), host: '0.0.0.0' };
-  } catch (e) {
-    if (e.code !== 'EADDRINUSE') throw e;
-  }
-  // Linux: systemd-resolved already holds 127.0.0.53:53, so bind only the Wi-Fi address.
   return { sock: await startCatchAllDns({ answerIp: ip, host: ip, port }), host: ip };
 }
 
@@ -100,9 +97,7 @@ async function main(argv) {
     onRecovered: (ip) => console.log(`Laptop address OK again: ${ip}`),
     onChange: async (next, previous) => {
       server.setLaptopIp(next.ip);
-      if (dns?.host === '0.0.0.0') {
-        dns.sock.setAnswerIp(next.ip);
-      } else if (dns) {
+      if (dns) {
         dns.sock.close();
         try {
           dns = await startDns(next.ip, cfg.dnsPort);

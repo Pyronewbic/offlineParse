@@ -40,7 +40,8 @@ describe('entry point', () => {
     const port = await freePort();
     const configPath = join(dir, 'config.json');
     writeFileSync(configPath, JSON.stringify(rawConfig({ httpPort: port, dbPath: join(dir, 'data', 'leads.db'), ...configOverrides })));
-    child = spawn(process.execPath, [MAIN, '--config', configPath, '--no-dns', '--quiet', ...args], { stdio: ['ignore', 'pipe', 'pipe'] });
+    const flags = args.includes('--dns') ? args.filter((x) => x !== '--dns') : ['--no-dns', ...args];
+    child = spawn(process.execPath, [MAIN, '--config', configPath, '--quiet', ...flags], { stdio: ['ignore', 'pipe', 'pipe'] });
     let out = '';
     let err = '';
     child.stdout.on('data', (d) => { out += d; });
@@ -74,6 +75,13 @@ describe('entry point', () => {
     const { outcome, err } = await start({ laptopIp: '127.0.0.1' }, ['--ip', '203.0.113.7']);
     assert.equal(outcome, 'exit 2');
     assert.match(err(), /203\.0\.113\.7 is not an address of this machine/);
+  });
+
+  test('DNS listens on the booth address itself, not on every address', async () => {
+    const dnsPort = await freePort();
+    const { outcome, out, err } = await start({ laptopIp: '127.0.0.1', dnsPort }, ['--dns']);
+    assert.equal(outcome, 'ready', err());
+    assert.ok(out().includes(`DNS:                 answering every name with 127.0.0.1 on 127.0.0.1:${dnsPort}`), out());
   });
 
   test('--ip with an adapter name serves on that adapter; an unknown name is refused', async (t) => {
