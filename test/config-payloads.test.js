@@ -12,6 +12,7 @@ describe('config', () => {
   test('shipped config.json loads', () => {
     const cfg = loadConfig(fileURLToPath(new URL('../config.json', import.meta.url)));
     assert.ok(Object.isFrozen(cfg));
+    assert.equal(cfg.laptopIp, '100.64.0.2');
   });
 
   test('rejects bad values', () => {

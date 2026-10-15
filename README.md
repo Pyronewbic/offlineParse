@@ -25,7 +25,7 @@ npm test
 | `eventName`, `eventCode` | WhatsApp prefilled message; `eventCode` also tags each registration |
 | `whatsappNumber` | For the WhatsApp QR, country code and no `+` (e.g. `919876543210`) |
 | `wifiSsid`, `wifiPassword` | Must match the router; empty password = open network |
-| `laptopIp` | The booth address, `"192.168.0.2"` |
+| `laptopIp` | The booth address, `"100.64.0.2"` |
 | `logoLight`, `logoDark` | PNG logos for light and dark phones; empty shows `orgName` |
 | `noticeVersion` | Recorded with each registration; change it when the consent wording changes |
 
@@ -34,10 +34,11 @@ npm test
 Nothing in the WAN port. Join its Wi-Fi, open `http://192.168.0.1`, then:
 
 1. **Wireless:** SSID and password as in `config.json`.
-2. **DHCP > DHCP Settings:** start `192.168.0.100`, end `192.168.0.199`, **Primary DNS `192.168.0.2`**, Secondary DNS `0.0.0.0`. Save.
-3. Turn IPv6 off if there is a menu for it, then **System Tools > Reboot**.
+2. **Network > LAN:** IP `100.64.0.1`, mask `255.255.255.0`. Save; the router restarts, so rejoin and open `http://100.64.0.1`. (Android skips the sign-in sheet when DNS answers with a `192.168.x` address.)
+3. **DHCP > DHCP Settings:** start `100.64.0.100`, end `100.64.0.199`, **Primary DNS `100.64.0.2`**, Secondary DNS `0.0.0.0`. Save.
+4. Turn IPv6 off if there is a menu for it, then **System Tools > Reboot**.
 
-After step 2, reach the router by `http://192.168.0.1` only; `tplinkwifi.net` will open the form instead.
+From now on reach the router by `http://100.64.0.1` only; `tplinkwifi.net` will open the form instead.
 
 ### QR codes
 
@@ -49,7 +50,7 @@ After step 2, reach the router by `http://192.168.0.1` only; `tplinkwifi.net` wi
 Join the booth Wi-Fi, then:
 
 ```sh
-npm run booth-ip   # gives this laptop 192.168.0.2; asks for the admin password
+npm run booth-ip   # gives this laptop 100.64.0.2; asks for the admin password
 npm start
 ```
 
@@ -61,7 +62,7 @@ npm start
 **Admin:** `http://localhost/admin` on the laptop only. Newest first, search by name or any part of the number, add, delete, and **Download CSV**. Press **Refresh** for new sign-ups.
 
 **Phone says "no internet" instead of opening the form:** run `npm start -- --verbose`, then forget and rejoin the Wi-Fi on the phone. Each DNS question and web request is printed.
-- Nothing printed: the phone is not asking the laptop. Check the router's DHCP Primary DNS is `192.168.0.2` (saved, router rebooted) and the phone's Private DNS is Off or Automatic.
+- Nothing printed: the phone is not asking the laptop. Check the router's DHCP Primary DNS is `100.64.0.2` (saved, router rebooted) and the phone's Private DNS is Off or Automatic.
 - `dns` lines but no `http` lines: the phone resolved to the laptop but could not connect; check the laptop firewall allows `node`.
 
 **Check on real phones first** (one iPhone, one Android): the sign-in sheet opens by itself on joining, and the WhatsApp QR opens a prefilled chat with mobile data off.
@@ -69,7 +70,7 @@ npm start
 ## After the event
 
 1. Stop the server (Ctrl+C).
-2. Remove the booth address: `npm run booth-ip -- --undo`. **Required on macOS and Windows** (Windows: as administrator), or the laptop keeps `192.168.0.2` on every network. On Linux a reboot also clears it.
+2. Remove the booth address: `npm run booth-ip -- --undo`. **Required on macOS and Windows** (Windows: as administrator), or the laptop keeps `100.64.0.2` on every network. On Linux a reboot also clears it.
 3. Add anyone who registered by WhatsApp: search WhatsApp for the event code, then **Add a registration** on the admin page.
 
 ## Data
