@@ -37,7 +37,7 @@ Nothing needs internet. If you want it anyway, keep Wi-Fi on the event router an
 - Give the laptop's own Wi-Fi a manual DNS server such as `1.1.1.1`, or exclude the laptop from the router's DNS setting. Otherwise the laptop asks its own catch-all DNS for every website and gets nowhere.
 - Put the tether or Ethernet above Wi-Fi in the network order (macOS: Network settings, Set Service Order; Windows does this automatically; Linux: lower route metric) so internet traffic leaves that way. Traffic to the booth Wi-Fi's own address range still uses Wi-Fi.
 
-Then `npm run qr` writes `qr/whatsapp.{svg,png}` and `qr/wifi.{svg,png}` and prints the fallback URL for the poster.
+Then `npm run qr` writes `qr/whatsapp.{svg,png}` and `qr/wifi.{svg,png}` and prints the fallback URL for the poster. `npm run qr:show` draws both codes in the terminal instead, to scan straight off the laptop screen (if a scan fails, zoom the terminal out or reduce its line spacing).
 
 ### Test on real phones (one iPhone, one Android)
 

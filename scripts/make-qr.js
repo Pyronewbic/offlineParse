@@ -1,4 +1,5 @@
-// Writes the two booth QR codes (WhatsApp chat + Wi-Fi join) to qr/. Needs `npm install` once, with internet.
+// Writes the two booth QR codes (WhatsApp chat + Wi-Fi join) to qr/, or with --terminal draws them in the
+// terminal to scan straight off the screen. Needs `npm install` once, with internet.
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { parseArgs } from 'node:util';
@@ -10,6 +11,7 @@ const { values } = parseArgs({
   options: {
     config: { type: 'string', default: 'config.json' },
     out: { type: 'string', default: 'qr' },
+    terminal: { type: 'boolean', default: false },
   },
 });
 
@@ -26,7 +28,11 @@ const payloads = {
   whatsapp: whatsappLink(cfg.whatsappNumber, prefillText(cfg)),
   wifi: wifiPayload(cfg.wifiSsid, cfg.wifiPassword),
 };
-for (const [name, payload] of Object.entries(payloads)) console.log(`${name}: ${payload}`);
+const labels = {
+  whatsapp: `WhatsApp: message ${cfg.orgName}`,
+  wifi: `Wi-Fi: join "${cfg.wifiSsid}"${cfg.wifiPassword ? '' : ' (open network)'}`,
+};
+if (!values.terminal) for (const [name, payload] of Object.entries(payloads)) console.log(`${name}: ${payload}`);
 try {
   const { ip, how } = await detectAddress(cfg.laptopIp);
   console.log(`form fallback URL to print on the poster: http://${ip}/ (${how}; reserve this address in the router so it stays put)`);
@@ -40,6 +46,13 @@ try {
 } catch {
   console.error('qrcode is not installed; run `npm install` (needs internet once) to write the images.');
   process.exit(2);
+}
+if (values.terminal) {
+  for (const name of ['wifi', 'whatsapp']) {
+    console.log(`\n${labels[name]}`);
+    console.log(await QRCode.toString(payloads[name], { type: 'terminal', small: true, errorCorrectionLevel: 'M' }));
+  }
+  process.exit(0);
 }
 mkdirSync(values.out, { recursive: true });
 for (const [name, payload] of Object.entries(payloads)) {

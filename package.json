@@ -10,6 +10,7 @@
   "scripts": {
     "start": "node src/main.js",
     "qr": "node scripts/make-qr.js",
+    "qr:show": "node scripts/make-qr.js --terminal",
     "test": "node --test"
   },
   "dependencies": {
