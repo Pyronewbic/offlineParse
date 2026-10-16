@@ -6,6 +6,7 @@ import { themeCss } from './theme.js';
 
 export const MAX_BODY = 8 * 1024;
 const MAX_FIELDS = 20;
+const TOO_MANY = 'Too many sign-ups from this phone just now. Please wait a minute and try again.';
 const ALREADY_REGISTERED = 'This number is already registered. Reach out to us at the desk if you need to change your details.';
 export const BRAND_PATHS = { '/brand/logo-light.png': 'light', '/brand/logo-dark.png': 'dark' };
 const LOOPBACK = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
@@ -360,6 +361,7 @@ function tokenMatches(given, expected) {
 
 export function createPortalServer(cfg, store, {
   laptopIp, quiet = false, brand = { light: null, dark: null }, onRequest = null, idleTimeoutMs = 20_000, maxConnectionsPerAddress = 32,
+  submitLimit = { max: 10, windowMs: 60_000 }, clock = () => Date.now(),
 }) {
   const adminToken = randomBytes(32).toString('base64url');
   let portalHosts;
@@ -371,11 +373,30 @@ export function createPortalServer(cfg, store, {
     portalUrl = `http://${ip}${port === 80 ? '' : `:${port}`}/`;
   };
   const log = quiet ? () => {} : (...args) => console.log(new Date().toISOString(), ...args);
+  const warn = quiet ? () => {} : (...args) => console.error(new Date().toISOString(), ...args);
+
+  // Sign-up attempts per guest address in the current window, so one device cannot flood the list.
+  const attempts = new Map();
+  function overLimit(addr) {
+    const t = clock();
+    const recent = (attempts.get(addr) ?? []).filter((at) => t - at < submitLimit.windowMs);
+    recent.push(t);
+    attempts.set(addr, recent);
+    if (recent.length === submitLimit.max + 1) {
+      warn(`WARNING ${printable(addr)} sent more than ${submitLimit.max} sign-ups in a minute; further ones are refused for now`);
+    }
+    return recent.length > submitLimit.max;
+  }
 
   async function submit(req, res) {
     const fields = await readForm(req);
     const rawName = fields.name ?? '';
     const rawPhone = fields.phone ?? '';
+    if (overLimit(req.socket.remoteAddress)) {
+      return html(res, 429, formPage(cfg, {
+        error: TOO_MANY, name: rawName.slice(0, NAME_MAX), phone: rawPhone.slice(0, 20), consent: fields.consent === 'yes',
+      }, brand));
+    }
     let name;
     let phone;
     try {

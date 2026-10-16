@@ -21,7 +21,8 @@ describe('portal server', () => {
 
   before(async () => {
     store = new LeadStore(':memory:');
-    server = createPortalServer(cfg, store, { laptopIp: '127.0.0.1', quiet: true });
+    // Every test here signs up from 127.0.0.1, so the per-address sign-up limit is lifted (tested below).
+    server = createPortalServer(cfg, store, { laptopIp: '127.0.0.1', quiet: true, submitLimit: { max: 1e6, windowMs: 60_000 } });
     await new Promise((r) => server.listen(0, '0.0.0.0', r));
     port = server.address().port;
   });
@@ -378,4 +379,34 @@ describe('connection limits', () => {
     await new Promise((r) => setTimeout(r, 20));
     assert.equal((await request({ port })).status, 200, 'positive control: a new request is served once slots free up');
   });
+});
+
+test('one address gets a bounded number of sign-up attempts per minute, and it resets', async () => {
+  const store = new LeadStore(':memory:');
+  let now = 1_000_000;
+  const server = createPortalServer(makeConfig(), store, {
+    laptopIp: '127.0.0.1', quiet: true, submitLimit: { max: 3, windowMs: 60_000 }, clock: () => now,
+  });
+  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  const { port } = server.address();
+  const signUp = (i, extra) => postForm(port, '/submit', { name: `Guest ${i}`, phone: `98765${String(i).padStart(5, '0')}`, consent: 'yes' }, extra);
+  try {
+    assert.equal((await postForm(port, '/submit', { name: '', phone: '1', consent: 'yes' })).status, 400, 'a failed attempt counts too');
+    assert.equal((await signUp(1)).status, 200);
+    assert.equal((await signUp(2)).status, 200);
+    const refused = await signUp(3);
+    assert.equal(refused.status, 429);
+    assert.match(refused.body, /Too many sign-ups from this phone just now/);
+    assert.match(refused.body, /value="Guest 3"/, 'what they typed is kept');
+    assert.equal(store.list().length, 2, 'the refused one was not stored');
+
+    now += 59_000;
+    assert.equal((await signUp(4)).status, 429, 'still inside the window');
+    now += 61_000;
+    assert.equal((await signUp(5)).status, 200, 'window passed: allowed again');
+    assert.equal(store.list().length, 3);
+  } finally {
+    server.close();
+    store.close();
+  }
 });
