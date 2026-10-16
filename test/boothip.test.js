@@ -96,7 +96,16 @@ describe('planBoothIp', () => {
     assert.match(done.note, /already on en0/);
     const nothing = plan({ undo: true });
     assert.deepEqual(nothing.steps, []);
-    assert.match(nothing.note, /nothing to undo/);
+    assert.match(nothing.note, /not on this machine right now\. If the Wi-Fi is off or disconnected, connect it/);
+  });
+
+  test('Windows undo with the adapter disconnected still removes the firewall rules', () => {
+    const r = plan({ platform: 'win32', undo: true, addresses: [] });
+    assert.equal(r.firewallOnly, true);
+    assert.deepEqual(r.steps.map(([, args]) => args.join(' ')), [
+      'advfirewall firewall delete rule name=offlineParse-booth-http', 'advfirewall firewall delete rule name=offlineParse-booth-dns']);
+    assert.ok(r.steps.every(([, , opts]) => opts?.mayFail), 'absent rules do not fail the undo');
+    assert.match(r.note, /connect it/);
   });
 
   test('refuses when the laptop is not on the booth network, or on it twice', () => {

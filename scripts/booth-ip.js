@@ -45,10 +45,8 @@ try {
   if (!(e instanceof BoothIpError)) throw e;
   fail(e.message, 2);
 }
-if (plan.note) {
-  console.log(plan.note);
-  process.exit(0);
-}
+if (plan.note) console.log(plan.note);
+if (plan.steps.length === 0) process.exit(0);
 
 if (values['dry-run']) {
   console.log(`Would run on ${plan.iface}:`);
@@ -60,7 +58,7 @@ if (process.platform === 'win32' && spawnSync('net', ['session'], { stdio: 'igno
   fail('Windows needs an administrator terminal: right-click Terminal or PowerShell, choose "Run as administrator", and run this again.', 2);
 }
 
-console.log(values.undo
+console.log(plan.firewallOnly ? 'Removing the booth firewall rules.' : values.undo
   ? `Removing ${boothIp} from ${plan.iface}.`
   : `Giving ${plan.iface} the booth address ${boothIp}${process.platform === 'win32' ? '' : ' (asks for your password)'}.`);
 try {
@@ -79,7 +77,9 @@ try {
   fail(e.message);
 }
 
-if (values.undo) {
+if (plan.firewallOnly) {
+  console.log('Done: firewall rules removed.');
+} else if (values.undo) {
   console.log(`Done: ${boothIp} removed.`);
 } else if (process.platform === 'win32' || process.platform === 'darwin') {
   console.log(`Done: ${plan.iface} now uses ${boothIp}${process.platform === 'win32' ? ' and the firewall lets the booth network in' : ''}. Run npm start.`);

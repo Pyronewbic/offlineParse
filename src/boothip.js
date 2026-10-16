@@ -73,7 +73,12 @@ export function planBoothIp({ platform, addresses, boothIp, undo = false, prefix
   const holder = addresses.find((a) => a.address === boothIp);
 
   if (undo) {
-    if (!holder) return { steps: [], note: `${boothIp} is not on this machine, so there is nothing to undo.` };
+    if (!holder) {
+      // The address only shows while the adapter is connected, so a disconnected Wi-Fi can still hold it.
+      const note = `${boothIp} is not on this machine right now. If the Wi-Fi is off or disconnected, ` +
+        'connect it to any network and run this again.';
+      return platform === 'win32' ? { iface: 'Windows Firewall', firewallOnly: true, steps: firewallDelete(), note } : { steps: [], note };
+    }
     return { iface: holder.name, steps: undoSteps(platform, holder.name, boothIp, prefix, services) };
   }
   if (holder) return { iface: holder.name, steps: [], note: `${boothIp} is already on ${holder.name}. Run npm start.` };
