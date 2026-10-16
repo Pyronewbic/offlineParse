@@ -258,13 +258,21 @@ describe('portal server', () => {
         'Content-Type': 'application/x-www-form-urlencoded', 'Content-Length': Buffer.byteLength(body), ...headers } });
     };
     for (const headers of [{ Origin: 'http://rebind.attacker.example' }, { Origin: 'null' }, { Origin: `http://localhost:${port + 1}` },
-      { 'Sec-Fetch-Site': 'cross-site' }, { 'Sec-Fetch-Site': 'same-site' }]) {
+      { Origin: 'null', 'Sec-Fetch-Site': 'cross-site' }, { 'Sec-Fetch-Site': 'cross-site' }, { 'Sec-Fetch-Site': 'same-site' }]) {
       assert.equal((await add(headers)).status, 403, JSON.stringify(headers));
     }
     assert.equal(store.list().length, 0);
     const ok = await add({ Origin: `http://127.0.0.1:${port}`, 'Sec-Fetch-Site': 'same-origin' });
     assert.equal(ok.status, 303, 'positive control: the page itself can post');
-    assert.equal(store.list().length, 1);
+    // What Chrome sends from a no-referrer page: the desk's own post must still work.
+    const nullOrigin = await add({ Origin: 'null', 'Sec-Fetch-Site': 'same-origin' });
+    assert.equal(nullOrigin.status, 409, 'accepted (409: the number is already registered by the post above)');
+  });
+
+  test('admin pages let the browser send their real Origin; guest pages still send no referrer', async () => {
+    assert.equal((await request({ port, path: '/admin' })).headers['referrer-policy'], 'same-origin');
+    assert.equal((await request({ port, path: '/' })).headers['referrer-policy'], 'no-referrer');
+    assert.equal((await request({ port, path: '/generate_204' })).headers['referrer-policy'], 'no-referrer');
   });
 
   test('admin delete asks for confirmation, then removes the registration', async () => {

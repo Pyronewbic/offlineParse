@@ -286,7 +286,7 @@ function send(res, status, type, body, extra = {}) {
     'Content-Length': buf.length,
     'Cache-Control': 'no-store',
     'X-Content-Type-Options': 'nosniff',
-    'Referrer-Policy': 'no-referrer',
+    'Referrer-Policy': res.getHeader('Referrer-Policy') ?? 'no-referrer',
     'Content-Security-Policy': CSP,
     ...extra,
   });
@@ -348,11 +348,15 @@ function hostOf(req) {
   return host.replace(/:\d*$/, '');
 }
 
-/** A browser POST from the admin page itself: no cross-site fetch metadata, Origin (if sent) equal to the Host. */
+/**
+ * A browser POST from the admin page itself: no cross-site fetch metadata, and an Origin (if sent) equal
+ * to the Host. "null" passes only with Sec-Fetch-Site same-origin, which pages cannot forge.
+ */
 function sameOriginPost(req) {
   const site = req.headers['sec-fetch-site'];
   if (site !== undefined && site !== 'same-origin' && site !== 'none') return false;
   const origin = req.headers.origin;
+  if (origin === 'null') return site === 'same-origin';
   return origin === undefined || origin.toLowerCase() === `http://${String(req.headers.host).toLowerCase()}`;
 }
 
@@ -477,6 +481,8 @@ export function createPortalServer(cfg, store, {
       if (!LOOPBACK.has(req.socket.remoteAddress) || !ADMIN_HOSTS.has(hostOf(req))) {
         return plain(res, 404, 'not found', { Connection: 'close' });
       }
+      // With no-referrer, browsers send "Origin: null" even on the desk's own form posts.
+      res.setHeader('Referrer-Policy', 'same-origin');
       if (method === 'GET' && path === '/admin') {
         const params = new URL(req.url, 'http://x').searchParams;
         return html(res, 200, adminPage(cfg, {
