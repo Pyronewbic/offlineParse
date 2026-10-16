@@ -9,6 +9,9 @@ const MAX_FIELDS = 20;
 const ALREADY_REGISTERED = 'This number is already registered. Reach out to us at the desk if you need to change your details.';
 export const BRAND_PATHS = { '/brand/logo-light.png': 'light', '/brand/logo-dark.png': 'dark' };
 const LOOPBACK = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
+// Names the admin desk answers to. A loopback socket alone is not enough: a page the operator opens
+// could rebind its own name to 127.0.0.1 (DNS rebinding) and read the desk as same-origin.
+const ADMIN_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]']);
 const CSP = "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'";
 
 const HEAVY = 'Impact,Haettenschweiler,"Arial Narrow Bold",system-ui,sans-serif';
@@ -341,6 +344,14 @@ function hostOf(req) {
   return host.replace(/:\d*$/, '');
 }
 
+/** A browser POST from the admin page itself: no cross-site fetch metadata, Origin (if sent) equal to the Host. */
+function sameOriginPost(req) {
+  const site = req.headers['sec-fetch-site'];
+  if (site !== undefined && site !== 'same-origin' && site !== 'none') return false;
+  const origin = req.headers.origin;
+  return origin === undefined || origin.toLowerCase() === `http://${String(req.headers.host).toLowerCase()}`;
+}
+
 function tokenMatches(given, expected) {
   const a = Buffer.from(String(given ?? ''), 'utf8');
   const b = Buffer.from(expected, 'utf8');
@@ -435,7 +446,9 @@ export function createPortalServer(cfg, store, { laptopIp, quiet = false, brand 
     const isAdmin = path === '/admin' || path.startsWith('/admin/');
 
     if (isAdmin) {
-      if (!LOOPBACK.has(req.socket.remoteAddress)) return plain(res, 404, 'not found', { Connection: 'close' });
+      if (!LOOPBACK.has(req.socket.remoteAddress) || !ADMIN_HOSTS.has(hostOf(req))) {
+        return plain(res, 404, 'not found', { Connection: 'close' });
+      }
       if (method === 'GET' && path === '/admin') {
         const params = new URL(req.url, 'http://x').searchParams;
         return html(res, 200, adminPage(cfg, {
@@ -447,7 +460,10 @@ export function createPortalServer(cfg, store, { laptopIp, quiet = false, brand 
         return send(res, 200, 'text/csv; charset=utf-8', leadsCsv(store.list()),
           { 'Content-Disposition': 'attachment; filename="leads.csv"' });
       }
-      if (method === 'POST') return adminPost(req, res, path);
+      if (method === 'POST') {
+        if (!sameOriginPost(req)) return plain(res, 403, 'cross-site request refused; use the admin page itself', { Connection: 'close' });
+        return adminPost(req, res, path);
+      }
       return plain(res, 404, 'not found');
     }
     if (method === 'POST' && path === '/submit') return submit(req, res);

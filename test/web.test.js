@@ -228,6 +228,43 @@ describe('portal server', () => {
     assert.equal(store.list().length, 1);
   });
 
+  test('admin answers only to localhost names, so a rebound hostname cannot read or change it', async () => {
+    await postForm(port, '/submit', VALID);
+    const token = await adminToken();
+    for (const host of ['rebind.attacker.example', `rebind.attacker.example:${port}`, '100.64.0.2', 'localhost.attacker.example']) {
+      for (const path of ['/admin', '/admin/export.csv']) {
+        const res = await request({ port, path, headers: { Host: host } });
+        assert.equal(res.status, 404, `${host} ${path}`);
+        assert.ok(!res.body.includes('9876543210') && !res.body.includes(token), `${host} ${path} leaks nothing`);
+      }
+      const body = new URLSearchParams({ id: '1', confirm: 'yes', token }).toString();
+      const post = await request({ port, method: 'POST', path: '/admin/delete', body, headers: {
+        Host: host, 'Content-Type': 'application/x-www-form-urlencoded', 'Content-Length': Buffer.byteLength(body) } });
+      assert.equal(post.status, 404, `${host} delete`);
+    }
+    for (const host of [`localhost:${port}`, `127.0.0.1:${port}`, `LOCALHOST:${port}`]) {
+      assert.equal((await request({ port, path: '/admin', headers: { Host: host } })).status, 200, `positive control: ${host}`);
+    }
+    assert.equal(store.list().length, 1, 'nothing was deleted');
+  });
+
+  test('admin POSTs from another origin are refused even with the token', async () => {
+    const token = await adminToken();
+    const add = (headers) => {
+      const body = new URLSearchParams({ name: 'Ravi', phone: '9123456789', token }).toString();
+      return request({ port, method: 'POST', path: '/admin/add', body, headers: {
+        'Content-Type': 'application/x-www-form-urlencoded', 'Content-Length': Buffer.byteLength(body), ...headers } });
+    };
+    for (const headers of [{ Origin: 'http://rebind.attacker.example' }, { Origin: 'null' }, { Origin: `http://localhost:${port + 1}` },
+      { 'Sec-Fetch-Site': 'cross-site' }, { 'Sec-Fetch-Site': 'same-site' }]) {
+      assert.equal((await add(headers)).status, 403, JSON.stringify(headers));
+    }
+    assert.equal(store.list().length, 0);
+    const ok = await add({ Origin: `http://127.0.0.1:${port}`, 'Sec-Fetch-Site': 'same-origin' });
+    assert.equal(ok.status, 303, 'positive control: the page itself can post');
+    assert.equal(store.list().length, 1);
+  });
+
   test('admin delete asks for confirmation, then removes the registration', async () => {
     await postForm(port, '/submit', { ...VALID, name: 'Asha <b>Rao</b>' });
     const { id } = store.list()[0];
