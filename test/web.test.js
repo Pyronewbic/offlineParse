@@ -302,6 +302,15 @@ describe('portal server', () => {
     assert.deepEqual(store.list().map((l) => [l.phone, l.source]), [['+919123456789', 'whatsapp']]);
   });
 
+  test('a desk-added WhatsApp registration does not claim the form notice the person never saw', async () => {
+    await postForm(port, '/submit', VALID);
+    await postForm(port, '/admin/add', { name: 'Ravi', phone: '9123456789', token: await adminToken() });
+    assert.deepEqual(store.list().map((l) => [l.source, l.noticeVersion]),
+      [['form', cfg.noticeVersion], ['whatsapp', 'none (WhatsApp message)']]);
+    const csv = (await request({ port, path: '/admin/export.csv' })).body;
+    assert.match(csv, /,WhatsApp message,[^,]*,[^,]*,none \(WhatsApp message\)\r\n/);
+  });
+
   test('CSV export guards formula-looking names and keeps phones intact', async () => {
     await postForm(port, '/submit', { ...VALID, name: '=HYPERLINK("http://evil","x")' });
     const res = await request({ port, path: '/admin/export.csv' });

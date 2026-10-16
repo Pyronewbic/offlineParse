@@ -6,6 +6,7 @@ import { themeCss } from './theme.js';
 
 export const MAX_BODY = 8 * 1024;
 const MAX_FIELDS = 20;
+export const WHATSAPP_NOTICE = 'none (WhatsApp message)';
 const TOO_MANY = 'Too many sign-ups from this phone just now. Please wait a minute and try again.';
 const ALREADY_REGISTERED = 'This number is already registered. Reach out to us at the desk if you need to change your details.';
 export const BRAND_PATHS = { '/brand/logo-light.png': 'light', '/brand/logo-dark.png': 'dark' };
@@ -448,7 +449,8 @@ export function createPortalServer(cfg, store, {
           form: { name: String(fields.name ?? '').slice(0, NAME_MAX), phone: String(fields.phone ?? '').slice(0, 20) },
         }));
       }
-      const result = store.register({ name, phone, source: 'whatsapp', eventCode: cfg.eventCode, noticeVersion: cfg.noticeVersion });
+      // They sent the prefilled WhatsApp text and never saw the form's notice, so do not record that one.
+      const result = store.register({ name, phone, source: 'whatsapp', eventCode: cfg.eventCode, noticeVersion: WHATSAPP_NOTICE });
       if (!result.created) {
         const message = `${displayPhone(phone)} is already registered, as ${result.existing.name}.`;
         return html(res, 409, adminPage(cfg, {
