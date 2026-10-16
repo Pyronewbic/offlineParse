@@ -1,6 +1,6 @@
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import http from 'node:http';
-import { SOURCE_LABELS, leadsCsv, toISTShort } from './files.js';
+import { CSV_RETRY_MS, SOURCE_LABELS, leadsCsv, toISTShort } from './files.js';
 import { NAME_MAX, ValidationError, cleanName, normalizePhone } from './leads.js';
 import { themeCss } from './theme.js';
 
@@ -178,6 +178,8 @@ export function thanksPage(cfg, name, phone, brand = NO_BRAND) {
 const FLASH = {
   added: 'Registration added.',
   deleted: 'Registration deleted from the database, the spreadsheet and the log.',
+  'deleted-partial': 'Registration deleted from the database. The spreadsheet or the log still has it (see the warning above); ' +
+    `that is retried every ${CSV_RETRY_MS / 1000} seconds.`,
 };
 
 const hidden = (token, id) =>
@@ -429,8 +431,9 @@ export function createPortalServer(cfg, store, {
       if (!lead) return plain(res, 404, 'registration not found; it may already be deleted');
       if (fields.confirm !== 'yes') return html(res, 200, confirmDeletePage(cfg, lead, adminToken, brand));
       store.remove(id);
-      log('registration deleted');
-      return redirect(res, '/admin?msg=deleted', 303);
+      const partial = store.files?.stillHolds(lead) ?? false;
+      log(partial ? 'registration deleted from the database; files pending' : 'registration deleted');
+      return redirect(res, `/admin?msg=${partial ? 'deleted-partial' : 'deleted'}`, 303);
     }
     if (path === '/admin/add') {
       let name;

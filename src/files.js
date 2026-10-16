@@ -2,7 +2,7 @@ import { randomBytes } from 'node:crypto';
 import {
   closeSync, constants, mkdirSync, openSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync, writeSync,
 } from 'node:fs';
-import { dirname, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 
 const CSV_FORMULA_PREFIXES = ['=', '+', '-', '@', '\t', '\r'];
 const LOG_FIELDS = ['id', 'name', 'phone', 'source', 'eventCode'];
@@ -23,13 +23,19 @@ export function csvProblem(e, platform = process.platform) {
 const openLog = (path) =>
   openSync(path, constants.O_WRONLY | constants.O_APPEND | constants.O_CREAT | (constants.O_NOFOLLOW ?? 0), 0o600);
 
-function mentionsPhone(line, phone) {
+/** Whether a log line belongs to a registration deleted at `until` (a later re-registration is kept). */
+function erases(line, { phone, until }) {
   try {
-    return JSON.parse(line).phone === phone;
+    const entry = JSON.parse(line);
+    return entry.phone === phone && !(Date.parse(entry.ts) > Date.parse(until));
   } catch {
     return line.includes(phone);
   }
 }
+
+const MAX_PENDING_BYTES = 1024 * 1024;
+const validPending = (e) => e && Number.isSafeInteger(e.id) && typeof e.phone === 'string' && /^\+\d{8,15}$/.test(e.phone) &&
+  typeof e.until === 'string' && !Number.isNaN(Date.parse(e.until));
 const IST_OFFSET_MS = 330 * 60 * 1000; // India has no daylight saving, so a fixed +05:30 is exact
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -95,10 +101,43 @@ export class LeadFiles {
     this.platform = platform;
     this.problems = new Map();
     this.pendingCsv = null;
+    // Deletions not yet scrubbed from the log, kept on disk so a restart still finishes them.
+    this.pendingPath = join(dirname(this.logPath), 'pending-erasures.json');
+    this.pendingErasures = new Map();
     mkdirSync(dirname(this.logPath), { recursive: true });
     // O_NOFOLLOW: a symlink planted at the log path must not redirect our writes (absent on Windows,
     // where creating a symlink needs admin rights anyway).
     this.logFd = openLog(this.logPath);
+    this.loadPending();
+    if (this.pendingErasures.size) this.flushErasures();
+  }
+
+  loadPending() {
+    let entries;
+    try {
+      if (statSync(this.pendingPath).size > MAX_PENDING_BYTES) throw new Error('too large');
+      entries = JSON.parse(readFileSync(this.pendingPath, 'utf8'));
+      if (!Array.isArray(entries) || !entries.every(validPending)) throw new Error('not a list of pending erasures');
+    } catch (e) {
+      if (e.code !== 'ENOENT') this.fail(this.pendingPath, new Error(`ignored, so these deletions may still be in the log: ${e.message}`));
+      return;
+    }
+    for (const e of entries) this.pendingErasures.set(e.phone, { id: e.id, phone: e.phone, until: e.until });
+  }
+
+  savePending() {
+    try {
+      if (this.pendingErasures.size === 0) {
+        unlinkSync(this.pendingPath);
+      } else {
+        const tmp = `${this.pendingPath}.${randomBytes(6).toString('hex')}.tmp`;
+        writeFileSync(tmp, JSON.stringify([...this.pendingErasures.values()]), { flag: 'wx', mode: 0o600 });
+        renameSync(tmp, this.pendingPath);
+      }
+      this.problems.delete(this.pendingPath);
+    } catch (e) {
+      if (e.code !== 'ENOENT') this.fail(this.pendingPath, e);
+    }
   }
 
   record(event, lead, fields = LOG_FIELDS) {
@@ -133,22 +172,54 @@ export class LeadFiles {
     }
   }
 
-  /** Retry a CSV rewrite that failed, without waiting for the next sign-up. True if one was pending. */
-  retryCsv() {
-    if (!this.pendingCsv) return false;
-    this.sync(this.pendingCsv);
-    return true;
+  /** Retry deletions and a CSV rewrite that failed, without waiting for the next change. True if any was pending. */
+  retry() {
+    const pending = this.pendingErasures.size > 0 || this.pendingCsv !== null;
+    if (this.pendingErasures.size) this.flushErasures();
+    if (this.pendingCsv) this.sync(this.pendingCsv);
+    return pending;
+  }
+
+  /** Whether a deleted person may still be in the log or the spreadsheet. */
+  stillHolds(lead) {
+    return this.pendingErasures.has(lead.phone) || this.pendingCsv !== null;
   }
 
   /**
-   * Erase a deleted person from the log: rewrite it without any line for their number, then
-   * append a deletion entry that carries only the id. The CSV is resynced by the caller.
+   * Erase a deleted person from the log: append a deletion entry that carries only the id (now, as
+   * ids can be reused), then rewrite the log without their lines. A failed rewrite stays pending
+   * and is retried. True if erased.
    */
   forget(lead) {
+    const until = new Date().toISOString();
+    this.record('lead.deleted', lead, ['id']);
+    this.pendingErasures.set(lead.phone, { id: lead.id, phone: lead.phone, until });
+    this.flushErasures();
+    return !this.pendingErasures.has(lead.phone);
+  }
+
+  flushErasures() {
+    for (const entry of [...this.pendingErasures.values()]) {
+      if (!this.scrub(entry)) break;
+      this.pendingErasures.delete(entry.phone);
+    }
+    this.savePending();
+    const n = this.pendingErasures.size;
+    if (n) {
+      this.problems.set('erasures', {
+        key: n,
+        text: `${this.logPath} still holds ${n} deleted registration${n === 1 ? '' : 's'}; retrying every ${CSV_RETRY_MS / 1000} seconds`,
+      });
+    } else {
+      this.problems.delete('erasures');
+    }
+  }
+
+  scrub(entry) {
     const tmp = `${this.logPath}.${randomBytes(6).toString('hex')}.tmp`;
     try {
       if (statSync(this.logPath).size > MAX_LOG_REWRITE_BYTES) throw new Error('log too large to rewrite');
-      const kept = readFileSync(this.logPath, 'utf8').split('\n').filter((line) => line && !mentionsPhone(line, lead.phone));
+      const kept = readFileSync(this.logPath, 'utf8').split('\n').filter((line) => line && !erases(line, entry));
       writeFileSync(tmp, kept.map((line) => `${line}\n`).join(''), { flag: 'wx', mode: 0o600 });
       // The append handle points at the old file; swap files, then reopen on the new one.
       closeSync(this.logFd);
@@ -156,6 +227,7 @@ export class LeadFiles {
       renameSync(tmp, this.logPath);
       this.logFd = openLog(this.logPath);
       this.problems.delete(this.logPath);
+      return true;
     } catch (e) {
       try {
         unlinkSync(tmp);
@@ -166,21 +238,20 @@ export class LeadFiles {
         } catch {}
       }
       this.fail(this.logPath, e);
-      return;
+      return false;
     }
-    this.record('lead.deleted', lead, ['id']);
   }
 
   fail(path, e) {
     // Messages carry random temp-file names, so a repeat is the same error code.
     const key = e.code ?? e.message;
     const repeat = this.problems.get(path)?.key === key;
-    this.problems.set(path, { key, message: e.message });
+    this.problems.set(path, { key, text: `${path} is not being updated: ${e.message}` });
     if (!repeat) this.onError(`not updated: ${path}: ${e.message}`);
   }
 
   warnings() {
-    return [...this.problems].map(([path, { message }]) => `${path} is not being updated: ${message}`);
+    return [...this.problems.values()].map(({ text }) => text);
   }
 
   close() {

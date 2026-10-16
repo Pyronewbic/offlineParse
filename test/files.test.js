@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, test } from 'node:test';
@@ -140,7 +140,7 @@ describe('lead files', () => {
     const infos = [];
     files = new LeadFiles({ csvPath, logPath, onError: (m) => errors.push(m), onInfo: (m) => infos.push(m) });
     store = new LeadStore(join(dir, 'leads.db'), { files });
-    assert.equal(files.retryCsv(), false, 'nothing pending after a good startup sync');
+    assert.equal(files.retry(), false, 'nothing pending after a good startup sync');
     // A non-empty directory at the path makes the rename fail, standing in for a file Excel holds open.
     unlinkSync(csvPath);
     mkdirSync(csvPath);
@@ -150,16 +150,16 @@ describe('lead files', () => {
     assert.equal(store.list().length, 2, 'sign-ups still saved');
     assert.equal(errors.length, 1, 'one warning, not one per failed write');
     assert.equal(files.warnings().length, 1);
-    assert.equal(files.retryCsv(), true, 'still blocked: retried');
+    assert.equal(files.retry(), true, 'still blocked: retried');
     assert.equal(errors.length, 1, 'a retry that fails the same way stays quiet');
 
     rmSync(csvPath, { recursive: true });
-    assert.equal(files.retryCsv(), true);
+    assert.equal(files.retry(), true);
     assert.equal(csvRows(csvPath).length, 2, 'both sign-ups reached the sheet');
     assert.deepEqual(files.warnings(), []);
     assert.equal(infos.length, 1);
     assert.match(infos[0], /updated again: .*leads\.csv/);
-    assert.equal(files.retryCsv(), false, 'nothing left to retry');
+    assert.equal(files.retry(), false, 'nothing left to retry');
   });
 
   test('on Windows a locked CSV is explained as open in another app', () => {
@@ -272,6 +272,99 @@ describe('deleting a registration', () => {
     assert.deepEqual(logEntries(paths().log).map((e) => [e.event, e.name ?? null]),
       [['lead.deleted', null], ['lead.created', 'Zanzibar Quokka'], ['lead.created', 'Ravi']]);
     assert.equal(files.warnings().length, 0);
+  });
+
+  const posix = process.platform !== 'win32' && process.getuid?.() !== 0;
+  // An unreadable log stands in for any failed rewrite (disk full, a file held open on Windows).
+  const blockLog = () => chmodSync(paths().log, 0o200);
+  const unblockLog = () => chmodSync(paths().log, 0o600);
+  const pendingPath = () => join(dir, 'pending-erasures.json');
+
+  test('a failed erasure stays reported after later sign-ups, and the retry finishes it', { skip: !posix && 'needs POSIX permissions' }, () => {
+    reg('Zanzibar Quokka', '+919111122222');
+    blockLog();
+    store.remove(1);
+    assert.equal(files.stillHolds({ phone: '+919111122222' }), true);
+    assert.ok(existsSync(pendingPath()), 'the pending erasure is on disk');
+    unblockLog();
+    reg('Asha Rao', '+919876543210');
+    assert.ok(files.warnings().some((w) => /leads\.log still holds 1 deleted registration; retrying every 15 seconds/.test(w)),
+      'a later successful sign-up does not clear the erasure warning');
+    assert.ok(readFileSync(paths().log, 'utf8').includes('Zanzibar Quokka'), 'positive control: still in the log');
+
+    assert.equal(files.retry(), true);
+    assert.ok(!rawEverywhere().includes('Zanzibar Quokka') && !rawEverywhere().includes('9111122222'), 'gone from every file');
+    assert.deepEqual(files.warnings(), []);
+    assert.equal(files.stillHolds({ phone: '+919111122222' }), false);
+    assert.ok(!existsSync(pendingPath()));
+    assert.deepEqual(logEntries(paths().log).map((e) => [e.event, e.id, e.name ?? null]),
+      [['lead.deleted', 1, null], ['lead.created', 1, 'Asha Rao']], 'the deletion is logged when it happened, before the id was reused');
+    assert.equal(files.retry(), false, 'nothing left');
+  });
+
+  test('a pending erasure survives a restart and is finished on startup', { skip: !posix && 'needs POSIX permissions' }, () => {
+    reg('Zanzibar Quokka', '+919111122222');
+    blockLog();
+    store.remove(1);
+    store.close();
+    files.close();
+    unblockLog();
+    open();
+    assert.ok(!readFileSync(paths().log, 'utf8').includes('Zanzibar Quokka'));
+    assert.ok(!existsSync(pendingPath()));
+    assert.deepEqual(files.warnings(), []);
+  });
+
+  test('a number that registers again while its erasure is pending keeps the new registration', { skip: !posix && 'needs POSIX permissions' }, async () => {
+    reg('Zanzibar Quokka', '+919111122222');
+    blockLog();
+    store.remove(1);
+    unblockLog();
+    await new Promise((r) => setTimeout(r, 5));
+    reg('Zara New', '+919111122222');
+    files.retry();
+    const log = readFileSync(paths().log, 'utf8');
+    assert.ok(!log.includes('Zanzibar Quokka'), 'the deleted registration is erased');
+    assert.ok(log.includes('Zara New'), 'the new registration of the same number is kept');
+  });
+
+  test('a corrupt pending-erasures file is reported, not trusted', () => {
+    store.close();
+    files.close();
+    for (const content of ['not json', '[{"id":1,"phone":"; rm -rf /","until":"x"}]', '{"id":1}']) {
+      writeFileSync(pendingPath(), content);
+      open();
+      assert.ok(files.warnings().some((w) => /pending-erasures\.json is not being updated: ignored/.test(w)), content);
+      store.close();
+      files.close();
+    }
+    open();
+  });
+
+  test('the admin page says when a deletion did not reach every file', { skip: !posix && 'needs POSIX permissions' }, async () => {
+    reg('Zanzibar Quokka', '+919111122222');
+    const server = createPortalServer(makeConfig(), store, { laptopIp: '127.0.0.1', quiet: true });
+    await new Promise((r) => server.listen(0, '127.0.0.1', r));
+    const { port } = server.address();
+    try {
+      const page = await request({ port, path: '/admin' });
+      const token = page.body.match(/name="token" value="([^"]+)"/)[1];
+      blockLog();
+      const res = await postForm(port, '/admin/delete', { id: '1', confirm: 'yes', token });
+      assert.equal(res.headers.location, '/admin?msg=deleted-partial');
+      unblockLog();
+      const after = await request({ port, path: res.headers.location });
+      assert.match(after.body, /class="flash" role="status">Registration deleted from the database\. The spreadsheet or the log still has it/);
+      reg('Asha Rao', '+919876543210');
+      files.retry();
+      reg('Ravi', '+919123456789');
+      const ravi = store.list().find((l) => l.name === 'Ravi');
+      const ok = await postForm(port, '/admin/delete', { id: String(ravi.id), confirm: 'yes', token });
+      assert.equal(ok.headers.location, '/admin?msg=deleted', 'positive control: a clean deletion says so');
+    } finally {
+      server.close();
+      server.closeAllConnections();
+    }
   });
 
   test('an unknown id deletes nothing', () => {

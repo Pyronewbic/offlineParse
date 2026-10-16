@@ -81,7 +81,7 @@ All in `data/`, readable only by your user account. Copy the folder to back up.
 - `leads.csv`: rewritten after every change, one row per number, sign-up time in IST. Don't open it while the booth runs (Excel on Windows locks it, and Save in any app writes back an old copy); open a **Download CSV** copy instead. If it was open, it catches up within 15 seconds of closing.
 - `leads.log`: one JSON line per registration or deletion, UTC timestamps.
 - A number registers once; repeats are refused.
-- **Delete** on the admin page erases a person from all three files and frees the number. Spreadsheets already copied elsewhere are not touched.
+- **Delete** on the admin page erases a person from all three files and frees the number. If a file cannot be updated, the admin page says so and the server keeps retrying, across restarts (`pending-erasures.json`). Spreadsheets already copied elsewhere are not touched.
 
 ## Other setups
 

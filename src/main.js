@@ -112,7 +112,7 @@ async function main(argv) {
     },
   });
   const timer = setInterval(() => follower.check().catch((e) => console.error(`address check failed: ${e.message}`)), ADDRESS_CHECK_MS);
-  const csvRetry = setInterval(() => files.retryCsv(), CSV_RETRY_MS);
+  const fileRetry = setInterval(() => files.retry(), CSV_RETRY_MS);
 
   console.log(`Laptop address:      ${address.ip} (${address.how})`);
   console.log(`Sign-up form:        ${server.portalUrl()}`);
@@ -129,7 +129,7 @@ async function main(argv) {
 
   const stop = () => {
     clearInterval(timer);
-    clearInterval(csvRetry);
+    clearInterval(fileRetry);
     server.close();
     server.closeAllConnections();
     dns?.sock.close();
