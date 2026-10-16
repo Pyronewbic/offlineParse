@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
-import { existsSync, lstatSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, test } from 'node:test';
-import { LeadFiles, leadsCsv, toIST, toISTShort } from '../src/files.js';
+import { LeadFiles, csvProblem, leadsCsv, toIST, toISTShort } from '../src/files.js';
 import { LeadStore } from '../src/leads.js';
 import { createPortalServer } from '../src/web.js';
 import { makeConfig, postForm, request } from './helpers.js';
@@ -134,6 +134,42 @@ describe('lead files', () => {
     assert.equal(logEntries(logPath).length, 1, 'log still written');
     assert.match(files.warnings()[0], /missing-dir\/leads\.csv is not being updated/);
     assert.ok(!existsSync(csvPath));
+  });
+
+  test('a blocked CSV catches up on retry, without waiting for the next sign-up, and warns once', () => {
+    const infos = [];
+    files = new LeadFiles({ csvPath, logPath, onError: (m) => errors.push(m), onInfo: (m) => infos.push(m) });
+    store = new LeadStore(join(dir, 'leads.db'), { files });
+    assert.equal(files.retryCsv(), false, 'nothing pending after a good startup sync');
+    // A non-empty directory at the path makes the rename fail, standing in for a file Excel holds open.
+    unlinkSync(csvPath);
+    mkdirSync(csvPath);
+    writeFileSync(join(csvPath, 'blocker'), '');
+    add();
+    add({ phone: '+919123456789', name: 'Ravi' });
+    assert.equal(store.list().length, 2, 'sign-ups still saved');
+    assert.equal(errors.length, 1, 'one warning, not one per failed write');
+    assert.equal(files.warnings().length, 1);
+    assert.equal(files.retryCsv(), true, 'still blocked: retried');
+    assert.equal(errors.length, 1, 'a retry that fails the same way stays quiet');
+
+    rmSync(csvPath, { recursive: true });
+    assert.equal(files.retryCsv(), true);
+    assert.equal(csvRows(csvPath).length, 2, 'both sign-ups reached the sheet');
+    assert.deepEqual(files.warnings(), []);
+    assert.equal(infos.length, 1);
+    assert.match(infos[0], /updated again: .*leads\.csv/);
+    assert.equal(files.retryCsv(), false, 'nothing left to retry');
+  });
+
+  test('on Windows a locked CSV is explained as open in another app', () => {
+    for (const code of ['EPERM', 'EBUSY', 'EACCES']) {
+      const e = Object.assign(new Error(`${code}: operation not permitted, rename`), { code });
+      assert.match(csvProblem(e, 'win32'), /open in another app \(probably Excel\)\. It catches up within 15 seconds/, code);
+      assert.equal(csvProblem(e, 'darwin'), e.message, `${code} elsewhere keeps the real error`);
+    }
+    const missing = Object.assign(new Error('ENOENT: no such file or directory'), { code: 'ENOENT' });
+    assert.equal(csvProblem(missing, 'win32'), missing.message);
   });
 
   test('simultaneous sign-ups are all recorded exactly once', async () => {

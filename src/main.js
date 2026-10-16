@@ -4,7 +4,7 @@ import { parseArgs } from 'node:util';
 import { BrandError, loadBrand } from './brand.js';
 import { ConfigError, loadConfig } from './config.js';
 import { explainPortError, rivalAddresses, startDnsOn as startDns } from './dnsbind.js';
-import { LeadFiles } from './files.js';
+import { CSV_RETRY_MS, LeadFiles } from './files.js';
 import { LeadStore } from './leads.js';
 import { AddressError, addressFollower, detectAddress, localAddresses } from './netaddr.js';
 import { createPortalServer, printable } from './web.js';
@@ -112,6 +112,7 @@ async function main(argv) {
     },
   });
   const timer = setInterval(() => follower.check().catch((e) => console.error(`address check failed: ${e.message}`)), ADDRESS_CHECK_MS);
+  const csvRetry = setInterval(() => files.retryCsv(), CSV_RETRY_MS);
 
   console.log(`Laptop address:      ${address.ip} (${address.how})`);
   console.log(`Sign-up form:        ${server.portalUrl()}`);
@@ -128,6 +129,7 @@ async function main(argv) {
 
   const stop = () => {
     clearInterval(timer);
+    clearInterval(csvRetry);
     server.close();
     server.closeAllConnections();
     dns?.sock.close();

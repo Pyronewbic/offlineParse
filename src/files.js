@@ -7,6 +7,18 @@ import { dirname, resolve } from 'node:path';
 const CSV_FORMULA_PREFIXES = ['=', '+', '-', '@', '\t', '\r'];
 const LOG_FIELDS = ['id', 'name', 'phone', 'source', 'eventCode'];
 const MAX_LOG_REWRITE_BYTES = 64 * 1024 * 1024;
+export const CSV_RETRY_MS = 15000;
+// Windows refuses to replace a file another app holds open, which is what Excel does with a CSV.
+const LOCKED_CODES = new Set(['EPERM', 'EBUSY', 'EACCES']);
+
+/** The reason a CSV rewrite failed, in words the operator can act on. */
+export function csvProblem(e, platform = process.platform) {
+  if (platform === 'win32' && LOCKED_CODES.has(e.code)) {
+    return `it is open in another app (probably Excel). It catches up within ${CSV_RETRY_MS / 1000} seconds of closing it; ` +
+      'use Download CSV on the admin page for a copy to open';
+  }
+  return e.message;
+}
 
 const openLog = (path) =>
   openSync(path, constants.O_WRONLY | constants.O_APPEND | constants.O_CREAT | (constants.O_NOFOLLOW ?? 0), 0o600);
@@ -75,11 +87,14 @@ export function leadsCsv(leads) {
  * is reported but never fails the sign-up.
  */
 export class LeadFiles {
-  constructor({ csvPath, logPath, onError = (msg) => console.error(msg) }) {
+  constructor({ csvPath, logPath, onError = (msg) => console.error(msg), onInfo = (msg) => console.log(msg), platform = process.platform }) {
     this.csvPath = resolve(csvPath);
     this.logPath = resolve(logPath);
     this.onError = onError;
+    this.onInfo = onInfo;
+    this.platform = platform;
     this.problems = new Map();
+    this.pendingCsv = null;
     mkdirSync(dirname(this.logPath), { recursive: true });
     // O_NOFOLLOW: a symlink planted at the log path must not redirect our writes (absent on Windows,
     // where creating a symlink needs admin rights anyway).
@@ -107,13 +122,22 @@ export class LeadFiles {
     try {
       writeFileSync(tmp, leadsCsv(leads), { flag: 'wx', mode: 0o600 });
       renameSync(tmp, this.csvPath);
-      this.problems.delete(this.csvPath);
+      this.pendingCsv = null;
+      if (this.problems.delete(this.csvPath)) this.onInfo(`updated again: ${this.csvPath}`);
     } catch (e) {
       try {
         unlinkSync(tmp);
       } catch {}
-      this.fail(this.csvPath, e);
+      this.pendingCsv = leads;
+      this.fail(this.csvPath, Object.assign(new Error(csvProblem(e, this.platform)), { code: e.code }));
     }
+  }
+
+  /** Retry a CSV rewrite that failed, without waiting for the next sign-up. True if one was pending. */
+  retryCsv() {
+    if (!this.pendingCsv) return false;
+    this.sync(this.pendingCsv);
+    return true;
   }
 
   /**
@@ -148,12 +172,15 @@ export class LeadFiles {
   }
 
   fail(path, e) {
-    this.problems.set(path, e.message);
-    this.onError(`not updated: ${path}: ${e.message}`);
+    // Messages carry random temp-file names, so a repeat is the same error code.
+    const key = e.code ?? e.message;
+    const repeat = this.problems.get(path)?.key === key;
+    this.problems.set(path, { key, message: e.message });
+    if (!repeat) this.onError(`not updated: ${path}: ${e.message}`);
   }
 
   warnings() {
-    return [...this.problems].map(([path, message]) => `${path} is not being updated: ${message}`);
+    return [...this.problems].map(([path, { message }]) => `${path} is not being updated: ${message}`);
   }
 
   close() {

@@ -78,7 +78,7 @@ npm start
 All in `data/`, readable only by your user account. Copy the folder to back up.
 
 - `leads.db`: the source of truth.
-- `leads.csv`: rewritten after every change, one row per number, sign-up time in IST. Excel does not refresh an open file; reopen it.
+- `leads.csv`: rewritten after every change, one row per number, sign-up time in IST. Don't open it while the booth runs (Excel on Windows locks it, and Save in any app writes back an old copy); open a **Download CSV** copy instead. If it was open, it catches up within 15 seconds of closing.
 - `leads.log`: one JSON line per registration or deletion, UTC timestamps.
 - A number registers once; repeats are refused.
 - **Delete** on the admin page erases a person from all three files and frees the number. Spreadsheets already copied elsewhere are not touched.
