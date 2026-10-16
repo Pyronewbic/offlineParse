@@ -60,7 +60,8 @@ export function toIST(iso) {
 function csvCell(value) {
   if (value === null || value === undefined) return '';
   const s = String(value);
-  return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  // ';' too: spreadsheets in semicolon locales would otherwise start a new, possibly formula, cell.
+  return /[",;\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 
 export const SOURCE_LABELS = { form: 'Wi-Fi form', whatsapp: 'WhatsApp message' };

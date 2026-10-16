@@ -321,6 +321,12 @@ describe('portal server', () => {
     assert.ok(row.includes(',+919876543210,'), row);
   });
 
+  test('CSV quotes a semicolon so semicolon-locale spreadsheets cannot split a name into a formula cell', async () => {
+    await postForm(port, '/submit', { ...VALID, name: 'Ravi;=1+1' });
+    const row = (await request({ port, path: '/admin/export.csv' })).body.split('\r\n')[1];
+    assert.ok(row.includes(',"Ravi;=1+1",'), row);
+  });
+
   test('admin is invisible from the Wi-Fi side', { skip: !lanAddress() && 'no LAN address on this machine' }, async () => {
     const host = lanAddress();
     const local = await request({ port, path: '/admin' });
