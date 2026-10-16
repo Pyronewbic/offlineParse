@@ -33,29 +33,30 @@ npm test
 
 Nothing in the WAN port. Join its Wi-Fi, open `http://192.168.0.1`, then:
 
-1. **Wireless:** SSID and password as in `config.json`.
-2. **Network > LAN:** IP `100.64.0.1`, mask `255.255.255.0`. Save; the router restarts, so rejoin and open `http://100.64.0.1`. (Android skips the sign-in sheet when DNS answers with a `192.168.x` address.)
-3. **DHCP > DHCP Settings:** start `100.64.0.100`, end `100.64.0.199`, **Primary DNS `100.64.0.2`**, Secondary DNS `0.0.0.0`. Save.
-4. Turn IPv6 off if there is a menu for it, then **System Tools > Reboot**.
+1. **System Tools > Password:** set a strong router admin password, different from the Wi-Fi password. Every guest can reach this page, and anyone who logs in can point the phones somewhere else.
+2. **Wireless:** SSID and password as in `config.json`.
+3. **Network > LAN:** IP `100.64.0.1`, mask `255.255.255.0`. Save; the router restarts, so rejoin and open `http://100.64.0.1`. (Android skips the sign-in sheet when DNS answers with a `192.168.x` address.)
+4. **DHCP > DHCP Settings:** start `100.64.0.100`, end `100.64.0.199`, **Primary DNS `100.64.0.2`**, Secondary DNS `0.0.0.0`. Save.
+5. Turn IPv6 off if there is a menu for it, then **System Tools > Reboot**.
 
 From now on reach the router by `http://100.64.0.1` only; `tplinkwifi.net` will open the form instead.
 
 ### QR codes
 
-- `npm run qr` writes `qr/wifi` and `qr/whatsapp` (`.svg` and `.png`) for the poster.
+- `npm run qr` writes `qr/wifi` and `qr/whatsapp` as `.svg` (print these; they stay sharp at any size) and `.png`.
 - `npm run qr:show` draws them in the terminal to scan off the screen (if a scan fails, zoom the terminal out).
 
 ## Event day
 
-Join the booth Wi-Fi, then:
+Guests share a network with this laptop, so quit what you don't need first (dev servers, Docker or VMs, file sharing; on a Mac turn off AirPlay Receiver). Then join the booth Wi-Fi:
 
 ```sh
 npm run booth-ip   # gives this laptop 100.64.0.2; asks for the admin password
 npm start
 ```
 
-- **Windows:** run `booth-ip` and `booth-ip:undo` in **Command Prompt** opened with **Run as administrator** (PowerShell may refuse to run npm). `booth-ip` also lets the booth network through Windows Firewall on ports 80 and 53; undo removes those rules. Turn off sleep for the day.
-- **macOS:** `booth-ip` switches Wi-Fi to the fixed booth address (macOS only lets a normal user answer DNS on all addresses, so it must be the only one). Allow incoming connections for `node` when asked. Keep it awake with `caffeinate -dims npm start`.
+- **Windows:** run `booth-ip` and `booth-ip:undo` in **Command Prompt** opened with **Run as administrator** (PowerShell may refuse to run npm). `booth-ip` also lets the booth network through Windows Firewall on ports 80 and 53; undo removes those rules, so the booth Wi-Fi can stay a **Public** network, which keeps Windows' other services blocked. Turn off sleep for the day.
+- **macOS:** `booth-ip` switches Wi-Fi to the fixed booth address (macOS only lets a normal user answer DNS on all addresses, so it must be the only one). Allow incoming connections for `node` if asked (signed apps may be let in without asking). Keep it awake with `caffeinate -dims npm start`.
 - **Linux:** ports 80 and 53 need root or `sudo setcap cap_net_bind_service=+ep "$(readlink -f "$(command -v node)")"`; open 80/tcp and 53/udp in the firewall.
 - `npm run booth-ip -- --dry-run` shows the command without running it; `--ip <address>` acts on an address other than `config.json`'s (e.g. to undo an old one). If `npm start` warns that the booth address is gone, run `npm run booth-ip` again.
 
