@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { connect } from 'node:net';
 import { networkInterfaces } from 'node:os';
 import { after, before, beforeEach, describe, test } from 'node:test';
 import { LeadStore } from '../src/leads.js';
@@ -326,5 +327,55 @@ describe('portal server', () => {
     assert.equal(store.list().length, 1);
     store.db.exec('DELETE FROM leads');
     assert.equal(store.list().length, 0);
+  });
+});
+
+describe('connection limits', () => {
+  let store;
+  let server;
+  let port;
+  before(async () => {
+    store = new LeadStore(':memory:');
+    server = createPortalServer(makeConfig(), store, { laptopIp: '127.0.0.1', quiet: true, idleTimeoutMs: 300, maxConnectionsPerAddress: 2 });
+    await new Promise((r) => server.listen(0, '127.0.0.1', r));
+    port = server.address().port;
+  });
+  after(() => {
+    server.close();
+    store.close();
+  });
+
+  const silentSocket = () => new Promise((resolvePromise, reject) => {
+    const socket = connect(port, '127.0.0.1', () => resolvePromise(socket));
+    socket.on('error', reject);
+    socket.gone = new Promise((r) => socket.once('close', () => r(Date.now())));
+  });
+
+  test('a socket that never sends a request is closed after the idle timeout', async () => {
+    const started = Date.now();
+    const socket = await silentSocket();
+    try {
+      const closedAt = await Promise.race([socket.gone, new Promise((r) => setTimeout(() => r(null), 3000))]);
+      assert.ok(closedAt, 'server closed the idle socket');
+      assert.ok(closedAt - started >= 250, 'not before the timeout');
+    } finally {
+      socket.destroy();
+    }
+  });
+
+  test('one address gets a bounded number of connections; others are refused until one closes', async (t) => {
+    const a = await silentSocket();
+    const b = await silentSocket();
+    const c = await silentSocket();
+    t.after(() => [a, b, c].forEach((s) => s.destroy()));
+    const cClosed = await Promise.race([c.gone, new Promise((r) => setTimeout(() => r(null), 200))]);
+    assert.ok(cClosed, 'third connection from the same address is dropped at once');
+    const aStillOpen = await Promise.race([a.gone.then(() => false), new Promise((r) => setTimeout(() => r(true), 100))]);
+    assert.ok(aStillOpen, 'the first two stay open');
+    a.destroy();
+    b.destroy();
+    await Promise.all([a.gone, b.gone]);
+    await new Promise((r) => setTimeout(r, 20));
+    assert.equal((await request({ port })).status, 200, 'positive control: a new request is served once slots free up');
   });
 });

@@ -358,7 +358,9 @@ function tokenMatches(given, expected) {
   return a.length === b.length && timingSafeEqual(a, b);
 }
 
-export function createPortalServer(cfg, store, { laptopIp, quiet = false, brand = { light: null, dark: null }, onRequest = null }) {
+export function createPortalServer(cfg, store, {
+  laptopIp, quiet = false, brand = { light: null, dark: null }, onRequest = null, idleTimeoutMs = 20_000, maxConnectionsPerAddress = 32,
+}) {
   const adminToken = randomBytes(32).toString('base64url');
   let portalHosts;
   let portalUrl;
@@ -487,6 +489,22 @@ export function createPortalServer(cfg, store, { laptopIp, quiet = false, brand 
   });
   server.requestTimeout = 15_000;
   server.headersTimeout = 10_000;
+  // A guest holding many silent sockets must not starve everyone else: idle ones close, and each
+  // address gets a bounded share.
+  server.timeout = idleTimeoutMs;
+  server.maxConnections = 1024;
+  const open = new Map();
+  server.on('connection', (socket) => {
+    const addr = socket.remoteAddress;
+    const count = (open.get(addr) ?? 0) + 1;
+    if (count > maxConnectionsPerAddress) return socket.destroy();
+    open.set(addr, count);
+    socket.once('close', () => {
+      const left = open.get(addr) - 1;
+      if (left > 0) open.set(addr, left);
+      else open.delete(addr);
+    });
+  });
   setLaptopIp(laptopIp);
   server.on('listening', () => setLaptopIp(laptopIp));
   server.portalUrl = () => portalUrl;

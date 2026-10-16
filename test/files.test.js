@@ -174,7 +174,8 @@ describe('lead files', () => {
 
   test('simultaneous sign-ups are all recorded exactly once', async () => {
     open();
-    const server = createPortalServer(makeConfig(), store, { laptopIp: '127.0.0.1', quiet: true });
+    // One test client stands in for 50 phones, so the per-address limits are lifted here.
+    const server = createPortalServer(makeConfig(), store, { laptopIp: '127.0.0.1', quiet: true, maxConnectionsPerAddress: 100 });
     await new Promise((r) => server.listen(0, '127.0.0.1', r));
     const { port } = server.address();
     try {
