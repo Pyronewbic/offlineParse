@@ -29,7 +29,12 @@ npm test
 | `logoLight`, `logoDark` | PNG logos for light and dark phones; empty shows `orgName` |
 | `noticeVersion` | Recorded with each registration; change it when the consent wording changes |
 
-### Router (TP-Link TL-WR845N; other routers have the same settings)
+### Router (TP-Link TL-WR845N)
+
+The booth router is already set up: nothing in the WAN port, admin page at `http://100.64.0.1` (not `tplinkwifi.net`, which opens the form). Its Wi-Fi name and password are in `config.json`. If it stops giving laptops or phones an address, reboot it (**System Tools > Reboot**).
+
+<details>
+<summary>Setting up a router from scratch (after a factory reset, or for another router)</summary>
 
 Nothing in the WAN port. Join its Wi-Fi, open `http://192.168.0.1`, then:
 
@@ -40,6 +45,8 @@ Nothing in the WAN port. Join its Wi-Fi, open `http://192.168.0.1`, then:
 5. Turn IPv6 off if there is a menu for it, then **System Tools > Reboot**.
 
 From now on reach the router by `http://100.64.0.1` only; `tplinkwifi.net` will open the form instead.
+
+</details>
 
 ### QR codes
 
