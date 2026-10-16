@@ -270,7 +270,7 @@ ${adminHeader(cfg, brand, 'Delete registration')}
 <h2>Delete this registration?</h2>
 <p><strong>${esc(lead.name)}</strong>, <span class="nowrap">${esc(displayPhone(lead.phone))}</span>, signed up ${esc(toISTShort(lead.createdAt))} IST.</p>
 <p>This removes them from the database, the spreadsheet and the log. It cannot be undone. Spreadsheets you
-already downloaded or copied are not changed.</p>
+already downloaded or copied, and backups of this laptop, are not changed.</p>
 <form method="post" action="/admin/delete">${hidden(token, lead.id)}<input type="hidden" name="confirm" value="yes">
 <div class="buttons"><a class="btn secondary" href="/admin" autofocus>Cancel</a>
 <button class="danger" type="submit">Delete registration</button></div></form>

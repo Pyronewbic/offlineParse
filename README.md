@@ -76,7 +76,7 @@ npm start
 
 ## Data
 
-All in `data/`, readable only by your user account. Copy the folder to back up.
+All in `data/`, readable only by your user account on macOS and Linux. Copy the folder to back up. On a Mac `npm start` keeps `data/` out of Time Machine so deletions stick; on Windows keep the repo out of OneDrive and File History.
 
 - `leads.db`: the source of truth.
 - `leads.csv`: rewritten after every change, one row per number, sign-up time in IST. Don't open it while the booth runs (Excel on Windows locks it, and Save in any app writes back an old copy); open a **Download CSV** copy instead. If it was open, it catches up within 15 seconds of closing.

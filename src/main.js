@@ -1,6 +1,7 @@
 import { dirname, join } from 'node:path';
 import { isIPv4 } from 'node:net';
 import { parseArgs } from 'node:util';
+import { excludeFromBackups } from './backup.js';
 import { BrandError, loadBrand } from './brand.js';
 import { ConfigError, loadConfig } from './config.js';
 import { explainPortError, rivalAddresses, startDnsOn as startDns } from './dnsbind.js';
@@ -71,6 +72,8 @@ async function main(argv) {
     return 1;
   }
   const store = new LeadStore(cfg.dbPath, { files });
+  const backupWarning = excludeFromBackups(dataDir);
+  if (backupWarning) console.error(`WARNING ${printable(backupWarning)}`);
   const trace = values.verbose ? (line) => console.log(`${new Date().toISOString().slice(11, 19)} ${line}`) : null;
   const onQuery = trace && ((name, from, answered) => trace(`dns  ${printable(from)} asked ${printable(name ?? '(malformed)')}${answered ? '' : ' (no answer)'}`));
   const onRequest = trace && ((from, method, host, url) => trace(`http ${printable(from)} ${printable(method)} ${printable(host)}${printable(url)}`));
