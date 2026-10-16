@@ -31,7 +31,7 @@ On each phone, forget the booth Wi-Fi first, then scan the Wi-Fi QR with the cam
 
 ## Event day
 
-- [ ] Router on, laptop plugged in and on the booth Wi-Fi.
+- [ ] Router on, laptop plugged in and on the booth Wi-Fi. Turn off Auto-Join for your other Wi-Fi networks so the laptop does not switch back to one with internet. "No internet connection" on the booth Wi-Fi is normal.
 - [ ] `npm run booth-ip`, then `npm start`.
 - [ ] One test registration from a phone, then delete it on the admin page.
 - [ ] Watch sign-ups on the admin page. For a spreadsheet, use **Download CSV** and open that copy, never `data/leads.csv` itself.

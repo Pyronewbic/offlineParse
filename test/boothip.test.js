@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
-import { BoothIpError, applyBoothIp, parseServiceOrder, planBoothIp, prefixToMask, sameSubnet } from '../src/boothip.js';
+import { BoothIpError, applyBoothIp, parseServiceOrder, planBoothIp, planWhenReady, prefixToMask, sameSubnet } from '../src/boothip.js';
 
 const BOOTH = '192.168.88.2';
 const wifi = (name = 'en0', address = '192.168.88.8') => ({ name, address, connected: true, usable: true });
@@ -110,10 +110,28 @@ describe('planBoothIp', () => {
 
   test('refuses when the laptop is not on the booth network, or on it twice', () => {
     assert.throws(() => plan({ addresses: [loopback, wifi('en0', '10.0.0.5')] }),
-      (e) => e instanceof BoothIpError && /no network adapter is on 192\.168\.88\.0\/24; join the booth Wi-Fi/.test(e.message));
+      (e) => e instanceof BoothIpError && e.code === 'NO_BOOTH_NETWORK' && /no network adapter is on 192\.168\.88\.0\/24\./.test(e.message));
     assert.throws(() => plan({ addresses: [wifi('en0'), wifi('en7', '192.168.88.40')] }), /several adapters .*en0, en7/);
     const linkLocal = { name: 'en0', address: '192.168.88.9', connected: false, usable: false };
     assert.throws(() => plan({ addresses: [linkLocal] }), /no network adapter/, 'a disconnected entry does not count');
+  });
+
+  test('says what each adapter has instead, and what to do', () => {
+    const msg = (addresses) => {
+      try {
+        plan({ addresses });
+      } catch (e) {
+        return e.message;
+      }
+      return assert.fail('expected a refusal');
+    };
+    assert.match(msg([loopback, wifi('en0', '10.0.0.5')]),
+      /en0 is on 10\.0\.0\.5, a different network: join the booth Wi-Fi \(if the laptop keeps switching back, turn off Auto-Join/);
+    assert.match(msg([loopback, { name: 'en0', address: '169.254.12.7', connected: false, usable: false }]),
+      /en0 has only a temporary 169\.254\.12\.7 address, so the router has not given it one yet: turn Wi-Fi off and on/);
+    assert.match(msg([loopback]), /No adapter has an address: join the booth Wi-Fi\./);
+    const vpn = { name: 'utun3', address: '100.100.1.1', connected: true, usable: false };
+    assert.ok(!msg([loopback, vpn, wifi('en0', '10.0.0.5')]).includes('utun3'), 'VPN and virtual adapters are not mentioned');
   });
 
   test('refuses configs and flags it cannot honour', () => {
@@ -179,5 +197,34 @@ describe('applyBoothIp', () => {
   test('undo is verified the same way', async () => {
     await harness({ undo: true, appearsAfter: 1 }).promise;
     await assert.rejects(harness({ undo: true, appearsAfter: 99 }).promise, /is still on this machine/);
+  });
+});
+
+describe('planWhenReady', () => {
+  const noNetwork = () => Object.assign(new BoothIpError('no network adapter is on x'), { code: 'NO_BOOTH_NETWORK' });
+
+  test('waits for a just-joined Wi-Fi to get its address, telling the operator once', async () => {
+    let calls = 0;
+    const waits = [];
+    const slept = [];
+    const result = await planWhenReady({
+      plan: () => (++calls < 4 ? (() => { throw noNetwork(); })() : 'planned'),
+      sleep: async (ms) => slept.push(ms), onWait: () => waits.push('waiting'),
+    });
+    assert.equal(result, 'planned');
+    assert.equal(calls, 4);
+    assert.deepEqual(waits, ['waiting']);
+    assert.deepEqual(slept, [1000, 1000, 1000]);
+  });
+
+  test('gives up after the attempts with the last message, and never waits on other errors', async () => {
+    let calls = 0;
+    await assert.rejects(planWhenReady({ plan: () => { calls++; throw noNetwork(); }, sleep: async () => {}, attempts: 5 }),
+      /no network adapter is on x/);
+    assert.equal(calls, 5);
+    calls = 0;
+    await assert.rejects(planWhenReady({ plan: () => { calls++; throw new BoothIpError('--prefix must be'); }, sleep: async () => {} }),
+      /--prefix/);
+    assert.equal(calls, 1, 'a config error is reported at once');
   });
 });

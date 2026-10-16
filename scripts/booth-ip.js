@@ -2,7 +2,7 @@
 // points at it whoever's laptop runs the booth. `--undo` takes it away again (needed on macOS and Windows).
 import { spawnSync } from 'node:child_process';
 import { parseArgs } from 'node:util';
-import { BoothIpError, applyBoothIp, parseServiceOrder, planBoothIp } from '../src/boothip.js';
+import { BoothIpError, applyBoothIp, parseServiceOrder, planBoothIp, planWhenReady } from '../src/boothip.js';
 import { ConfigError, loadConfig } from '../src/config.js';
 import { localAddresses } from '../src/netaddr.js';
 
@@ -32,14 +32,19 @@ try {
 
 // --ip names a different address, e.g. to undo an old booth address after config.json changed.
 const boothIp = values.ip ?? cfg.laptopIp;
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let plan;
 try {
-  plan = planBoothIp({
-    platform: process.platform, addresses: localAddresses(), boothIp,
-    undo: values.undo, prefix: Number(values.prefix), gateway: values.gateway, ports: { http: cfg.httpPort, dns: cfg.dnsPort },
-    services: process.platform === 'darwin'
-      ? parseServiceOrder(spawnSync('networksetup', ['-listnetworkserviceorder'], { encoding: 'utf8' }).stdout ?? '')
-      : undefined,
+  plan = await planWhenReady({
+    plan: () => planBoothIp({
+      platform: process.platform, addresses: localAddresses(), boothIp,
+      undo: values.undo, prefix: Number(values.prefix), gateway: values.gateway, ports: { http: cfg.httpPort, dns: cfg.dnsPort },
+      services: process.platform === 'darwin'
+        ? parseServiceOrder(spawnSync('networksetup', ['-listnetworkserviceorder'], { encoding: 'utf8' }).stdout ?? '')
+        : undefined,
+    }),
+    sleep,
+    onWait: () => console.log('Waiting up to 20 seconds for the booth Wi-Fi to give this laptop an address...'),
   });
 } catch (e) {
   if (!(e instanceof BoothIpError)) throw e;
@@ -70,7 +75,7 @@ try {
     },
     hasAddress: () => localAddresses().some((a) => a.address === boothIp),
     log: (line) => console.log(line),
-    sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
+    sleep,
   });
 } catch (e) {
   if (!(e instanceof BoothIpError)) throw e;

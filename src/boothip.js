@@ -56,6 +56,29 @@ function undoSteps(platform, iface, ip, prefix, services) {
   throw new BoothIpError(`booth-ip does not support ${platform}`);
 }
 
+/** What the adapters have instead of a booth address, and what to do about it. */
+function whatIsThere(addresses) {
+  const real = addresses.filter((a) => !a.address.startsWith('127.') && (a.usable || !a.connected));
+  if (real.length === 0) return 'No adapter has an address: join the booth Wi-Fi.';
+  return real.map((a) => (a.connected
+    ? `${a.name} is on ${a.address}, a different network: join the booth Wi-Fi (if the laptop keeps switching back, turn off Auto-Join for that network).`
+    : `${a.name} has only a temporary ${a.address} address, so the router has not given it one yet: turn Wi-Fi off and on and rejoin the booth Wi-Fi.`))
+    .join(' ');
+}
+
+/** Plan, giving a just-joined Wi-Fi time to get its address from the router before giving up. */
+export async function planWhenReady({ plan, sleep, attempts = 20, onWait = () => {} }) {
+  for (let i = 1; ; i++) {
+    try {
+      return plan();
+    } catch (e) {
+      if (e.code !== 'NO_BOOTH_NETWORK' || i >= attempts) throw e;
+      if (i === 1) onWait();
+      await sleep(1000);
+    }
+  }
+}
+
 /**
  * Work out the commands that give this machine the booth address (or take it away with undo).
  * Pure: `addresses` comes from netaddr.localAddresses(), so tests can describe any machine.
@@ -84,7 +107,9 @@ export function planBoothIp({ platform, addresses, boothIp, undo = false, prefix
   if (holder) return { iface: holder.name, steps: [], note: `${boothIp} is already on ${holder.name}. Run npm start.` };
 
   const names = [...new Set(addresses.filter((a) => a.connected && sameSubnet(a.address, boothIp, prefix)).map((a) => a.name))];
-  if (names.length === 0) throw new BoothIpError(`no network adapter is on ${subnet}; join the booth Wi-Fi first`);
+  if (names.length === 0) {
+    throw Object.assign(new BoothIpError(`no network adapter is on ${subnet}. ${whatIsThere(addresses)}`), { code: 'NO_BOOTH_NETWORK' });
+  }
   if (names.length > 1) {
     throw new BoothIpError(`several adapters are on ${subnet} (${names.join(', ')}); disconnect all but the booth Wi-Fi`);
   }
