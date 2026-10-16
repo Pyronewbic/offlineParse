@@ -73,6 +73,29 @@ describe('buildResponse', () => {
   });
 });
 
+test('a packet from source port 0 is dropped and the server keeps answering', async () => {
+  const seen = [];
+  const server = await startCatchAllDns({ answerIp: '10.1.2.3', host: '127.0.0.1', port: 0, onQuery: (name, _from, answered) => seen.push([name, answered]) });
+  const client = dgram.createSocket('udp4');
+  try {
+    server.emit('message', query('captive.apple.com'), { address: '127.0.0.1', port: 0, family: 'IPv4', size: 0 });
+    server.emit('message', Buffer.alloc(12), { address: '127.0.0.1', port: 0, family: 'IPv4', size: 12 });
+    assert.deepEqual(seen, [['captive.apple.com', false], [null, false]], 'seen but not answered');
+    const answer = await new Promise((resolvePromise, reject) => {
+      const timer = setTimeout(() => reject(new Error('no answer after the port-0 packets')), 2000);
+      client.once('message', (msg) => {
+        clearTimeout(timer);
+        resolvePromise(msg);
+      });
+      client.send(query('example.com'), server.address().port, '127.0.0.1');
+    });
+    assert.deepEqual([...answer.subarray(answer.length - 4)], [10, 1, 2, 3]);
+  } finally {
+    server.close();
+    client.close();
+  }
+});
+
 const lanAddress = Object.values(networkInterfaces()).flat().find((a) => a && a.family === 'IPv4' && !a.internal)?.address;
 
 test('bound to one address, replies come from that address', { skip: !lanAddress && 'no LAN address' }, async () => {

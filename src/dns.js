@@ -97,9 +97,15 @@ export function startCatchAllDns({ answerIp, host = '0.0.0.0', port = 53, ttl = 
     ipBytes = ipv4Bytes(ip);
   };
   sock.on('message', (msg, rinfo) => {
-    const response = buildResponse(msg, ipBytes, ttl);
+    // Source port 0 cannot be answered, and dgram throws on it synchronously, which would end the process.
+    const response = rinfo.port === 0 ? null : buildResponse(msg, ipBytes, ttl);
     if (onQuery) onQuery(queryName(msg), rinfo.address, Boolean(response));
-    if (response) sock.send(response, rinfo.port, rinfo.address, () => {});
+    if (!response) return;
+    try {
+      sock.send(response, rinfo.port, rinfo.address, () => {});
+    } catch (e) {
+      console.error(`dns: ${e.message}`);
+    }
   });
   return new Promise((resolvePromise, reject) => {
     sock.once('error', reject);
