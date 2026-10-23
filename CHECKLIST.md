@@ -4,7 +4,7 @@ For whoever runs the booth. Commands and fixes are in the [README](README.md).
 
 ## Dry run (once, with the real router, the laptop and two phones)
 
-- [ ] Router set up as in the README: its own admin password set, LAN `100.64.0.1`, DHCP Primary DNS `100.64.0.2`, rebooted, nothing in the WAN port.
+- [ ] Router set up as in the README: its own admin password set, LAN `100.64.0.1`, DHCP pool `100.64.0.10` to `.250` with a 10-minute lease, Primary DNS `100.64.0.2`, rebooted, nothing in the WAN port.
 - [ ] `config.json`: `wifiSsid` and `wifiPassword` match the router, `laptopIp` is `"100.64.0.2"`.
 - [ ] Laptop on the booth Wi-Fi: `npm run booth-ip`, then `npm start -- --verbose`. The `DNS:` line shows `100.64.0.2` and there are no `WARNING` lines.
 - [ ] `npm run qr` and print `qr/wifi.svg` (and `qr/whatsapp.svg` if used). Delete any old `qr/register.*` files.

@@ -31,7 +31,7 @@ npm test
 
 ### Router (TP-Link TL-WR845N)
 
-The booth router is already set up: nothing in the WAN port, admin page at `http://100.64.0.1` (not `tplinkwifi.net`, which opens the form). Its Wi-Fi name and password are in `config.json`. If it stops giving laptops or phones an address, reboot it (**System Tools > Reboot**).
+The booth router is already set up: nothing in the WAN port, admin page at `http://100.64.0.1` (not `tplinkwifi.net`, which opens the form). Its Wi-Fi name and password are in `config.json`. Each address stays taken for the whole lease time after a phone leaves, so **DHCP > DHCP Settings** must have the pool `100.64.0.10` to `100.64.0.250` and a lease time of `10` minutes (the TP-Link default of 120 ran out at about 100 guests). If phones stop getting the sign-in sheet, **DHCP > DHCP Clients List** shows how many addresses are taken; reboot the router (**System Tools > Reboot**) to clear them.
 
 <details>
 <summary>Setting up a router from scratch (after a factory reset, or for another router)</summary>
@@ -41,7 +41,7 @@ Nothing in the WAN port. Join its Wi-Fi, open `http://192.168.0.1`, then:
 1. **System Tools > Password:** set a strong router admin password, different from the Wi-Fi password. Every guest can reach this page, and anyone who logs in can point the phones somewhere else.
 2. **Wireless:** SSID and password as in `config.json`.
 3. **Network > LAN:** IP `100.64.0.1`, mask `255.255.255.0`. Save; the router restarts, so rejoin and open `http://100.64.0.1`. (Android skips the sign-in sheet when DNS answers with a `192.168.x` address.)
-4. **DHCP > DHCP Settings:** start `100.64.0.100`, end `100.64.0.199`, **Primary DNS `100.64.0.2`**, Secondary DNS `0.0.0.0`. Save.
+4. **DHCP > DHCP Settings:** start `100.64.0.10`, end `100.64.0.250`, lease time `10` minutes, **Primary DNS `100.64.0.2`**, Secondary DNS `0.0.0.0`. Save.
 5. Turn IPv6 off if there is a menu for it, then **System Tools > Reboot**.
 
 From now on reach the router by `http://100.64.0.1` only; `tplinkwifi.net` will open the form instead.
@@ -70,7 +70,7 @@ npm start
 **Admin:** `http://localhost/admin` on the laptop only. Newest first, search by name or any part of the number, add, delete, and **Download CSV**. Press **Refresh** for new sign-ups.
 
 **Phone says "no internet" instead of opening the form:** run `npm start -- --verbose`, then forget and rejoin the Wi-Fi on the phone. Each DNS question and web request is printed.
-- Nothing printed: the phone is not asking the laptop. Check the router's DHCP Primary DNS is `100.64.0.2` (saved, router rebooted) and the phone's Private DNS is Off or Automatic.
+- Nothing printed: the phone is not asking the laptop. If the phone shows a `169.254` address or none, the router's addresses ran out (see Router above). Otherwise check the router's DHCP Primary DNS is `100.64.0.2` (saved, router rebooted) and the phone's Private DNS is Off or Automatic.
 - `dns` lines but no `http` lines: the phone resolved to the laptop but could not connect; check the laptop firewall allows `node`.
 
 **Do a dry run first** with [CHECKLIST.md](CHECKLIST.md), the one-page list for whoever runs the booth.
