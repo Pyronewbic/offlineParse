@@ -172,7 +172,7 @@ export function thanksPage(cfg, name, phone, brand = NO_BRAND) {
   return portalPage(cfg, brand, "You're registered", `
 <h1>You're registered, ${esc(firstName(name))}!</h1>
 <p class="lede">We've got you down as <strong>${esc(name)}</strong> on <strong class="nowrap">${esc(displayPhone(phone))}</strong>.</p>
-<p>You can disconnect from this Wi-Fi now so your phone goes back to mobile data.</p>`, `
+<p>You can leave this Wi-Fi now: in Wi-Fi settings, tap this network, then <strong>Forget This Network</strong> (iPhone) or <strong>Forget</strong> (Android).</p>`, `
 <p class="notice">Changed your mind? Reach out to us at the desk and we'll delete your details.</p>`);
 }
 

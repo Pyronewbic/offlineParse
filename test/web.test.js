@@ -134,6 +134,8 @@ describe('portal server', () => {
   test('the thank-you page shows the number in readable groups', async () => {
     const res = await postForm(port, '/submit', VALID);
     assert.match(res.body, /<strong class="nowrap">\+91 98765 43210<\/strong>/);
+    assert.match(res.body, /<strong>Forget This Network<\/strong> \(iPhone\) or <strong>Forget<\/strong> \(Android\)/,
+      'guests are told to forget the network, so their phone stops holding a router address');
   });
 
   test('re-rendered form escapes what the user typed', async () => {
