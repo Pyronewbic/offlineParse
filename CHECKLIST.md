@@ -4,42 +4,31 @@ For whoever runs the booth. Commands and fixes are in the [README](README.md).
 
 ## Dry run (once, with the real router, the laptop and two phones)
 
-- [ ] Router set up as in the README: its own admin password set, LAN `100.64.0.1`, DHCP pool `100.64.0.10` to `.250` with a 10-minute lease, Primary DNS `100.64.0.2`, rebooted, nothing in the WAN port.
-- [ ] `config.json`: `wifiSsid` and `wifiPassword` match the router, `laptopIp` is `"100.64.0.2"`.
-- [ ] Laptop on the booth Wi-Fi: `npm run booth-ip`, then `npm start -- --verbose`. The `DNS:` line shows `100.64.0.2` and there are no `WARNING` lines.
-- [ ] `npm run qr` and print `qr/wifi.svg` (and `qr/whatsapp.svg` if used). Delete any old `qr/register.*` files.
-- [ ] Only the booth server is open to guests: with `npm start` running, `lsof -nP -iTCP -sTCP:LISTEN` (Mac) or `netstat -ano -p TCP | findstr LISTENING` (Windows) lists node on port 80. Quit any app of yours that also shows `*` or `0.0.0.0` (the system's own entries, such as `rapportd` on a Mac or Windows services while the Wi-Fi is Public, can stay).
+- [ ] Router settings match the README's Router section; `wifiSsid` and `wifiPassword` in `config.json` match the router.
+- [ ] On the booth Wi-Fi: `npm run booth-ip`, then `npm start -- --verbose`. The `DNS:` line shows `100.64.0.2` and there is no `WARNING`.
+- [ ] `npm run qr`, print `qr/wifi.svg` with the text from the README under it.
+- [ ] Only the booth is open to guests: `lsof -nP -iTCP -sTCP:LISTEN` (Mac) or `netstat -ano -p TCP | findstr LISTENING` (Windows) shows nothing of yours on `*` or `0.0.0.0` except node.
 
-On each phone, forget the booth Wi-Fi first, then scan the Wi-Fi QR with the camera:
+On each phone, forget the booth Wi-Fi, then scan the Wi-Fi QR:
 
-- [ ] **Android:** "Sign in to Wi-Fi network" appears with no "no internet" question. The terminal shows `connectivitycheck.gstatic.com/generate_204`.
-- [ ] **iPhone** (iOS 26, plus an older iOS if you can): the sign-in sheet opens within about 10 seconds. The terminal shows `captive.apple.com/hotspot-detect.html`.
-- [ ] Register a test name: the thank-you page shows, the name is on `http://localhost/admin`, and the same number a second time is refused. Delete the test entry.
-- [ ] iPhone: the sheet only offers **Cancel**, which Apple says leaves the Wi-Fi. Try it after registering and note what happens, so desk staff know what to tell guests.
-- [ ] iPhone with iCloud Private Relay on: an alert about Private Relay may appear; the form should still open.
-- [ ] If you use the WhatsApp QR: with mobile data off it still opens a chat with the message filled in.
-- [ ] If the sheet does not open, follow "Phone says no internet" in the README.
+- [ ] **Android:** "Sign in" appears (as a pop-up or in the notification shade), and the terminal shows `generate_204`.
+- [ ] **iPhone:** the sign-in sheet opens within about 10 seconds, and the terminal shows `hotspot-detect.html`.
+- [ ] Register a test name: the thank-you page shows, the name is on the admin page, the same number again is refused. Delete it.
+- [ ] WhatsApp QR (if used): with mobile data off it opens a chat with the message filled in.
 
-**Windows laptop:**
-
-- [ ] `booth-ip` and `booth-ip:undo` run in Command Prompt opened with **Run as administrator**. "No rules match the specified criteria" on the first run is expected.
-- [ ] `npm start` runs in a normal Command Prompt. If it says a port is taken, do what the message says.
-- [ ] Sleep is off while plugged in (Settings, System, Power).
-- [ ] After `npm run booth-ip:undo`, `ipconfig /all` shows DHCP Enabled as Yes for the Wi-Fi, and home Wi-Fi works again.
-
-**Mac laptop:** run `caffeinate -dims npm start` so it stays awake.
+**Windows:** the commands run in an administrator Command Prompt ("No rules match the specified criteria" on the first run is fine); sleep is off; after `npm run booth-ip:undo`, home Wi-Fi works again.
 
 ## Event day
 
-- [ ] Router on, laptop plugged in and on the booth Wi-Fi. Turn off Auto-Join for your other Wi-Fi networks so the laptop does not switch back to one with internet. "No internet connection" on the booth Wi-Fi is normal.
-- [ ] `npm run booth-ip`, then `npm start`.
-- [ ] One test registration from a phone, then delete it on the admin page.
-- [ ] If a guest sees no sign-in: pull down the notification shade and tap **Sign in** (Samsung: Wi-Fi settings, the network's gear icon). Still nothing: turn off mobile data and open `http://100.64.0.2`. iPhone guests should not tap Cancel until they are registered.
-- [ ] Watch sign-ups on the admin page. For a spreadsheet, use **Download CSV** and open that copy, never `data/leads.csv` itself.
-- [ ] Glance at the terminal now and then: if it warns the booth address is gone, run `npm run booth-ip` again.
+- [ ] Router on; laptop plugged in, on the booth Wi-Fi, with Auto-Join off for your other networks. "No internet connection" is normal.
+- [ ] `npm run booth-ip`, then `npm start` (Mac: `caffeinate -dims npm start`).
+- [ ] One test registration from a phone, then delete it.
+- [ ] Guests with no sign-in: follow the poster text (Samsung: Wi-Fi settings, the network's gear icon).
+- [ ] Watch sign-ups on the admin page; for a spreadsheet use **Download CSV**, never `data/leads.csv`.
+- [ ] If the terminal warns the booth address is gone, run `npm run booth-ip` again.
 
 ## After the event
 
-- [ ] Stop the server (Ctrl+C), then `npm run booth-ip:undo` (required on macOS and Windows).
-- [ ] **Download CSV** on the admin page and copy the `data/` folder somewhere safe.
+- [ ] Stop the server (Ctrl+C), then `npm run booth-ip:undo`.
+- [ ] **Download CSV** and copy `data/` somewhere safe.
 - [ ] Add anyone who registered by WhatsApp on the admin page.
