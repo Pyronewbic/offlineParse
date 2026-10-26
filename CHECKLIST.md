@@ -34,6 +34,7 @@ On each phone, forget the booth Wi-Fi first, then scan the Wi-Fi QR with the cam
 - [ ] Router on, laptop plugged in and on the booth Wi-Fi. Turn off Auto-Join for your other Wi-Fi networks so the laptop does not switch back to one with internet. "No internet connection" on the booth Wi-Fi is normal.
 - [ ] `npm run booth-ip`, then `npm start`.
 - [ ] One test registration from a phone, then delete it on the admin page.
+- [ ] If a guest sees no sign-in: pull down the notification shade and tap **Sign in** (Samsung: Wi-Fi settings, the network's gear icon). Still nothing: turn off mobile data and open `http://100.64.0.2`. iPhone guests should not tap Cancel until they are registered.
 - [ ] Watch sign-ups on the admin page. For a spreadsheet, use **Download CSV** and open that copy, never `data/leads.csv` itself.
 - [ ] Glance at the terminal now and then: if it warns the booth address is gone, run `npm run booth-ip` again.
 

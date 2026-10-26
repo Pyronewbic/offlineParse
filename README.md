@@ -53,6 +53,12 @@ From now on reach the router by `http://100.64.0.1` only; `tplinkwifi.net` will 
 - `npm run qr` writes `qr/wifi` and `qr/whatsapp` as `.svg` (print these; they stay sharp at any size) and `.png`.
 - `npm run qr:show` draws them in the terminal to scan off the screen (if a scan fails, zoom the terminal out).
 
+Print this under the Wi-Fi code. Many Android phones only put "Sign in" in the notification shade, and with mobile data on, a typed address goes over mobile data instead of the booth Wi-Fi.
+
+> **Scan to join, then tap "Sign in"** (pull down from the top of the screen if it does not pop up).
+> Nothing? Turn off mobile data, then open **http://100.64.0.2**
+> iPhone: register first, then tap Cancel to leave.
+
 ## Event day
 
 Guests share a network with this laptop, so quit what you don't need first (dev servers, Docker or VMs, file sharing; on a Mac turn off AirPlay Receiver). Then join the booth Wi-Fi:
