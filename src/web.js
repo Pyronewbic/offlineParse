@@ -24,12 +24,42 @@ const CSP = "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; form
 // The LCQ runner page alone runs a script: its own, which reloads the page when something changes.
 const RUNNER_CSP = CSP.replace("default-src 'none';", "default-src 'none'; script-src 'self'; connect-src 'self';");
 const RUNNER_JS = `(() => {
-  const version = document.getElementById('version').dataset.version;
-  const busy = () => ['INPUT', 'SELECT', 'TEXTAREA'].includes(document.activeElement && document.activeElement.tagName);
+  // Folded sections are remembered per tablet; storage can throw (private mode), so it is best effort.
+  const KEY = 'lcq-open';
+  const load = () => { try { return JSON.parse(localStorage.getItem(KEY)) || {}; } catch { return {}; } };
+  const save = (s) => { try { localStorage.setItem(KEY, JSON.stringify(s)); } catch {} };
+  const apply = () => {
+    const s = load();
+    for (const d of document.querySelectorAll('details[id]')) if (d.id in s) d.open = s[d.id];
+  };
+  document.addEventListener('toggle', (e) => {
+    if (e.target.id) save({ ...load(), [e.target.id]: e.target.open });
+  }, true);
+  // Each button press reloads the page; come back to the same place instead of the top.
+  addEventListener('submit', () => { try { sessionStorage.setItem('lcq-y', String(scrollY)); } catch {} });
+  try {
+    const y = sessionStorage.getItem('lcq-y');
+    sessionStorage.removeItem('lcq-y');
+    if (y !== null) addEventListener('load', () => scrollTo(0, Number(y)));
+  } catch {}
+  let touching = false;
+  addEventListener('touchstart', () => { touching = true; }, { passive: true });
+  addEventListener('touchend', () => setTimeout(() => { touching = false; }, 400), { passive: true });
+  const busy = () => touching || ['INPUT', 'SELECT', 'TEXTAREA'].includes(document.activeElement && document.activeElement.tagName);
+  let version = document.getElementById('version').dataset.version;
+  apply();
+  // Swap in the new page body when something changed, so the scroll position and folds stay put.
   setInterval(async () => {
     try {
       const r = await fetch('/lcq/version', { cache: 'no-store' });
-      if (r.ok && (await r.json()).v !== version && !busy()) location.replace('/lcq');
+      if (!r.ok || (await r.json()).v === version || busy()) return;
+      const page = await fetch('/lcq', { cache: 'no-store' });
+      const next = new DOMParser().parseFromString(await page.text(), 'text/html').querySelector('main');
+      if (!page.ok || !next || !next.querySelector('#version') || busy()) return;
+      next.querySelectorAll('script').forEach((s) => s.remove());
+      document.querySelector('main').replaceWith(next);
+      version = document.getElementById('version').dataset.version;
+      apply();
     } catch {}
   }, 3000);
 })();
@@ -79,7 +109,21 @@ form.inline{display:inline}
 .plain > li{padding:.6rem 0;border-bottom:2px solid var(--line)}
 .plain > li:last-child{border-bottom:0}
 .plain h3{margin:0 0 .2rem;font-size:1rem}
-.plain form.inline button{margin:.25rem .25rem 0 0;padding:.5rem .8rem;box-shadow:none}
+.plain form.inline button{min-height:48px;margin:.25rem .5rem 0 0;padding:.5rem .9rem;box-shadow:none}
+details.panel{margin:0 0 16px}
+details.panel > summary{display:list-item;min-height:48px;padding:.4rem 0;cursor:pointer}
+details.panel > summary h2{display:inline}
+#lcq-older > summary,.plain details > summary{min-height:48px;padding:.6rem 0;cursor:pointer;font-weight:700}
+.plain details > summary h3{display:inline}
+.duo{display:grid;gap:0 16px}
+@media (min-width: 1000px){.duo{grid-template-columns:1fr 1fr}}
+.match{margin:0;overflow-wrap:anywhere}
+.won{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:.6rem}
+.won form.inline{display:block}
+.won form.inline button{width:100%;min-height:56px;margin:0;font-size:1.05rem;overflow-wrap:anywhere}
+@media (orientation: portrait){.won{grid-template-columns:1fr}}
+.names{list-style:none;margin:.2rem 0 .4rem;padding:0;columns:2 14rem;column-gap:16px}
+.names li{padding:.2rem 0;break-inside:avoid;overflow-wrap:anywhere}
 .topbar{display:flex;align-items:center;gap:14px 18px;flex-wrap:wrap;padding:0 0 14px;margin:0 0 18px;border-bottom:3px solid var(--line)}
 .topbar img{display:block;height:58px;width:auto}
 .topbar .wordmark{margin:0;font-size:1.4rem}
@@ -359,63 +403,76 @@ export function runnerPage(cfg, state, { brand = NO_BRAND, error = '', version =
   const { rules, players, groups, proposals, open, decided } = state;
   const record = (p) => `${p.wins}W ${p.losses}L`;
   const none = (text) => `<li class="hint">${text}</li>`;
+  // Native folding; the script remembers each section's state by id across updates.
+  const section = (id, title, count, body, isOpen) =>
+    `<details class="panel" id="${id}"${isOpen ? ' open' : ''}><summary><h2>${title}${count === null ? '' : ` (${count})`}</h2></summary>${body}</details>`;
+  const choose = (list, id, name, label) => `<div><label for="${id}">${label}</label><select id="${id}" name="${name}" required>` +
+    `<option value="">Choose player</option>${list.map((p) => `<option value="${p.id}">${esc(p.name)} (${record(p)})</option>`).join('')}</select></div>`;
+
   const fresh = groups.filter((g) => !g.seen);
   const banner = fresh.length
     ? `<div class="flash" role="status">New group${fresh.length > 1 ? 's' : ''}: ${fresh.map((g) =>
       `#${g.id} (${g.seats.map((x) => esc(x.name)).join(', ')})`).join('; ')} ${runnerButton('seen', {}, 'Got it', 'secondary')}</div>`
     : '';
-  const ready = proposals.map((p) => `<li>${esc(p.a.name)} vs ${esc(p.b.name)} <span class="chip">${p.wins}W</span> ` +
-    `${runnerButton('start', { a: p.a.id, b: p.b.id }, 'Start')}</li>`).join('') || none('Nobody to pair yet.');
-  const free = players.filter((p) => p.status === 'free');
-  const options = free.map((p) => `<option value="${p.id}">${esc(p.name)} (${record(p)})</option>`).join('');
-  const manual = free.length < 2 ? '' : `<form method="post" action="/lcq/start" class="fields">
-  <div><label for="pa">Player</label><select id="pa" name="a">${options}</select></div>
-  <div><label for="pb">Against</label><select id="pb" name="b">${options}</select></div>
-  <button class="secondary" type="submit">Start match</button></form>`;
-  const playing = open.map((m) => `<li><strong>${esc(m.aName)}</strong> vs <strong>${esc(m.bName)}</strong>` +
-    `${m.groupId ? ` <span class="chip">Group ${m.groupId}</span>` : ''}<br>` +
-    `${runnerButton('result', { match: m.id, winner: m.a }, `${esc(m.aName)} won`)}` +
-    `${runnerButton('result', { match: m.id, winner: m.b }, `${esc(m.bName)} won`)}</li>`).join('') || none('No matches in progress.');
+
   const toPair = groups.filter((g) => !g.started).map((g) => {
     const radios = splitsFor(g.seats.length).map((split, i) => `<label class="check"><input type="radio" name="split" value="${i}" required>` +
       `<span>${split.map(([x, y]) => `${esc(g.seats[x]?.name ?? '?')} vs ${esc(g.seats[y]?.name ?? '?')}`).join(' and ')}` +
       `${g.seats.length === 3 ? `; ${esc(g.seats[3 - split[0][0] - split[0][1]].name)} sits out` : ''}</span></label>`).join('');
-    return `<li><h3>Group ${g.id}${g.paired ? ' (paired; can change until a result is in)' : ''}</h3>` +
-      `<form method="post" action="/lcq/pair">${fieldsOf({ group: g.id })}${radios}<button type="submit">Set pairing</button></form>` +
-      `${runnerButton('randomize', { group: g.id }, 'Randomize', 'secondary')}</li>`;
-  }).join('');
-  const names = (list) => list.map((p) => `${esc(p.name)}${p.status === 'playing' ? ' (playing)' : ''}`).join(', ');
-  const active = players.filter((p) => ['grouped', 'playing', 'free'].includes(p.status));
-  const buckets = [...new Set(active.map((p) => p.wins))].sort((x, y) => y - x)
-    .map((w) => `<li><strong>${w}W:</strong> ${names(active.filter((p) => p.wins === w))}</li>`).join('');
-  const line = (title, list, extra = '') => (list.length ? `<li><strong>${title}:</strong> ${names(list)}${extra}</li>` : '');
-  const queued = players.filter((p) => p.status === 'queued');
-  const closeGroup = queued.length >= 2 ? ` ${runnerButton('close', {}, `Make a group of these ${queued.length}`, 'secondary')}` : '';
-  const standings = line(`Qualified (${rules.winsToQualify}W)`, players.filter((p) => p.status === 'qualified')) + buckets +
-    line(`Out (${rules.lossesOut}L)`, players.filter((p) => p.status === 'out')) +
-    line('Dropped', players.filter((p) => p.status === 'dropped')) +
-    line(`Waiting for a group (${queued.length}/4)`, queued, closeGroup) || none('No LCQ registrations yet.');
-  const droppable = players.filter((p) => ['free', 'playing'].includes(p.status));
-  const dropForm = droppable.length ? `<form method="post" action="/lcq/drop" class="fields">
-  <div><label for="drop">Drop a no-show (their match goes to the opponent)</label><select id="drop" name="player">${
-  droppable.map((p) => `<option value="${p.id}">${esc(p.name)} (${record(p)})</option>`).join('')}</select></div>
-  <button class="secondary" type="submit">Drop</button></form>` : '';
-  const results = decided.map((m) => {
+    // A paired group folds to one line; it can still be changed until a result is in. No id: not remembered.
+    return `<li><details${g.paired ? '' : ' open'}><summary><h3>Group ${g.id}${g.paired ? ': paired, tap to change' : ''}</h3></summary>` +
+      `<form method="post" action="/lcq/pair">${fieldsOf({ group: g.id })}${radios}<button class="secondary" type="submit">Set pairing</button></form>` +
+      `${runnerButton('randomize', { group: g.id }, 'Randomize', 'secondary')}</details></li>`;
+  });
+  const unpaired = groups.filter((g) => !g.paired).length;
+
+  const playing = open.map((m) => `<li><p class="match"><strong>${esc(m.aName)}</strong> vs <strong>${esc(m.bName)}</strong>` +
+    `${m.groupId ? ` <span class="chip">Group ${m.groupId}</span>` : ''}</p><div class="won">` +
+    `${runnerButton('result', { match: m.id, winner: m.a }, `${esc(m.aName)} won`)}` +
+    `${runnerButton('result', { match: m.id, winner: m.b }, `${esc(m.bName)} won`)}</div></li>`).join('') || none('No matches in progress.');
+
+  const free = players.filter((p) => p.status === 'free');
+  const ready = proposals.map((p) => `<li>${esc(p.a.name)} vs ${esc(p.b.name)} <span class="chip">${p.wins}W</span> ` +
+    `${runnerButton('start', { a: p.a.id, b: p.b.id }, 'Start', 'secondary')}</li>`).join('') || none('Nobody to pair yet.');
+  const manual = free.length < 2 ? '' : `<form method="post" action="/lcq/start" class="fields">
+  ${choose(free, 'pa', 'a', 'Player')}${choose(free, 'pb', 'b', 'Against')}
+  <button class="secondary" type="submit">Start match</button></form>`;
+
+  const resultRow = (m) => {
     const [winner, loser] = m.winner === m.a ? [m.aName, m.bName] : [m.bName, m.aName];
     return `<li>${esc(winner)} beat ${esc(loser)} ${runnerButton('undo', { match: m.id }, 'Undo', 'quiet')}</li>`;
-  }).join('') || none('No results yet.');
+  };
+  const older = decided.slice(5);
+  const results = `<ul class="plain">${decided.slice(0, 5).map(resultRow).join('') || none('No results yet.')}</ul>` +
+    (older.length ? `<details id="lcq-older"><summary>Older results (${older.length})</summary><ul class="plain">${older.map(resultRow).join('')}</ul></details>` : '');
+
+  const nameRows = (list) => `<ul class="names">${list.map((p) =>
+    `<li>${esc(p.name)} <span class="hint">${record(p)}${p.status === 'playing' ? ', playing' : ''}</span></li>`).join('')}</ul>`;
+  const bucket = (title, list, extra = '') => (list.length ? `<li><h3>${title} (${list.length})</h3>${nameRows(list)}${extra}</li>` : '');
+  const active = players.filter((p) => ['grouped', 'playing', 'free'].includes(p.status));
+  const queued = players.filter((p) => p.status === 'queued');
+  const closeGroup = queued.length >= 2 ? runnerButton('close', {}, `Make a group of these ${queued.length}`, 'secondary') : '';
+  const standings = bucket(`Qualified, ${rules.winsToQualify}W`, players.filter((p) => p.status === 'qualified')) +
+    [...new Set(active.map((p) => p.wins))].sort((x, y) => y - x).map((w) => bucket(`${w}W`, active.filter((p) => p.wins === w))).join('') +
+    bucket(`Out, ${rules.lossesOut}L`, players.filter((p) => p.status === 'out')) +
+    bucket('Dropped', players.filter((p) => p.status === 'dropped')) +
+    bucket(`Waiting for a group, ${queued.length}/4`, queued, closeGroup) || none('No LCQ registrations yet.');
+  const droppable = players.filter((p) => ['free', 'playing'].includes(p.status));
+  const dropForm = droppable.length ? `<p class="hint">Their match, if any, goes to the opponent.</p>
+<form method="post" action="/lcq/drop" class="fields">${choose(droppable, 'drop', 'player', 'Player')}
+  <button class="secondary" type="submit">Drop</button></form>` : '<p class="hint">Nobody to drop.</p>';
+
   return page('LCQ runner', `<div id="version" data-version="${esc(version)}" hidden></div>
 ${adminHeader(cfg, brand, 'LCQ runner', `<span>Qualify at ${rules.winsToQualify} wins, out at ${rules.lossesOut} losses</span>`)}
 ${errorBlock(error)}${banner}
-<div class="panels">
-  <section class="panel"><h2>Ready to play</h2><ul class="plain">${ready}</ul>${manual}</section>
-  <section class="panel"><h2>Playing</h2><ul class="plain">${playing}</ul></section>
+${toPair.length ? section('lcq-pair', 'Groups to pair', unpaired, `<ul class="plain">${toPair.join('')}</ul>`, true) : ''}
+<div class="duo">
+${section('lcq-playing', 'Playing', open.length, `<ul class="plain">${playing}</ul>`, true)}
+${section('lcq-ready', 'Ready to play', proposals.length, `<ul class="plain">${ready}</ul>${manual}`, true)}
 </div>
-${toPair ? `<section class="panel"><h2>Groups to pair</h2><ul class="plain">${toPair}</ul></section>` : ''}
-<div class="panels">
-  <section class="panel"><h2>Standings</h2><p class="hint">Group matches count toward wins and losses.</p><ul class="plain">${standings}</ul>${dropForm}</section>
-  <section class="panel"><h2>Results</h2><ul class="plain">${results}</ul></section>
-</div>
+${section('lcq-results', 'Results', decided.length, results, true)}
+${section('lcq-standings', 'Standings', players.length, `<p class="hint">Group matches count toward wins and losses.</p><ul class="plain">${standings}</ul>`, false)}
+${section('lcq-drop', 'Drop a no-show', null, dropForm, false)}
 <script src="/lcq/app.js"></script>`, 'admin');
 }
 

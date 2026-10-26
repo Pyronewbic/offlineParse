@@ -87,7 +87,7 @@ describe('LCQ runner over HTTP', () => {
     const cookie = await signIn();
     const page = async () => (await request({ port, path: '/lcq', headers: cookie })).body;
     signUp(3);
-    assert.match(await page(), /Waiting for a group \(3\/4\)/);
+    assert.match(await page(), /<h3>Waiting for a group, 3\/4 \(3\)<\/h3>/);
     signUp(4);
     const v1 = JSON.parse((await request({ port, path: '/lcq/version', headers: cookie })).body).v;
     assert.match(await page(), /New group: #1 \(P1, P2, P3, P4\)/, 'the 4th LCQ registration makes a group');
@@ -106,7 +106,39 @@ describe('LCQ runner over HTTP', () => {
     await post('/lcq/start', { a: String(m1.a), b: String(m2.a) }, cookie);
     const final = lcq.state().open[0];
     await post('/lcq/result', { match: String(final.id), winner: String(final.a) }, cookie);
-    assert.match(await page(), /<strong>Qualified \(2W\):<\/strong> P1/);
+    assert.match(await page(), /<h3>Qualified, 2W \(1\)<\/h3><ul class="names"><li>P1 <span class="hint">2W 0L<\/span>/);
+  });
+
+  test('layout: the most-tapped sections first and open, history and standings folded, pickers start blank', async () => {
+    const cookie = await signIn();
+    signUp(8);
+    lcq.syncGroups();
+    lcq.pairGroup(1, 0);
+    lcq.pairGroup(2, 0);
+    const st = () => lcq.state();
+    for (const m of st().open) lcq.result(m.id, m.a);
+    for (let i = 0; i < 2; i++) {
+      const [p] = st().proposals;
+      lcq.start(p.a.id, p.b.id);
+      lcq.result(st().open[0].id, p.a.id);
+    }
+    const [next] = st().proposals;
+    lcq.start(next.a.id, next.b.id);
+    const body = (await request({ port, path: '/lcq', headers: cookie })).body;
+    const at = (id) => body.indexOf(`id="${id}"`);
+    assert.ok(at('lcq-playing') < at('lcq-ready') && at('lcq-ready') < at('lcq-results') && at('lcq-results') < at('lcq-standings')
+      && at('lcq-standings') < at('lcq-drop'), 'Playing, Ready, Results, Standings, Drop');
+    for (const [id, open] of [['lcq-playing', true], ['lcq-ready', true], ['lcq-results', true], ['lcq-standings', false], ['lcq-drop', false]]) {
+      assert.equal(new RegExp(`<details class="panel" id="${id}" open>`).test(body), open, id);
+    }
+    assert.match(body, /<summary><h2>Results \(6\)<\/h2><\/summary>/);
+    assert.match(body, /<summary>Older results \(1\)<\/summary>/, 'the newest 5 stay out, the rest fold away');
+    assert.match(body, /<div class="won"><form class="inline" method="post" action="\/lcq\/result">/);
+    assert.ok(!/action="\/lcq\/start">.*?<button type="submit">/.test(body), 'Start is never the pink primary button');
+    for (const name of ['a', 'b', 'player']) {
+      assert.match(body, new RegExp(`name="${name}" required><option value="">Choose player</option>`), `${name} starts blank`);
+    }
+    assert.ok(!body.includes('id="lcq-pair"'), 'Groups to pair is hidden when there is nothing to pair');
   });
 
   test('a refused action is explained once on the next page load', async () => {
