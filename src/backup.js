@@ -1,7 +1,8 @@
 import { spawnSync } from 'node:child_process';
 import { resolve } from 'node:path';
 
-const runCommand = (cmd, args) => spawnSync(cmd, args, { encoding: 'utf8' });
+// tmutil can hang (seen on some folders); npm start must not hang with it.
+const runCommand = (cmd, args) => spawnSync(cmd, args, { encoding: 'utf8', timeout: 5000 });
 
 /**
  * Keep the data folder out of Time Machine on macOS, so a guest deleted at the desk does not live on

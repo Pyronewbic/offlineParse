@@ -23,3 +23,13 @@ test('a failure is reported, never silently treated as done', () => {
     /\(spawn tmutil ENOENT\)/);
   assert.match(excludeFromBackups('data', { platform: 'darwin', run: () => ({ status: 1, stderr: '' }) }), /\(exit 1\)/);
 });
+
+test('a tmutil that hangs is cut off after a few seconds and reported', { skip: process.platform === 'win32' && 'needs sleep' }, async () => {
+  const { spawnSync } = await import('node:child_process');
+  const started = Date.now();
+  const warning = excludeFromBackups('data', {
+    platform: 'darwin', run: () => spawnSync('sleep', ['30'], { encoding: 'utf8', timeout: 300 }),
+  });
+  assert.ok(Date.now() - started < 5000);
+  assert.match(warning, /could not keep .*Time Machine \(spawnSync sleep ETIMEDOUT\)/);
+});
