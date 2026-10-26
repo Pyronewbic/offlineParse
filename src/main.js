@@ -6,6 +6,7 @@ import { BrandError, loadBrand } from './brand.js';
 import { ConfigError, loadConfig } from './config.js';
 import { explainPortError, rivalAddresses, startDnsOn as startDns, startRefusers } from './dnsbind.js';
 import { CSV_RETRY_MS, LeadFiles } from './files.js';
+import { Lcq } from './lcq.js';
 import { LeadStore } from './leads.js';
 import { AddressError, addressFollower, detectAddress, localAddresses } from './netaddr.js';
 import { createPortalServer, printable } from './web.js';
@@ -77,7 +78,8 @@ async function main(argv) {
   const trace = values.verbose ? (line) => console.log(`${new Date().toISOString().slice(11, 19)} ${line}`) : null;
   const onQuery = trace && ((name, from, answered) => trace(`dns  ${printable(from)} asked ${printable(name ?? '(malformed)')}${answered ? '' : ' (no answer)'}`));
   const onRequest = trace && ((from, method, host, url) => trace(`http ${printable(from)} ${printable(method)} ${printable(host)}${printable(url)}`));
-  const server = createPortalServer(cfg, store, { laptopIp: address.ip, quiet: values.quiet, brand, onRequest });
+  const lcq = new Lcq(store, { winsToQualify: cfg.lcqWinsToQualify, lossesOut: cfg.lcqLossesOut });
+  const server = createPortalServer(cfg, store, { laptopIp: address.ip, quiet: values.quiet, brand, onRequest, lcq });
   let dns = null;
   try {
     await listen(server, cfg.httpPort, '0.0.0.0').catch((e) => {
@@ -125,6 +127,7 @@ async function main(argv) {
   console.log(`Laptop address:      ${address.ip} (${address.how})`);
   console.log(`Sign-up form:        ${server.portalUrl()}`);
   console.log(`Admin (laptop only): http://localhost${port === 80 ? '' : `:${port}`}/admin`);
+  console.log(`LCQ runner (tablet): ${server.portalUrl()}lcq  PIN ${lcq.pin()}`);
   console.log(`DNS:                 ${dnsLine()}`);
   if (refusers.servers.length) {
     console.log(`Refusing at once:    ${refusers.servers.map((r) => r.address().port).join(', ')} (HTTPS, private DNS)`);

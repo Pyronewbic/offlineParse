@@ -26,6 +26,7 @@ npm test
 | `laptopIp` | The booth address, `"100.64.0.2"` |
 | `logoLight`, `logoDark` | PNG logos for light and dark phones; empty shows `orgName` |
 | `noticeVersion` | Recorded with each registration; change it when the consent wording changes |
+| `lcqWinsToQualify`, `lcqLossesOut` | Optional LCQ rules: qualify at this many wins (default 4), out at this many losses (default 2) |
 
 ### Router (TP-Link TL-WR845N)
 
@@ -67,6 +68,8 @@ npm start
 - `npm run booth-ip -- --dry-run` shows the command; `--ip <address>` acts on another address. If `npm start` warns the booth address is gone, run `npm run booth-ip` again.
 
 **Admin:** `http://localhost/admin`, on the laptop only. **New sign-ups go to** switches the bracket (Normal or LCQ) every new registration joins; the All / Normal / LCQ tabs split the list, and **Download CSV** exports the tab you're on. Also search, add, delete, **Refresh** for new sign-ups.
+
+**LCQ runner:** on a tablet on the booth Wi-Fi, open the address and PIN shown on the admin page (`http://100.64.0.2/lcq`). Every 4 LCQ registrations form a group, which pops up within 3 seconds: pick a pairing or **Randomize**, then tap each match's winner. After that it offers matches between free players with equal wins (never a rematch) for you to **Start**, or pair any two yourself. **Make a group** takes the last 2 or 3 waiting players; **Drop** gives a no-show's match to the opponent. The tablet stays signed in until the server restarts.
 
 **A phone gets no sign-in page:** run `npm start -- --verbose` and rejoin from the phone; each DNS question and web request is printed.
 - Nothing printed: the phone is not asking the laptop. A `169.254` address or none on the phone means the router's addresses ran out (see Router). Otherwise check the router's Primary DNS and that the phone's Private DNS is Off or Automatic.

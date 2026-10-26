@@ -1,6 +1,7 @@
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import http from 'node:http';
 import { CSV_RETRY_MS, SOURCE_LABELS, leadsCsv, toISTShort } from './files.js';
+import { LcqError, splitsFor } from './lcq.js';
 import { BRACKETS, NAME_MAX, ValidationError, cleanName, normalizePhone } from './leads.js';
 import { themeCss } from './theme.js';
 
@@ -20,6 +21,20 @@ const LOOPBACK = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
 // could rebind its own name to 127.0.0.1 (DNS rebinding) and read the desk as same-origin.
 const ADMIN_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]']);
 const CSP = "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'";
+// The LCQ runner page alone runs a script: its own, which reloads the page when something changes.
+const RUNNER_CSP = CSP.replace("default-src 'none';", "default-src 'none'; script-src 'self'; connect-src 'self';");
+const RUNNER_JS = `(() => {
+  const version = document.getElementById('version').dataset.version;
+  const busy = () => ['INPUT', 'SELECT', 'TEXTAREA'].includes(document.activeElement && document.activeElement.tagName);
+  setInterval(async () => {
+    try {
+      const r = await fetch('/lcq/version', { cache: 'no-store' });
+      if (r.ok && (await r.json()).v !== version && !busy()) location.replace('/lcq');
+    } catch {}
+  }, 3000);
+})();
+`;
+const SESSION_COOKIE = /(?:^|;\s*)lcq=([A-Za-z0-9_-]{43})(?:;|$)/;
 
 const HEAVY = 'Impact,Haettenschweiler,"Arial Narrow Bold",system-ui,sans-serif';
 const CSS = `${themeCss()}
@@ -60,6 +75,11 @@ button.danger{color:var(--onDanger);background:var(--danger)}
 .confetti.tr{top:-24px;right:-8px;width:58px}
 .confetti.bl{bottom:-20px;left:-12px;width:38px}
 form.inline{display:inline}
+.plain{list-style:none;margin:.4rem 0 0;padding:0}
+.plain > li{padding:.6rem 0;border-bottom:2px solid var(--line)}
+.plain > li:last-child{border-bottom:0}
+.plain h3{margin:0 0 .2rem;font-size:1rem}
+.plain form.inline button{margin:.25rem .25rem 0 0;padding:.5rem .8rem;box-shadow:none}
 .topbar{display:flex;align-items:center;gap:14px 18px;flex-wrap:wrap;padding:0 0 14px;margin:0 0 18px;border-bottom:3px solid var(--line)}
 .topbar img{display:block;height:58px;width:auto}
 .topbar .wordmark{margin:0;font-size:1.4rem}
@@ -220,7 +240,7 @@ function adminHeader(cfg, brand, title, actions = '') {
 }
 
 export function adminPage(cfg, {
-  leads: all, token, brand = NO_BRAND, q = '', msg = '', error = '', warnings = [], form = {}, tab = 'all', active = 'normal',
+  leads: all, token, brand = NO_BRAND, q = '', msg = '', error = '', warnings = [], form = {}, tab = 'all', active = 'normal', runner = null,
 }) {
   const leads = tab === 'all' ? all : all.filter((l) => l.bracket === tab);
   const newestFirst = [...leads].reverse();
@@ -263,6 +283,7 @@ ${flash ? `<p class="flash" role="status">${flash}</p>` : ''}
   <span>New sign-ups go to</span>${toggle}
 </form>
 <nav class="tabs" aria-label="Brackets">${tabs}</nav>
+${runner ? `<p class="hint">LCQ runner for a tablet on the booth Wi-Fi: <strong>${esc(runner.url)}</strong>, PIN <strong>${esc(runner.pin)}</strong></p>` : ''}
 <dl class="stats">
   <div class="stat"><dt>Total</dt><dd>${leads.length}</dd></div>
   <div class="stat"><dt>Wi-Fi form</dt><dd>${bySource('form')}</dd></div>
@@ -313,6 +334,89 @@ already downloaded or copied, and backups of this laptop, are not changed.</p>
 <div class="buttons"><a class="btn secondary" href="${adminUrl(tab)}" autofocus>Cancel</a>
 <button class="danger" type="submit">Delete registration</button></div></form>
 </section>`, 'admin');
+}
+
+export function pinPage(cfg, brand = NO_BRAND, error = '') {
+  return page('LCQ runner', `
+${adminHeader(cfg, brand, 'LCQ runner')}
+<section class="panel confirm">
+<h2>Enter the PIN</h2>
+<p class="hint">It is on the booth laptop's admin page and in its terminal.</p>
+${errorBlock(error)}
+<form method="post" action="/lcq/login" class="fields">
+  <div><label for="pin">PIN</label><input id="pin" name="pin" type="text" inputmode="numeric" autocomplete="off" maxlength="6" required autofocus></div>
+  <button type="submit">Open</button>
+</form>
+</section>`, 'admin');
+}
+
+const fieldsOf = (fields) => Object.entries(fields).map(([k, v]) => `<input type="hidden" name="${k}" value="${esc(v)}">`).join('');
+// `label` is HTML: callers escape what they put in it.
+const runnerButton = (action, fields, label, cls = '') =>
+  `<form class="inline" method="post" action="/lcq/${action}">${fieldsOf(fields)}<button type="submit"${cls ? ` class="${cls}"` : ''}>${label}</button></form>`;
+
+export function runnerPage(cfg, state, { brand = NO_BRAND, error = '', version = '' } = {}) {
+  const { rules, players, groups, proposals, open, decided } = state;
+  const record = (p) => `${p.wins}W ${p.losses}L`;
+  const none = (text) => `<li class="hint">${text}</li>`;
+  const fresh = groups.filter((g) => !g.seen);
+  const banner = fresh.length
+    ? `<div class="flash" role="status">New group${fresh.length > 1 ? 's' : ''}: ${fresh.map((g) =>
+      `#${g.id} (${g.seats.map((x) => esc(x.name)).join(', ')})`).join('; ')} ${runnerButton('seen', {}, 'Got it', 'secondary')}</div>`
+    : '';
+  const ready = proposals.map((p) => `<li>${esc(p.a.name)} vs ${esc(p.b.name)} <span class="chip">${p.wins}W</span> ` +
+    `${runnerButton('start', { a: p.a.id, b: p.b.id }, 'Start')}</li>`).join('') || none('Nobody to pair yet.');
+  const free = players.filter((p) => p.status === 'free');
+  const options = free.map((p) => `<option value="${p.id}">${esc(p.name)} (${record(p)})</option>`).join('');
+  const manual = free.length < 2 ? '' : `<form method="post" action="/lcq/start" class="fields">
+  <div><label for="pa">Player</label><select id="pa" name="a">${options}</select></div>
+  <div><label for="pb">Against</label><select id="pb" name="b">${options}</select></div>
+  <button class="secondary" type="submit">Start match</button></form>`;
+  const playing = open.map((m) => `<li><strong>${esc(m.aName)}</strong> vs <strong>${esc(m.bName)}</strong>` +
+    `${m.groupId ? ` <span class="chip">Group ${m.groupId}</span>` : ''}<br>` +
+    `${runnerButton('result', { match: m.id, winner: m.a }, `${esc(m.aName)} won`)}` +
+    `${runnerButton('result', { match: m.id, winner: m.b }, `${esc(m.bName)} won`)}</li>`).join('') || none('No matches in progress.');
+  const toPair = groups.filter((g) => !g.started).map((g) => {
+    const radios = splitsFor(g.seats.length).map((split, i) => `<label class="check"><input type="radio" name="split" value="${i}" required>` +
+      `<span>${split.map(([x, y]) => `${esc(g.seats[x]?.name ?? '?')} vs ${esc(g.seats[y]?.name ?? '?')}`).join(' and ')}` +
+      `${g.seats.length === 3 ? `; ${esc(g.seats[3 - split[0][0] - split[0][1]].name)} sits out` : ''}</span></label>`).join('');
+    return `<li><h3>Group ${g.id}${g.paired ? ' (paired; can change until a result is in)' : ''}</h3>` +
+      `<form method="post" action="/lcq/pair">${fieldsOf({ group: g.id })}${radios}<button type="submit">Set pairing</button></form>` +
+      `${runnerButton('randomize', { group: g.id }, 'Randomize', 'secondary')}</li>`;
+  }).join('');
+  const names = (list) => list.map((p) => `${esc(p.name)}${p.status === 'playing' ? ' (playing)' : ''}`).join(', ');
+  const active = players.filter((p) => ['grouped', 'playing', 'free'].includes(p.status));
+  const buckets = [...new Set(active.map((p) => p.wins))].sort((x, y) => y - x)
+    .map((w) => `<li><strong>${w}W:</strong> ${names(active.filter((p) => p.wins === w))}</li>`).join('');
+  const line = (title, list, extra = '') => (list.length ? `<li><strong>${title}:</strong> ${names(list)}${extra}</li>` : '');
+  const queued = players.filter((p) => p.status === 'queued');
+  const closeGroup = queued.length >= 2 ? ` ${runnerButton('close', {}, `Make a group of these ${queued.length}`, 'secondary')}` : '';
+  const standings = line(`Qualified (${rules.winsToQualify}W)`, players.filter((p) => p.status === 'qualified')) + buckets +
+    line(`Out (${rules.lossesOut}L)`, players.filter((p) => p.status === 'out')) +
+    line('Dropped', players.filter((p) => p.status === 'dropped')) +
+    line(`Waiting for a group (${queued.length}/4)`, queued, closeGroup) || none('No LCQ registrations yet.');
+  const droppable = players.filter((p) => ['free', 'playing'].includes(p.status));
+  const dropForm = droppable.length ? `<form method="post" action="/lcq/drop" class="fields">
+  <div><label for="drop">Drop a no-show (their match goes to the opponent)</label><select id="drop" name="player">${
+  droppable.map((p) => `<option value="${p.id}">${esc(p.name)} (${record(p)})</option>`).join('')}</select></div>
+  <button class="secondary" type="submit">Drop</button></form>` : '';
+  const results = decided.map((m) => {
+    const [winner, loser] = m.winner === m.a ? [m.aName, m.bName] : [m.bName, m.aName];
+    return `<li>${esc(winner)} beat ${esc(loser)} ${runnerButton('undo', { match: m.id }, 'Undo', 'quiet')}</li>`;
+  }).join('') || none('No results yet.');
+  return page('LCQ runner', `<div id="version" data-version="${esc(version)}" hidden></div>
+${adminHeader(cfg, brand, 'LCQ runner', `<span>Qualify at ${rules.winsToQualify} wins, out at ${rules.lossesOut} losses</span>`)}
+${errorBlock(error)}${banner}
+<div class="panels">
+  <section class="panel"><h2>Ready to play</h2><ul class="plain">${ready}</ul>${manual}</section>
+  <section class="panel"><h2>Playing</h2><ul class="plain">${playing}</ul></section>
+</div>
+${toPair ? `<section class="panel"><h2>Groups to pair</h2><ul class="plain">${toPair}</ul></section>` : ''}
+<div class="panels">
+  <section class="panel"><h2>Standings</h2><p class="hint">Group matches count toward wins and losses.</p><ul class="plain">${standings}</ul>${dropForm}</section>
+  <section class="panel"><h2>Results</h2><ul class="plain">${results}</ul></section>
+</div>
+<script src="/lcq/app.js"></script>`, 'admin');
 }
 
 const warningsOf = (store) => store.files?.warnings() ?? [];
@@ -406,7 +510,7 @@ function tokenMatches(given, expected) {
 
 export function createPortalServer(cfg, store, {
   laptopIp, quiet = false, brand = { light: null, dark: null }, onRequest = null, idleTimeoutMs = 20_000, maxConnectionsPerAddress = 32,
-  submitLimit = { max: 10, windowMs: 60_000 }, clock = () => Date.now(),
+  submitLimit = { max: 10, windowMs: 60_000 }, clock = () => Date.now(), lcq = null,
 }) {
   const adminToken = randomBytes(32).toString('base64url');
   let portalHosts;
@@ -420,17 +524,74 @@ export function createPortalServer(cfg, store, {
   const log = quiet ? () => {} : (...args) => console.log(new Date().toISOString(), ...args);
   const warn = quiet ? () => {} : (...args) => console.error(new Date().toISOString(), ...args);
 
-  // Sign-up attempts per guest address in the current window, so one device cannot flood the list.
-  const attempts = new Map();
-  function overLimit(addr) {
-    const t = clock();
-    const recent = (attempts.get(addr) ?? []).filter((at) => t - at < submitLimit.windowMs);
-    recent.push(t);
-    attempts.set(addr, recent);
-    if (recent.length === submitLimit.max + 1) {
-      warn(`WARNING ${printable(addr)} sent more than ${submitLimit.max} sign-ups in a minute; further ones are refused for now`);
+  // Attempts per guest address in the current window, so one device cannot flood the list or guess the PIN.
+  function limiter({ max, windowMs }, what) {
+    const attempts = new Map();
+    return (addr) => {
+      const t = clock();
+      const recent = (attempts.get(addr) ?? []).filter((at) => t - at < windowMs);
+      recent.push(t);
+      attempts.set(addr, recent);
+      if (recent.length === max + 1) warn(`WARNING ${printable(addr)} sent more than ${max} ${what} in a minute; further ones are refused for now`);
+      return recent.length > max;
+    };
+  }
+  const overLimit = limiter(submitLimit, 'sign-ups');
+  const pinOverLimit = limiter({ max: 5, windowMs: 60_000 }, 'LCQ PIN tries');
+  const runnerInfo = () => (lcq ? { url: `${portalUrl}lcq`, pin: lcq.pin() } : null);
+
+  // Signed-in tablets. Kept in memory: after a restart the tablet enters the PIN again.
+  const sessions = new Set();
+  const flashes = new Map();
+  const sessionOf = (req) => {
+    const token = SESSION_COOKIE.exec(req.headers.cookie ?? '')?.[1];
+    return token && sessions.has(token) ? token : null;
+  };
+
+  async function runner(req, res, path, method) {
+    if (!lcq || !portalHosts.has(hostOf(req))) return plain(res, 404, 'not found');
+    res.setHeader('Referrer-Policy', 'same-origin');
+    if (method === 'GET' && path === '/lcq/app.js') return send(res, 200, 'text/javascript; charset=utf-8', RUNNER_JS);
+    const session = sessionOf(req);
+    if (method === 'POST') {
+      if (!sameOriginPost(req)) return plain(res, 403, 'cross-site request refused', { Connection: 'close' });
+      const fields = await readForm(req);
+      if (path === '/lcq/login') {
+        if (pinOverLimit(req.socket.remoteAddress)) return html(res, 429, pinPage(cfg, brand, 'Too many tries. Wait a minute.'));
+        if (!tokenMatches(fields.pin, lcq.pin())) return html(res, 401, pinPage(cfg, brand, 'That PIN is not right.'));
+        const token = randomBytes(32).toString('base64url');
+        sessions.add(token);
+        log(`LCQ runner opened from ${printable(req.socket.remoteAddress)}`);
+        return send(res, 303, 'text/html; charset=utf-8', '<a href="/lcq">Continue</a>', {
+          Location: '/lcq', 'Set-Cookie': `lcq=${token}; Path=/lcq; HttpOnly; SameSite=Strict; Max-Age=86400`,
+        });
+      }
+      if (!session) return redirect(res, '/lcq', 303);
+      const n = (key) => Number(fields[key]);
+      try {
+        if (path === '/lcq/pair') lcq.pairGroup(n('group'), n('split'));
+        else if (path === '/lcq/randomize') lcq.randomize(n('group'));
+        else if (path === '/lcq/start') lcq.start(n('a'), n('b'));
+        else if (path === '/lcq/result') lcq.result(n('match'), n('winner'));
+        else if (path === '/lcq/undo') lcq.undo(n('match'));
+        else if (path === '/lcq/seen') lcq.markSeen();
+        else if (path === '/lcq/close') lcq.closeGroup();
+        else if (path === '/lcq/drop') lcq.drop(n('player'));
+        else return plain(res, 404, 'not found');
+      } catch (e) {
+        if (!(e instanceof LcqError)) throw e;
+        flashes.set(session, e.message);
+      }
+      return redirect(res, '/lcq', 303);
     }
-    return recent.length > submitLimit.max;
+    if (method !== 'GET' || (path !== '/lcq' && path !== '/lcq/version')) return plain(res, 404, 'not found');
+    if (!session) return path === '/lcq' ? html(res, 200, pinPage(cfg, brand)) : plain(res, 401, 'enter the PIN at /lcq');
+    lcq.syncGroups();
+    if (path === '/lcq/version') return send(res, 200, 'application/json', JSON.stringify({ v: lcq.version() }));
+    const error = flashes.get(session) ?? '';
+    flashes.delete(session);
+    return send(res, 200, 'text/html; charset=utf-8', runnerPage(cfg, lcq.state(), { brand, error, version: lcq.version() }),
+      { 'Content-Security-Policy': RUNNER_CSP });
   }
 
   async function submit(req, res) {
@@ -472,7 +633,7 @@ export function createPortalServer(cfg, store, {
     if (!tokenMatches(fields.token, adminToken)) return plain(res, 403, 'bad or missing admin token; reload /admin');
     const tab = tabOf(fields.tab);
     const adminReply = (status, extra) => html(res, status, adminPage(cfg, {
-      leads: store.list(), token: adminToken, brand, warnings: warningsOf(store), tab, active: store.bracket(), ...extra,
+      leads: store.list(), token: adminToken, brand, warnings: warningsOf(store), tab, active: store.bracket(), runner: runnerInfo(), ...extra,
     }));
     if (path === '/admin/bracket') {
       if (!Object.hasOwn(BRACKETS, fields.bracket)) return plain(res, 400, 'unknown bracket');
@@ -533,6 +694,7 @@ export function createPortalServer(cfg, store, {
         return html(res, 200, adminPage(cfg, {
           leads: store.list(), token: adminToken, brand, warnings: warningsOf(store),
           q: (params.get('q') ?? '').slice(0, 60), msg: params.get('msg') ?? '', tab: tabOf(params.get('tab')), active: store.bracket(),
+          runner: runnerInfo(),
         }));
       }
       if (method === 'GET' && path === '/admin/export.csv') {
@@ -547,6 +709,7 @@ export function createPortalServer(cfg, store, {
       }
       return plain(res, 404, 'not found');
     }
+    if (path === '/lcq' || path.startsWith('/lcq/')) return runner(req, res, path, method);
     if (method === 'POST' && path === '/submit') return submit(req, res);
     const logo = method === 'GET' && BRAND_PATHS[path];
     if (logo && brand[logo]) {

@@ -21,7 +21,11 @@ const FIELD_TYPES = {
   socials: 'object',
   socialsMessage: 'string',
   prefillMessage: 'string',
+  lcqWinsToQualify: 'count',
+  lcqLossesOut: 'count',
 };
+// Keys older config files lack: the LCQ rules default to qualify at 4 wins, out at 2 losses.
+const DEFAULTS = { lcqWinsToQualify: 4, lcqLossesOut: 2 };
 
 export class ConfigError extends Error {}
 
@@ -39,6 +43,7 @@ export function configFromObject(raw) {
   if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) {
     throw new ConfigError('config must be a JSON object');
   }
+  raw = { ...DEFAULTS, ...raw };
   const names = Object.keys(FIELD_TYPES);
   const unknown = Object.keys(raw).filter((k) => !names.includes(k));
   const missing = names.filter((k) => !(k in raw));
@@ -49,9 +54,10 @@ export function configFromObject(raw) {
     const value = raw[key];
     const ok =
       type === 'port' ? Number.isInteger(value) && value >= 1 && value <= 65535
+      : type === 'count' ? Number.isInteger(value) && value >= 1 && value <= 20
       : type === 'object' ? value !== null && typeof value === 'object' && !Array.isArray(value)
       : typeof value === type;
-    if (!ok) throw new ConfigError(`${key} must be ${type === 'port' ? 'an integer 1-65535' : `a ${type}`}`);
+    if (!ok) throw new ConfigError(`${key} must be ${type === 'port' ? 'an integer 1-65535' : type === 'count' ? 'a whole number 1-20' : `a ${type}`}`);
   }
 
   for (const key of ['orgName', 'eventName', 'dbPath', 'noticeVersion']) {

@@ -9,6 +9,13 @@ import { fill, prefillText, socialsText, whatsappLink, wifiPayload } from '../sr
 import { BASE_CONFIG, makeConfig, rawConfig } from './helpers.js';
 
 describe('config', () => {
+  test('the LCQ rules default to 4 wins and 2 losses, and can be set', () => {
+    const cfg = makeConfig();
+    assert.deepEqual([cfg.lcqWinsToQualify, cfg.lcqLossesOut], [4, 2]);
+    const set = makeConfig({ lcqWinsToQualify: 3, lcqLossesOut: 1 });
+    assert.deepEqual([set.lcqWinsToQualify, set.lcqLossesOut], [3, 1]);
+  });
+
   test('shipped config.json loads', () => {
     const cfg = loadConfig(fileURLToPath(new URL('../config.json', import.meta.url)));
     assert.ok(Object.isFrozen(cfg));
@@ -29,6 +36,9 @@ describe('config', () => {
       'port as string': { httpPort: '80' },
       'port as bool': { httpPort: true },
       'port zero': { httpPort: 0 },
+      'LCQ wins zero': { lcqWinsToQualify: 0 },
+      'LCQ losses too many': { lcqLossesOut: 21 },
+      'LCQ wins as text': { lcqWinsToQualify: '4' },
       'port fractional': { dnsPort: 53.5 },
       'port out of range': { dnsPort: 70000 },
       'short WPA password': { wifiPassword: 'short' },
