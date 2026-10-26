@@ -191,14 +191,44 @@ export class Lcq {
     this.db.prepare('UPDATE lcq_matches SET winner = ?, decidedAt = ? WHERE id = ?').run(winner, now(), matchId);
   }
 
-  /** Take back a result, as long as neither player has been put in a later match. */
+  /**
+   * Take back a result. Later matches of either player that have no result yet were paired on the
+   * wrong record, so they are cancelled too; a later match with a result must be undone first.
+   * Returns what else was cancelled, for the operator.
+   */
   undo(matchId) {
     const m = this.match(matchId);
     if (m.winner === null) throw new LcqError('That match has no result yet.');
-    const later = this.db.prepare('SELECT COUNT(*) AS n FROM lcq_matches WHERE id > ? AND (a IN (?, ?) OR b IN (?, ?))')
-      .get(matchId, m.a, m.b, m.a, m.b).n;
-    if (later) throw new LcqError('One of these players is already in a later match; undo that one first.');
-    this.db.prepare('UPDATE lcq_matches SET winner = NULL, decidedAt = NULL WHERE id = ?').run(matchId);
+    const later = this.db.prepare('SELECT * FROM lcq_matches WHERE id > ? AND (a IN (?, ?) OR b IN (?, ?)) ORDER BY id')
+      .all(matchId, m.a, m.b, m.a, m.b);
+    const decided = later.find((x) => x.winner !== null);
+    if (decided) {
+      const [w, l] = decided.winner === decided.a ? [decided.a, decided.b] : [decided.b, decided.a];
+      throw new LcqError(`Undo "${this.nameOf(w)} beat ${this.nameOf(l)}" first; it came after this result.`);
+    }
+    if (later.some((x) => x.groupId !== null)) throw new LcqError('A group match came after this result; change that pairing first.');
+    this.db.exec('BEGIN');
+    try {
+      for (const x of later) this.db.prepare('DELETE FROM lcq_matches WHERE id = ?').run(x.id);
+      this.db.prepare('UPDATE lcq_matches SET winner = NULL, decidedAt = NULL WHERE id = ?').run(matchId);
+      this.db.exec('COMMIT');
+    } catch (e) {
+      this.db.exec('ROLLBACK');
+      throw e;
+    }
+    return later.map((x) => `${this.nameOf(x.a)} vs ${this.nameOf(x.b)}`);
+  }
+
+  /** Call off a ladder match that has no result yet (started by mistake); both players are free again. */
+  cancel(matchId) {
+    const m = this.match(matchId);
+    if (m.winner !== null) throw new LcqError('That match already has a result; use Undo.');
+    if (m.groupId !== null) throw new LcqError('A group match is changed with its group pairing.');
+    this.db.prepare('DELETE FROM lcq_matches WHERE id = ?').run(matchId);
+  }
+
+  nameOf(leadId) {
+    return this.store.get(leadId)?.name ?? '(deleted)';
   }
 
   /** The tablet's 6-digit PIN, made once and kept across restarts. */

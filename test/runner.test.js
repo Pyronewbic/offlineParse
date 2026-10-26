@@ -152,6 +152,26 @@ describe('LCQ runner over HTTP', () => {
     assert.ok(!(await request({ port, path: '/lcq', headers: cookie })).body.includes('The winner must be'), 'shown once');
   });
 
+  test('undo says what else it called off; a mistaken ladder match can be called off', async () => {
+    const cookie = await signIn();
+    signUp(4);
+    lcq.syncGroups();
+    lcq.pairGroup(1, 0);
+    const [m1, m2] = lcq.state().open;
+    lcq.result(m1.id, m1.a);
+    lcq.result(m2.id, m2.a);
+    lcq.start(m1.a, m2.a);
+    const body = (await request({ port, path: '/lcq', headers: cookie })).body;
+    assert.match(body, /action="\/lcq\/cancel">.*Call off/, 'the ladder match has Call off');
+    await post('/lcq/undo', { match: String(m1.id) }, cookie);
+    assert.match((await request({ port, path: '/lcq', headers: cookie })).body,
+      /<p class="flash" role="status">Result undone\. Also called off P1 vs P3, which depended on it\.<\/p>/);
+    lcq.result(m1.id, m1.a);
+    lcq.start(m1.a, m2.a);
+    await post('/lcq/cancel', { match: String(lcq.state().open[0].id) }, cookie);
+    assert.deepEqual(lcq.state().open, []);
+  });
+
   test('cross-site posts and other hostnames are refused even with a session', async () => {
     const cookie = await signIn();
     signUp(4);

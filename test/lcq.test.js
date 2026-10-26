@@ -85,7 +85,7 @@ describe('LCQ runner', () => {
     assert.deepEqual([player('P1').wins, player('P1').losses], [3, 0]);
   });
 
-  test('a result can be undone until either player is in a later match; bad results are refused', () => {
+  test('undo calls off later matches that have no result yet, and names a later result that must go first', () => {
     for (let i = 0; i < 4; i++) signUp();
     lcq.syncGroups();
     lcq.pairGroup(1, 0);
@@ -93,12 +93,33 @@ describe('LCQ runner', () => {
     assert.throws(() => lcq.result(first.id, id('P3')), LcqError, 'the winner must be in the match');
     win('P1');
     assert.throws(() => lcq.result(first.id, id('P2')), LcqError, 'no second result');
-    lcq.undo(first.id);
-    assert.equal(player('P1').status, 'playing');
-    win('P2');
     win('P3');
-    lcq.start(id('P2'), id('P3'));
-    assert.throws(() => lcq.undo(first.id), LcqError);
+    lcq.start(id('P1'), id('P3'));
+    assert.deepEqual(lcq.undo(first.id), ['P1 vs P3'], 'the match paired on the wrong record is called off');
+    assert.equal(player('P1').status, 'playing', 'P1 is back in the undone match');
+    assert.equal(player('P3').status, 'free');
+    assert.deepEqual(lcq.state().open.map((m) => [m.aName, m.bName]), [['P1', 'P2']]);
+
+    win('P1');
+    lcq.start(id('P1'), id('P3'));
+    win('P3');
+    assert.throws(() => lcq.undo(first.id), /Undo "P3 beat P1" first/);
+    lcq.start(id('P2'), id('P4'));
+    assert.throws(() => lcq.undo(openMatch('P2').id), /no result yet/);
+  });
+
+  test('a ladder match started by mistake can be called off; group matches and decided ones cannot', () => {
+    for (let i = 0; i < 4; i++) signUp();
+    lcq.syncGroups();
+    lcq.pairGroup(1, 0);
+    assert.throws(() => lcq.cancel(openMatch('P1').id), /changed with its group pairing/);
+    win('P1');
+    win('P3');
+    lcq.start(id('P1'), id('P3'));
+    lcq.cancel(openMatch('P1').id);
+    assert.deepEqual([player('P1').status, player('P3').status], ['free', 'free']);
+    assert.deepEqual(lcq.state().proposals.map((p) => [p.a.name, p.b.name]), [['P2', 'P4'], ['P1', 'P3']]);
+    assert.throws(() => lcq.cancel(lcq.state().decided[0].id), /already has a result/);
   });
 
   test('a deleted registration leaves the runner working and keeps no name', () => {

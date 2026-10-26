@@ -399,7 +399,7 @@ const fieldsOf = (fields) => Object.entries(fields).map(([k, v]) => `<input type
 const runnerButton = (action, fields, label, cls = '') =>
   `<form class="inline" method="post" action="/lcq/${action}">${fieldsOf(fields)}<button type="submit"${cls ? ` class="${cls}"` : ''}>${label}</button></form>`;
 
-export function runnerPage(cfg, state, { brand = NO_BRAND, error = '', version = '' } = {}) {
+export function runnerPage(cfg, state, { brand = NO_BRAND, error = '', notice = '', version = '' } = {}) {
   const { rules, players, groups, proposals, open, decided } = state;
   const record = (p) => `${p.wins}W ${p.losses}L`;
   const none = (text) => `<li class="hint">${text}</li>`;
@@ -429,7 +429,8 @@ export function runnerPage(cfg, state, { brand = NO_BRAND, error = '', version =
   const playing = open.map((m) => `<li><p class="match"><strong>${esc(m.aName)}</strong> vs <strong>${esc(m.bName)}</strong>` +
     `${m.groupId ? ` <span class="chip">Group ${m.groupId}</span>` : ''}</p><div class="won">` +
     `${runnerButton('result', { match: m.id, winner: m.a }, `${esc(m.aName)} won`)}` +
-    `${runnerButton('result', { match: m.id, winner: m.b }, `${esc(m.bName)} won`)}</div></li>`).join('') || none('No matches in progress.');
+    `${runnerButton('result', { match: m.id, winner: m.b }, `${esc(m.bName)} won`)}</div>` +
+    `${m.groupId ? '' : runnerButton('cancel', { match: m.id }, 'Call off', 'quiet')}</li>`).join('') || none('No matches in progress.');
 
   const free = players.filter((p) => p.status === 'free');
   const ready = proposals.map((p) => `<li>${esc(p.a.name)} vs ${esc(p.b.name)} <span class="chip">${p.wins}W</span> ` +
@@ -464,7 +465,7 @@ export function runnerPage(cfg, state, { brand = NO_BRAND, error = '', version =
 
   return page('LCQ runner', `<div id="version" data-version="${esc(version)}" hidden></div>
 ${adminHeader(cfg, brand, 'LCQ runner', `<span>Qualify at ${rules.winsToQualify} wins, out at ${rules.lossesOut} losses</span>`)}
-${errorBlock(error)}${banner}
+${errorBlock(error)}${notice ? `<p class="flash" role="status">${esc(notice)}</p>` : ''}${banner}
 ${toPair.length ? section('lcq-pair', 'Groups to pair', unpaired, `<ul class="plain">${toPair.join('')}</ul>`, true) : ''}
 <div class="duo">
 ${section('lcq-playing', 'Playing', open.length, `<ul class="plain">${playing}</ul>`, true)}
@@ -630,14 +631,17 @@ export function createPortalServer(cfg, store, {
         else if (path === '/lcq/randomize') lcq.randomize(n('group'));
         else if (path === '/lcq/start') lcq.start(n('a'), n('b'));
         else if (path === '/lcq/result') lcq.result(n('match'), n('winner'));
-        else if (path === '/lcq/undo') lcq.undo(n('match'));
+        else if (path === '/lcq/undo') {
+          const cancelled = lcq.undo(n('match'));
+          flashes.set(session, { notice: `Result undone.${cancelled.length ? ` Also called off ${cancelled.join(', ')}, which depended on it.` : ''}` });
+        } else if (path === '/lcq/cancel') lcq.cancel(n('match'));
         else if (path === '/lcq/seen') lcq.markSeen();
         else if (path === '/lcq/close') lcq.closeGroup();
         else if (path === '/lcq/drop') lcq.drop(n('player'));
         else return plain(res, 404, 'not found');
       } catch (e) {
         if (!(e instanceof LcqError)) throw e;
-        flashes.set(session, e.message);
+        flashes.set(session, { error: e.message });
       }
       return redirect(res, '/lcq', 303);
     }
@@ -645,9 +649,9 @@ export function createPortalServer(cfg, store, {
     if (!session) return path === '/lcq' ? html(res, 200, pinPage(cfg, brand)) : plain(res, 401, 'enter the PIN at /lcq');
     lcq.syncGroups();
     if (path === '/lcq/version') return send(res, 200, 'application/json', JSON.stringify({ v: lcq.version() }));
-    const error = flashes.get(session) ?? '';
+    const { error = '', notice = '' } = flashes.get(session) ?? {};
     flashes.delete(session);
-    return send(res, 200, 'text/html; charset=utf-8', runnerPage(cfg, lcq.state(), { brand, error, version: lcq.version() }),
+    return send(res, 200, 'text/html; charset=utf-8', runnerPage(cfg, lcq.state(), { brand, error, notice, version: lcq.version() }),
       { 'Content-Security-Policy': RUNNER_CSP });
   }
 
