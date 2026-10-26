@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { explainPortError, rivalAddresses, startDnsOn } from '../src/dnsbind.js';
+import { connect, createServer } from 'node:net';
+import { explainPortError, rivalAddresses, startDnsOn, startRefusers } from '../src/dnsbind.js';
 
 const failing = (code) => Object.assign(new Error(code), { code });
 
@@ -93,4 +94,29 @@ test('rivalAddresses finds other connected addresses on the booth /24 only', () 
   ];
   assert.deepEqual(rivalAddresses('192.168.0.2', addrs).map((a) => a.address), ['192.168.0.101']);
   assert.deepEqual(rivalAddresses('192.168.0.2', [addrs[0]]), []);
+});
+
+test('refusers reset every connection at once, and a port that cannot be opened is reported, not fatal', async () => {
+  const taken = createServer();
+  await new Promise((r) => taken.listen(0, '127.0.0.1', r));
+  const busy = taken.address().port;
+  const { servers, failed } = await startRefusers([0, busy], '127.0.0.1', 'darwin');
+  try {
+    assert.equal(servers.length, 1);
+    assert.deepEqual(failed.map((f) => f.port), [busy]);
+    assert.match(failed[0].message, new RegExp(`TCP port ${busy} is already used by another program`));
+    const started = Date.now();
+    const outcome = await new Promise((resolvePromise) => {
+      // Send nothing: a plain close would then end cleanly, so only a real reset gives ECONNRESET.
+      const socket = connect(servers[0].address().port, '127.0.0.1');
+      socket.on('data', () => resolvePromise('data'));
+      socket.on('error', (e) => resolvePromise(e.code));
+      socket.on('close', () => resolvePromise('closed'));
+    });
+    assert.equal(outcome, 'ECONNRESET', 'reset, not a silent wait');
+    assert.ok(Date.now() - started < 1000, 'at once');
+  } finally {
+    for (const s of servers) s.close();
+    taken.close();
+  }
 });

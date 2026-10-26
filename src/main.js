@@ -4,7 +4,7 @@ import { parseArgs } from 'node:util';
 import { excludeFromBackups } from './backup.js';
 import { BrandError, loadBrand } from './brand.js';
 import { ConfigError, loadConfig } from './config.js';
-import { explainPortError, rivalAddresses, startDnsOn as startDns } from './dnsbind.js';
+import { explainPortError, rivalAddresses, startDnsOn as startDns, startRefusers } from './dnsbind.js';
 import { CSV_RETRY_MS, LeadFiles } from './files.js';
 import { LeadStore } from './leads.js';
 import { AddressError, addressFollower, detectAddress, localAddresses } from './netaddr.js';
@@ -91,6 +91,11 @@ async function main(argv) {
     files.close();
     return 1;
   }
+  // Only phones that use this laptop as DNS knock on these, and the booth works without them.
+  const refusers = dns ? await startRefusers() : { servers: [], failed: [] };
+  for (const { message } of refusers.failed) {
+    console.error(`WARNING ${message} Phones may wait longer before showing the sign-in page.`);
+  }
 
   const { port } = server.address();
   const dnsLine = () => (dns ? `answering every name with ${follower.current.ip} on ${dns.host}:${cfg.dnsPort}` : 'off');
@@ -121,6 +126,9 @@ async function main(argv) {
   console.log(`Sign-up form:        ${server.portalUrl()}`);
   console.log(`Admin (laptop only): http://localhost${port === 80 ? '' : `:${port}`}/admin`);
   console.log(`DNS:                 ${dnsLine()}`);
+  if (refusers.servers.length) {
+    console.log(`Refusing at once:    ${refusers.servers.map((r) => r.address().port).join(', ')} (HTTPS, private DNS)`);
+  }
   const rivals = dns?.host === '0.0.0.0' ? rivalAddresses(address.ip, localAddresses()) : [];
   if (rivals.length) {
     console.error(`WARNING ${rivals.map((r) => r.address).join(', ')} is also on the booth network, so DNS replies may leave ` +
@@ -133,6 +141,7 @@ async function main(argv) {
   const stop = () => {
     clearInterval(timer);
     clearInterval(fileRetry);
+    for (const r of refusers.servers) r.close();
     server.close();
     server.closeAllConnections();
     dns?.sock.close();

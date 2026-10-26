@@ -62,9 +62,9 @@ npm run booth-ip   # gives this laptop 100.64.0.2; asks for the admin password
 npm start
 ```
 
-- **Windows:** run `booth-ip` and `booth-ip:undo` in **Command Prompt** opened with **Run as administrator** (PowerShell may refuse to run npm). `booth-ip` also lets the booth network through Windows Firewall on ports 80 and 53; undo removes those rules, so the booth Wi-Fi can stay a **Public** network, which keeps Windows' other services blocked. Turn off sleep for the day.
+- **Windows:** run `booth-ip` and `booth-ip:undo` in **Command Prompt** opened with **Run as administrator** (PowerShell may refuse to run npm). `booth-ip` also lets the booth network through Windows Firewall on ports 80, 53, 443 and 853; undo removes those rules, so the booth Wi-Fi can stay a **Public** network, which keeps Windows' other services blocked. Turn off sleep for the day.
 - **macOS:** `booth-ip` switches Wi-Fi to the fixed booth address (macOS only lets a normal user answer DNS on all addresses, so it must be the only one). Allow incoming connections for `node` if asked (signed apps may be let in without asking). Keep it awake with `caffeinate -dims npm start`.
-- **Linux:** ports 80 and 53 need root or `sudo setcap cap_net_bind_service=+ep "$(readlink -f "$(command -v node)")"`; open 80/tcp and 53/udp in the firewall.
+- **Linux:** ports 80 and 53 need root or `sudo setcap cap_net_bind_service=+ep "$(readlink -f "$(command -v node)")"`; open 80, 443 and 853/tcp and 53/udp in the firewall.
 - `npm run booth-ip -- --dry-run` shows the command without running it; `--ip <address>` acts on an address other than `config.json`'s (e.g. to undo an old one). If `npm start` warns that the booth address is gone, run `npm run booth-ip` again.
 
 **Admin:** `http://localhost/admin` on the laptop only. Newest first, search by name or any part of the number, add, delete, and **Download CSV**. Press **Refresh** for new sign-ups.

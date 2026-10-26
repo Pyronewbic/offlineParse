@@ -1,3 +1,4 @@
+import { createServer } from 'node:net';
 import { startCatchAllDns } from './dns.js';
 
 /**
@@ -41,4 +42,30 @@ export function explainPortError(e, port, proto, platform = process.platform) {
 export function rivalAddresses(ip, addresses) {
   const net = ip.split('.').slice(0, 3).join('.');
   return addresses.filter((a) => a.connected && a.address !== ip && a.address.split('.').slice(0, 3).join('.') === net);
+}
+
+// Phones try HTTPS (443) and private DNS (853) on the booth address too. A firewall that silently drops
+// them (macOS stealth mode) makes phones wait for a timeout, so answer with an immediate reset instead.
+export const REFUSED_PORTS = [443, 853];
+
+/** Listen on each port and reset every connection at once. Resolves to the servers and any ports it could not open. */
+export async function startRefusers(ports = REFUSED_PORTS, host = '0.0.0.0', platform = process.platform) {
+  const servers = [];
+  const failed = [];
+  for (const port of ports) {
+    const server = createServer((socket) => socket.resetAndDestroy());
+    try {
+      await new Promise((resolvePromise, reject) => {
+        server.once('error', reject);
+        server.listen(port, host, () => {
+          server.off('error', reject);
+          resolvePromise();
+        });
+      });
+      servers.push(server);
+    } catch (e) {
+      failed.push({ port, message: explainPortError(e, port, 'TCP', platform).message });
+    }
+  }
+  return { servers, failed };
 }

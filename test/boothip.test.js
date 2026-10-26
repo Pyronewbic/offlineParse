@@ -66,12 +66,15 @@ describe('planBoothIp', () => {
     assert.deepEqual(rest, [
       ['netsh', ['advfirewall', 'firewall', 'delete', 'rule', 'name=offlineParse-booth-http'], { mayFail: true }],
       ['netsh', ['advfirewall', 'firewall', 'delete', 'rule', 'name=offlineParse-booth-dns'], { mayFail: true }],
+      ['netsh', ['advfirewall', 'firewall', 'delete', 'rule', 'name=offlineParse-booth-refuse'], { mayFail: true }],
       ['netsh', ['advfirewall', 'firewall', 'add', 'rule', 'name=offlineParse-booth-http', 'dir=in', 'action=allow',
         'protocol=TCP', 'localport=8080', 'remoteip=192.168.88.0/24', 'profile=any']],
       ['netsh', ['advfirewall', 'firewall', 'add', 'rule', 'name=offlineParse-booth-dns', 'dir=in', 'action=allow',
         'protocol=UDP', 'localport=5353', 'remoteip=192.168.88.0/24', 'profile=any']],
+      ['netsh', ['advfirewall', 'firewall', 'add', 'rule', 'name=offlineParse-booth-refuse', 'dir=in', 'action=allow',
+        'protocol=TCP', 'localport=443,853', 'remoteip=192.168.88.0/24', 'profile=any']],
     ]);
-    assert.match(plan({ platform: 'win32', addresses: [wifi('Wi-Fi')] }).steps.at(-1)[1].join(' '), /localport=53 /);
+    assert.match(plan({ platform: 'win32', addresses: [wifi('Wi-Fi')] }).steps.at(-2)[1].join(' '), /localport=53 /);
     for (const platform of ['darwin', 'linux']) {
       assert.ok(!JSON.stringify(plan({ platform, addresses: [wifi()] }).steps).includes('advfirewall'), platform);
     }
@@ -85,6 +88,7 @@ describe('planBoothIp', () => {
       ['netsh', ['interface', 'ipv4', 'set', 'dnsservers', 'Wi-Fi', 'dhcp']],
       ['netsh', ['advfirewall', 'firewall', 'delete', 'rule', 'name=offlineParse-booth-http'], { mayFail: true }],
       ['netsh', ['advfirewall', 'firewall', 'delete', 'rule', 'name=offlineParse-booth-dns'], { mayFail: true }],
+      ['netsh', ['advfirewall', 'firewall', 'delete', 'rule', 'name=offlineParse-booth-refuse'], { mayFail: true }],
     ]);
     assert.deepEqual(plan({ platform: 'linux', undo: true, addresses: [wifi('wlan0', BOOTH)] }).steps,
       [['sudo', ['ip', 'addr', 'del', `${BOOTH}/24`, 'dev', 'wlan0']]]);
@@ -103,7 +107,8 @@ describe('planBoothIp', () => {
     const r = plan({ platform: 'win32', undo: true, addresses: [] });
     assert.equal(r.firewallOnly, true);
     assert.deepEqual(r.steps.map(([, args]) => args.join(' ')), [
-      'advfirewall firewall delete rule name=offlineParse-booth-http', 'advfirewall firewall delete rule name=offlineParse-booth-dns']);
+      'advfirewall firewall delete rule name=offlineParse-booth-http', 'advfirewall firewall delete rule name=offlineParse-booth-dns',
+      'advfirewall firewall delete rule name=offlineParse-booth-refuse']);
     assert.ok(r.steps.every(([, , opts]) => opts?.mayFail), 'absent rules do not fail the undo');
     assert.match(r.note, /connect it/);
   });

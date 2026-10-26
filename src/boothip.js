@@ -1,4 +1,5 @@
 import { isIPv4 } from 'node:net';
+import { REFUSED_PORTS } from './dnsbind.js';
 
 export class BoothIpError extends Error {}
 
@@ -26,7 +27,9 @@ function macService(iface, services) {
 
 // Windows often files a Wi-Fi with no internet as Public, where an app-specific allow rule may not
 // apply, so open the booth ports by number to the booth network only, for every profile.
-const FIREWALL_RULES = [['offlineParse-booth-http', 'TCP', 'http'], ['offlineParse-booth-dns', 'UDP', 'dns']];
+const FIREWALL_RULES = [
+  ['offlineParse-booth-http', 'TCP', 'http'], ['offlineParse-booth-dns', 'UDP', 'dns'], ['offlineParse-booth-refuse', 'TCP', 'refuse'],
+];
 const firewallDelete = () => FIREWALL_RULES.map(([name]) =>
   ['netsh', ['advfirewall', 'firewall', 'delete', 'rule', `name=${name}`], { mayFail: true }]);
 const firewallAdd = (subnet, ports) => FIREWALL_RULES.map(([name, protocol, key]) => ['netsh', ['advfirewall', 'firewall', 'add',
@@ -83,7 +86,10 @@ export async function planWhenReady({ plan, sleep, attempts = 20, onWait = () =>
  * Work out the commands that give this machine the booth address (or take it away with undo).
  * Pure: `addresses` comes from netaddr.localAddresses(), so tests can describe any machine.
  */
-export function planBoothIp({ platform, addresses, boothIp, undo = false, prefix = 24, gateway, services, ports = { http: 80, dns: 53 } }) {
+export function planBoothIp({
+  platform, addresses, boothIp, undo = false, prefix = 24, gateway, services, ports: given = { http: 80, dns: 53 },
+}) {
+  const ports = { refuse: REFUSED_PORTS.join(','), ...given };
   if (!isIPv4(boothIp)) {
     throw new BoothIpError(`laptopIp in config.json must be the fixed booth address, e.g. "100.64.0.2" (it is "${boothIp}")`);
   }
