@@ -1,14 +1,19 @@
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import http from 'node:http';
 import { CSV_RETRY_MS, SOURCE_LABELS, leadsCsv, toISTShort } from './files.js';
-import { NAME_MAX, ValidationError, cleanName, normalizePhone } from './leads.js';
+import { BRACKETS, NAME_MAX, ValidationError, cleanName, normalizePhone } from './leads.js';
 import { themeCss } from './theme.js';
 
 export const MAX_BODY = 8 * 1024;
 const MAX_FIELDS = 20;
 export const WHATSAPP_NOTICE = 'none (WhatsApp message)';
 const TOO_MANY = 'Too many sign-ups from this phone just now. Please wait a minute and try again.';
-const ALREADY_REGISTERED = 'This number is already registered. Reach out to us at the desk if you need to change your details.';
+const alreadyRegistered = (bracket) =>
+  `This number is already registered for ${BRACKETS[bracket]}. Reach out to us at the desk if you need to change your details.`;
+const TABS = ['all', ...Object.keys(BRACKETS)];
+const tabOf = (value) => (TABS.includes(value) ? value : 'all');
+const adminUrl = (tab, msg = '') =>
+  `/admin${[tab !== 'all' && `tab=${tab}`, msg && `msg=${msg}`].filter(Boolean).map((x, i) => `${i ? '&' : '?'}${x}`).join('')}`;
 export const BRAND_PATHS = { '/brand/logo-light.png': 'light', '/brand/logo-dark.png': 'dark' };
 const LOOPBACK = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
 // Names the admin desk answers to. A loopback socket alone is not enough: a page the operator opens
@@ -72,9 +77,10 @@ form.inline{display:inline}
 .panel .fields{display:flex;gap:10px 12px;align-items:flex-end;flex-wrap:wrap}
 .panel .fields > div{flex:1 1 170px}
 .panel label{margin:.6rem 0 .3rem}
-.panel input[type=text],.panel input[type=tel],.panel input[type=search]{min-height:46px;font-size:16px}
-.panel input[type=search]{width:100%;padding:.6rem .85rem;font-family:inherit;color:var(--text);background:var(--surface);border:3px solid var(--line);border-radius:10px;-webkit-appearance:none;appearance:none}
+.panel input[type=text],.panel input[type=tel],.panel input[type=search],.panel select{min-height:46px;font-size:16px}
+.panel input[type=search],.panel select{width:100%;padding:.6rem .85rem;font-family:inherit;color:var(--text);background:var(--surface);border:3px solid var(--line);border-radius:10px;-webkit-appearance:none;appearance:none}
 .panel button,.panel .btn{min-height:46px}
+.panel select{-webkit-appearance:auto;appearance:auto}
 .showing{margin:0 0 8px;color:var(--muted);font-weight:600}
 table.reg{width:100%;border-collapse:separate;border-spacing:0;font-size:15px;background:var(--surface);border:3px solid var(--line);border-radius:14px}
 .reg th,.reg td{padding:10px 14px;text-align:left;vertical-align:middle;border-bottom:1px solid var(--rule)}
@@ -89,6 +95,12 @@ table.reg{width:100%;border-collapse:separate;border-spacing:0;font-size:15px;ba
 .reg .act{width:1%;text-align:right}
 .chip{display:inline-block;padding:2px 10px;border:2px solid var(--line);border-radius:999px;font-size:.8rem;font-weight:700;white-space:nowrap}
 .chip.whatsapp{background:var(--pink);color:var(--onPink)}
+.toggle{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:0 0 16px;font-weight:800}
+.toggle button{padding:.5rem 1rem;box-shadow:none}
+.toggle button[aria-pressed=false]{color:var(--text);background:var(--surface)}
+.tabs{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 16px}
+.tabs a{padding:.4rem .9rem;border:3px solid var(--line);border-radius:999px;font-weight:800;text-decoration:none;background:var(--surface)}
+.tabs a[aria-current=page]{background:var(--pink);color:var(--onPink)}
 button.quiet{min-height:40px;padding:.4rem .8rem;font-size:.85rem;color:var(--error);background:transparent;border:2px solid var(--error);box-shadow:none}
 .empty{padding:28px 14px;text-align:center;color:var(--muted)}
 .confirm{max-width:36rem}
@@ -139,7 +151,7 @@ function portalPage(cfg, brand, title, card, after = '') {
 
 const FIELDS = ['name', 'phone', 'consent'];
 
-export function formPage(cfg, { error = '', field = null, name = '', phone = '', consent = false } = {}, brand = NO_BRAND) {
+export function formPage(cfg, { error = '', field = null, name = '', phone = '', consent = false, bracket = 'normal' } = {}, brand = NO_BRAND) {
   const inline = error && FIELDS.includes(field);
   const fieldError = (id) => (inline && field === id
     ? `<p class="field-error" id="${id}-error" role="alert">${esc(error)}</p>` : '');
@@ -150,6 +162,7 @@ export function formPage(cfg, { error = '', field = null, name = '', phone = '',
   };
   return portalPage(cfg, brand, `${cfg.orgName} registration`, `
 <h1 class="sr-only">Register for ${esc(cfg.orgName)}</h1>
+<p class="lede">Registering for <strong>${esc(BRACKETS[bracket])}</strong></p>
 ${inline ? '' : errorBlock(error)}
 <form method="post" action="/submit">
   <label for="name">Your name</label>
@@ -168,10 +181,10 @@ ${inline ? '' : errorBlock(error)}
 Reach out to us at the desk any time to have your details deleted.</p>`);
 }
 
-export function thanksPage(cfg, name, phone, brand = NO_BRAND) {
+export function thanksPage(cfg, name, phone, brand = NO_BRAND, bracket = 'normal') {
   return portalPage(cfg, brand, "You're registered", `
 <h1>You're registered, ${esc(firstName(name))}!</h1>
-<p class="lede">We've got you down as <strong>${esc(name)}</strong> on <strong class="nowrap">${esc(displayPhone(phone))}</strong>.</p>
+<p class="lede">We've got you down for <strong>${esc(BRACKETS[bracket])}</strong> as <strong>${esc(name)}</strong> on <strong class="nowrap">${esc(displayPhone(phone))}</strong>.</p>
 <p>You can leave this Wi-Fi now.</p>
 <p><strong>iPhone:</strong> tap <strong>Cancel</strong> at the top of this screen. To stop it joining again, go to Settings, Wi-Fi, tap (i) next to this network, then <strong>Forget This Network</strong>.</p>
 <p><strong>Android:</strong> in Wi-Fi settings, tap this network, then <strong>Forget</strong>.</p>`, `
@@ -185,8 +198,9 @@ const FLASH = {
     `that is retried every ${CSV_RETRY_MS / 1000} seconds.`,
 };
 
-const hidden = (token, id) =>
-  `<input type="hidden" name="token" value="${esc(token)}"><input type="hidden" name="id" value="${esc(id)}">`;
+const hidden = (token, id, tab = 'all') =>
+  `<input type="hidden" name="token" value="${esc(token)}"><input type="hidden" name="id" value="${esc(id)}">` +
+  `<input type="hidden" name="tab" value="${esc(tab)}">`;
 
 const phoneDigits = (phone) => phone.replace(/\D/g, '');
 
@@ -205,7 +219,10 @@ function adminHeader(cfg, brand, title, actions = '') {
     (actions ? `<div class="actions">${actions}</div>` : '') + '</header>';
 }
 
-export function adminPage(cfg, { leads, token, brand = NO_BRAND, q = '', msg = '', error = '', warnings = [], form = {} }) {
+export function adminPage(cfg, {
+  leads: all, token, brand = NO_BRAND, q = '', msg = '', error = '', warnings = [], form = {}, tab = 'all', active = 'normal',
+}) {
+  const leads = tab === 'all' ? all : all.filter((l) => l.bracket === tab);
   const newestFirst = [...leads].reverse();
   const shown = newestFirst.filter((lead) => matchesSearch(lead, q));
   const bySource = (source) => leads.filter((l) => l.source === source).length;
@@ -213,23 +230,39 @@ export function adminPage(cfg, { leads, token, brand = NO_BRAND, q = '', msg = '
   const rows = shown.map((lead) => {
     const n = leads.length - newestFirst.indexOf(lead);
     return `<tr><td class="num idx">${n}</td><th scope="row">${esc(lead.name)}</th>` +
+      `<td><span class="chip">${esc(BRACKETS[lead.bracket] ?? lead.bracket)}</span></td>` +
       `<td class="num">${esc(displayPhone(lead.phone))}</td>` +
       `<td><span class="chip ${lead.source === 'whatsapp' ? 'whatsapp' : 'form'}">${esc(SOURCE_LABELS[lead.source] ?? lead.source)}</span></td>` +
       `<td class="num">${esc(toISTShort(lead.createdAt))}</td>` +
-      `<td class="act"><form class="inline" method="post" action="/admin/delete">${hidden(token, lead.id)}` +
+      `<td class="act"><form class="inline" method="post" action="/admin/delete">${hidden(token, lead.id, tab)}` +
       `<button class="quiet" aria-label="Delete ${esc(lead.name)}">Delete</button></form></td></tr>`;
   });
   const empty = leads.length === 0
     ? 'No registrations yet. They will appear here as people sign up.'
     : `No matches for "${esc(q.trim())}".`;
   const showing = q.trim()
-    ? `${shown.length} ${shown.length === 1 ? 'match' : 'matches'} for "${esc(q.trim())}" out of ${leads.length}. <a href="/admin">Clear search</a>`
+    ? `${shown.length} ${shown.length === 1 ? 'match' : 'matches'} for "${esc(q.trim())}" out of ${leads.length}. <a href="${adminUrl(tab)}">Clear search</a>`
     : `Showing all ${leads.length}, newest first.`;
+  const label = (b) => esc(BRACKETS[b]);
+  const flash = msg === 'bracket' ? `New sign-ups now go to ${label(active)}.` : Object.hasOwn(FLASH, msg) ? FLASH[msg] : '';
+  const exportUrl = `/admin/export.csv${tab === 'all' ? '' : `?tab=${tab}`}`;
+  const tabs = TABS.map((t) => {
+    const count = t === 'all' ? all.length : all.filter((l) => l.bracket === t).length;
+    return `<a href="${adminUrl(t)}"${t === tab ? ' aria-current="page"' : ''}>${t === 'all' ? 'All' : label(t)} (${count})</a>`;
+  }).join('');
+  const toggle = Object.keys(BRACKETS).map((b) =>
+    `<button type="submit" name="bracket" value="${b}" aria-pressed="${b === active}">${label(b)}</button>`).join('');
+  const addTo = form.bracket ?? (tab === 'all' ? active : tab);
   return page('Registrations', `
 ${adminHeader(cfg, brand, 'Registrations',
-    '<a href="/admin">Refresh</a><a class="btn secondary" href="/admin/export.csv">Download CSV</a>')}
+    `<a href="${adminUrl(tab)}">Refresh</a><a class="btn secondary" href="${exportUrl}">Download CSV</a>`)}
 ${warnings.map((w) => `<p class="error" role="alert">${esc(w)}</p>`).join('')}
-${Object.hasOwn(FLASH, msg) ? `<p class="flash" role="status">${FLASH[msg]}</p>` : ''}
+${flash ? `<p class="flash" role="status">${flash}</p>` : ''}
+<form method="post" action="/admin/bracket" class="toggle">
+  <input type="hidden" name="token" value="${esc(token)}"><input type="hidden" name="tab" value="${esc(tab)}">
+  <span>New sign-ups go to</span>${toggle}
+</form>
+<nav class="tabs" aria-label="Brackets">${tabs}</nav>
 <dl class="stats">
   <div class="stat"><dt>Total</dt><dd>${leads.length}</dd></div>
   <div class="stat"><dt>Wi-Fi form</dt><dd>${bySource('form')}</dd></div>
@@ -242,7 +275,9 @@ ${Object.hasOwn(FLASH, msg) ? `<p class="flash" role="status">${FLASH[msg]}</p>`
     <p class="hint">For people who registered by WhatsApp message.</p>
     ${errorBlock(error)}
     <form method="post" action="/admin/add" class="fields">
-      <input type="hidden" name="token" value="${esc(token)}">
+      <input type="hidden" name="token" value="${esc(token)}"><input type="hidden" name="tab" value="${esc(tab)}">
+      <div><label for="add-bracket">Bracket</label><select id="add-bracket" name="bracket">${Object.keys(BRACKETS).map((b) =>
+    `<option value="${b}"${b === addTo ? ' selected' : ''}>${label(b)}</option>`).join('')}</select></div>
       <div><label for="name">Name</label><input id="name" name="name" type="text" maxlength="${NAME_MAX}" required value="${esc(form.name ?? '')}"></div>
       <div><label for="phone">Mobile number</label><input id="phone" name="phone" type="tel" maxlength="20" required value="${esc(form.phone ?? '')}"></div>
       <button type="submit">Add registration</button>
@@ -252,6 +287,7 @@ ${Object.hasOwn(FLASH, msg) ? `<p class="flash" role="status">${FLASH[msg]}</p>`
     <h2 id="find-title">Find someone</h2>
     <p class="hint">Search by name or any part of the number.</p>
     <form method="get" action="/admin" class="fields" role="search">
+      ${tab === 'all' ? '' : `<input type="hidden" name="tab" value="${esc(tab)}">`}
       <div><label for="q">Name or number</label><input id="q" name="q" type="search" maxlength="60" value="${esc(q)}"></div>
       <button class="secondary" type="submit">Search</button>
     </form>
@@ -260,21 +296,21 @@ ${Object.hasOwn(FLASH, msg) ? `<p class="flash" role="status">${FLASH[msg]}</p>`
 <p class="showing">${showing}</p>
 <table class="reg">
 <caption class="sr-only">Registrations, newest first</caption>
-<thead><tr><th scope="col">#</th><th scope="col">Name</th><th scope="col">Mobile</th><th scope="col">Came in via</th><th scope="col">Signed up (IST)</th><th scope="col"><span class="sr-only">Actions</span></th></tr></thead>
-<tbody>${rows.join('') || `<tr><td colspan="6" class="empty">${empty}</td></tr>`}</tbody>
+<thead><tr><th scope="col">#</th><th scope="col">Name</th><th scope="col">Bracket</th><th scope="col">Mobile</th><th scope="col">Came in via</th><th scope="col">Signed up (IST)</th><th scope="col"><span class="sr-only">Actions</span></th></tr></thead>
+<tbody>${rows.join('') || `<tr><td colspan="7" class="empty">${empty}</td></tr>`}</tbody>
 </table>`, 'admin');
 }
 
-export function confirmDeletePage(cfg, lead, token, brand = NO_BRAND) {
+export function confirmDeletePage(cfg, lead, token, brand = NO_BRAND, tab = 'all') {
   return page('Delete registration', `
 ${adminHeader(cfg, brand, 'Delete registration')}
 <section class="panel confirm">
 <h2>Delete this registration?</h2>
-<p><strong>${esc(lead.name)}</strong>, <span class="nowrap">${esc(displayPhone(lead.phone))}</span>, signed up ${esc(toISTShort(lead.createdAt))} IST.</p>
+<p><strong>${esc(lead.name)}</strong>, <span class="nowrap">${esc(displayPhone(lead.phone))}</span>, ${esc(BRACKETS[lead.bracket] ?? lead.bracket)}, signed up ${esc(toISTShort(lead.createdAt))} IST.</p>
 <p>This removes them from the database, the spreadsheet and the log. It cannot be undone. Spreadsheets you
 already downloaded or copied, and backups of this laptop, are not changed.</p>
-<form method="post" action="/admin/delete">${hidden(token, lead.id)}<input type="hidden" name="confirm" value="yes">
-<div class="buttons"><a class="btn secondary" href="/admin" autofocus>Cancel</a>
+<form method="post" action="/admin/delete">${hidden(token, lead.id, tab)}<input type="hidden" name="confirm" value="yes">
+<div class="buttons"><a class="btn secondary" href="${adminUrl(tab)}" autofocus>Cancel</a>
 <button class="danger" type="submit">Delete registration</button></div></form>
 </section>`, 'admin');
 }
@@ -401,9 +437,11 @@ export function createPortalServer(cfg, store, {
     const fields = await readForm(req);
     const rawName = fields.name ?? '';
     const rawPhone = fields.phone ?? '';
+    // The bracket staff have on now, read once so the stored row and the reply agree.
+    const bracket = store.bracket();
     if (overLimit(req.socket.remoteAddress)) {
       return html(res, 429, formPage(cfg, {
-        error: TOO_MANY, name: rawName.slice(0, NAME_MAX), phone: rawPhone.slice(0, 20), consent: fields.consent === 'yes',
+        error: TOO_MANY, name: rawName.slice(0, NAME_MAX), phone: rawPhone.slice(0, 20), consent: fields.consent === 'yes', bracket,
       }, brand));
     }
     let name;
@@ -415,34 +453,46 @@ export function createPortalServer(cfg, store, {
     } catch (e) {
       if (!(e instanceof ValidationError)) throw e;
       return html(res, 400, formPage(cfg, {
-        error: e.message, field: e.field, name: rawName.slice(0, NAME_MAX), phone: rawPhone.slice(0, 20), consent: fields.consent === 'yes',
+        error: e.message, field: e.field, name: rawName.slice(0, NAME_MAX), phone: rawPhone.slice(0, 20), consent: fields.consent === 'yes', bracket,
       }, brand));
     }
-    const { created } = store.register({ name, phone, source: 'form', eventCode: cfg.eventCode, noticeVersion: cfg.noticeVersion });
+    const { created } = store.register({ name, phone, source: 'form', eventCode: cfg.eventCode, noticeVersion: cfg.noticeVersion, bracket });
     if (!created) {
       log('duplicate registration refused');
       return html(res, 409, formPage(cfg, {
-        error: ALREADY_REGISTERED, field: 'phone', name: rawName.slice(0, NAME_MAX), phone: rawPhone.slice(0, 20), consent: true,
+        error: alreadyRegistered(bracket), field: 'phone', name: rawName.slice(0, NAME_MAX), phone: rawPhone.slice(0, 20), consent: true, bracket,
       }, brand));
     }
-    log('registration added via form');
-    html(res, 200, thanksPage(cfg, name, phone, brand));
+    log(`registration added via form (${BRACKETS[bracket]})`);
+    html(res, 200, thanksPage(cfg, name, phone, brand, bracket));
   }
 
   async function adminPost(req, res, path) {
     const fields = await readForm(req);
     if (!tokenMatches(fields.token, adminToken)) return plain(res, 403, 'bad or missing admin token; reload /admin');
+    const tab = tabOf(fields.tab);
+    const adminReply = (status, extra) => html(res, status, adminPage(cfg, {
+      leads: store.list(), token: adminToken, brand, warnings: warningsOf(store), tab, active: store.bracket(), ...extra,
+    }));
+    if (path === '/admin/bracket') {
+      if (!Object.hasOwn(BRACKETS, fields.bracket)) return plain(res, 400, 'unknown bracket');
+      store.setBracket(fields.bracket);
+      log(`new sign-ups now go to ${BRACKETS[fields.bracket]}`);
+      return redirect(res, adminUrl(tab, 'bracket'), 303);
+    }
     if (path === '/admin/delete') {
       const id = Number(fields.id);
       const lead = Number.isSafeInteger(id) ? store.get(id) : null;
       if (!lead) return plain(res, 404, 'registration not found; it may already be deleted');
-      if (fields.confirm !== 'yes') return html(res, 200, confirmDeletePage(cfg, lead, adminToken, brand));
+      if (fields.confirm !== 'yes') return html(res, 200, confirmDeletePage(cfg, lead, adminToken, brand, tab));
       store.remove(id);
       const partial = store.files?.stillHolds(lead) ?? false;
       log(partial ? 'registration deleted from the database; files pending' : 'registration deleted');
-      return redirect(res, `/admin?msg=${partial ? 'deleted-partial' : 'deleted'}`, 303);
+      return redirect(res, adminUrl(tab, partial ? 'deleted-partial' : 'deleted'), 303);
     }
     if (path === '/admin/add') {
+      const bracket = Object.hasOwn(BRACKETS, fields.bracket) ? fields.bracket : store.bracket();
+      const form = { name: String(fields.name ?? '').slice(0, NAME_MAX), phone: String(fields.phone ?? '').slice(0, 20), bracket };
       let name;
       let phone;
       try {
@@ -450,21 +500,14 @@ export function createPortalServer(cfg, store, {
         phone = normalizePhone(fields.phone);
       } catch (e) {
         if (!(e instanceof ValidationError)) throw e;
-        return html(res, 400, adminPage(cfg, {
-          leads: store.list(), token: adminToken, brand, error: e.message, warnings: warningsOf(store),
-          form: { name: String(fields.name ?? '').slice(0, NAME_MAX), phone: String(fields.phone ?? '').slice(0, 20) },
-        }));
+        return adminReply(400, { error: e.message, form });
       }
       // They sent the prefilled WhatsApp text and never saw the form's notice, so do not record that one.
-      const result = store.register({ name, phone, source: 'whatsapp', eventCode: cfg.eventCode, noticeVersion: WHATSAPP_NOTICE });
+      const result = store.register({ name, phone, source: 'whatsapp', eventCode: cfg.eventCode, noticeVersion: WHATSAPP_NOTICE, bracket });
       if (!result.created) {
-        const message = `${displayPhone(phone)} is already registered, as ${result.existing.name}.`;
-        return html(res, 409, adminPage(cfg, {
-          leads: store.list(), token: adminToken, brand, error: message, warnings: warningsOf(store),
-          form: { name: String(fields.name ?? '').slice(0, NAME_MAX), phone: String(fields.phone ?? '').slice(0, 20) },
-        }));
+        return adminReply(409, { error: `${displayPhone(phone)} is already registered for ${BRACKETS[bracket]}, as ${result.existing.name}.`, form });
       }
-      return redirect(res, '/admin?msg=added', 303);
+      return redirect(res, adminUrl(tab, 'added'), 303);
     }
     plain(res, 404, 'not found');
   }
@@ -489,12 +532,14 @@ export function createPortalServer(cfg, store, {
         const params = new URL(req.url, 'http://x').searchParams;
         return html(res, 200, adminPage(cfg, {
           leads: store.list(), token: adminToken, brand, warnings: warningsOf(store),
-          q: (params.get('q') ?? '').slice(0, 60), msg: params.get('msg') ?? '',
+          q: (params.get('q') ?? '').slice(0, 60), msg: params.get('msg') ?? '', tab: tabOf(params.get('tab')), active: store.bracket(),
         }));
       }
       if (method === 'GET' && path === '/admin/export.csv') {
-        return send(res, 200, 'text/csv; charset=utf-8', leadsCsv(store.list()),
-          { 'Content-Disposition': 'attachment; filename="leads.csv"' });
+        const tab = tabOf(new URL(req.url, 'http://x').searchParams.get('tab'));
+        const leads = store.list().filter((l) => tab === 'all' || l.bracket === tab);
+        return send(res, 200, 'text/csv; charset=utf-8', leadsCsv(leads),
+          { 'Content-Disposition': `attachment; filename="leads${tab === 'all' ? '' : `-${tab}`}.csv"` });
       }
       if (method === 'POST') {
         if (!sameOriginPost(req)) return plain(res, 403, 'cross-site request refused; use the admin page itself', { Connection: 'close' });
@@ -507,7 +552,7 @@ export function createPortalServer(cfg, store, {
     if (logo && brand[logo]) {
       return send(res, 200, 'image/png', brand[logo].bytes, { 'Cache-Control': 'public, max-age=86400' });
     }
-    if (method === 'GET' && path === '/' && portalHosts.has(hostOf(req))) return html(res, 200, formPage(cfg, {}, brand));
+    if (method === 'GET' && path === '/' && portalHosts.has(hostOf(req))) return html(res, 200, formPage(cfg, { bracket: store.bracket() }, brand));
     // Every other URL, including the OS captive-portal probes, goes to the form.
     redirect(res, portalUrl, method === 'GET' ? 302 : 303);
   }

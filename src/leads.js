@@ -3,11 +3,14 @@ import { dirname, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 
 export const SOURCES = ['form', 'whatsapp'];
+// Gaming brackets. Staff pick which one new sign-ups join; a number can register once in each.
+export const BRACKETS = { normal: 'Normal', lcq: 'LCQ' };
 export const NAME_MAX = 80;
-export const COLUMNS = [
+const V1_COLUMNS = [
   'id', 'name', 'phone', 'source', 'eventCode', 'consentAt',
   'noticeVersion', 'createdAt', 'updatedAt', 'socialsSentAt',
 ];
+export const COLUMNS = [...V1_COLUMNS, 'bracket'];
 
 // Bidi overrides can make a stored name render as different text in the admin view.
 const STRIP_CHARS = /[\p{Cc}\p{Cs}\p{Co}\p{Cn}\u202A-\u202E\u2066-\u2069]/gu;
@@ -15,10 +18,10 @@ const STRIP_CHARS = /[\p{Cc}\p{Cs}\p{Co}\p{Cn}\u202A-\u202E\u2066-\u2069]/gu;
 // Contacts autofill and copy-paste wrap numbers in invisible format characters (\p{Cf}) and Unicode dashes.
 const PHONE_SEPARATORS = /[\s().\-\u2010-\u2015\u2212\p{Cf}]/gu;
 
-const SCHEMA = `
+const LEADS_TABLE = `
 CREATE TABLE IF NOT EXISTS leads (
   id INTEGER PRIMARY KEY,
-  phone TEXT NOT NULL UNIQUE,
+  phone TEXT NOT NULL,
   name TEXT NOT NULL,
   source TEXT NOT NULL CHECK (source IN ('form', 'whatsapp')),
   eventCode TEXT NOT NULL,
@@ -26,8 +29,35 @@ CREATE TABLE IF NOT EXISTS leads (
   noticeVersion TEXT NOT NULL,
   createdAt TEXT NOT NULL,
   updatedAt TEXT NOT NULL,
-  socialsSentAt TEXT
+  socialsSentAt TEXT,
+  bracket TEXT NOT NULL DEFAULT 'normal' CHECK (bracket IN ('normal', 'lcq')),
+  UNIQUE (phone, bracket)
 );`;
+const SCHEMA = `${LEADS_TABLE}
+CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);`;
+
+/**
+ * Databases from before brackets had one row per number. Rebuild the table with the per-bracket rule,
+ * every existing row as Normal, all in one transaction that keeps the old table unless every row copied.
+ */
+function addBrackets(db) {
+  const cols = db.prepare('PRAGMA table_info(leads)').all().map((c) => c.name);
+  if (cols.length === 0 || cols.includes('bracket')) return;
+  const count = (table) => db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get().n;
+  const before = count('leads');
+  const v1 = V1_COLUMNS.join(', ');
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    db.exec(`ALTER TABLE leads RENAME TO leads_v1; ${LEADS_TABLE}
+      INSERT INTO leads (${v1}, bracket) SELECT ${v1}, 'normal' FROM leads_v1;`);
+    const after = count('leads');
+    if (after !== before) throw new Error(`bracket upgrade copied ${after} of ${before} registrations`);
+    db.exec('DROP TABLE leads_v1; COMMIT;');
+  } catch (e) {
+    db.exec('ROLLBACK');
+    throw e;
+  }
+}
 
 export class ValidationError extends Error {
   constructor(message, field = null) {
@@ -81,13 +111,16 @@ export class LeadStore {
     this.db.exec('PRAGMA journal_mode = WAL;');
     // Overwrite deleted rows with zeros instead of leaving them in free pages: deletion must erase.
     this.db.exec('PRAGMA secure_delete = ON;');
+    addBrackets(this.db);
     this.db.exec(SCHEMA);
     const cols = COLUMNS.join(', ');
     this.stmts = {
-      byPhone: this.db.prepare(`SELECT ${cols} FROM leads WHERE phone = ?`),
+      byPhone: this.db.prepare(`SELECT ${cols} FROM leads WHERE phone = ? AND bracket = ?`),
       insert: this.db.prepare(
-        'INSERT INTO leads (phone, name, source, eventCode, consentAt, noticeVersion, createdAt, updatedAt)' +
-        ' VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(phone) DO NOTHING'),
+        'INSERT INTO leads (phone, name, source, eventCode, consentAt, noticeVersion, createdAt, updatedAt, bracket)' +
+        ' VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(phone, bracket) DO NOTHING'),
+      getSetting: this.db.prepare('SELECT value FROM settings WHERE key = ?'),
+      setSetting: this.db.prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value'),
       list: this.db.prepare(`SELECT ${cols} FROM leads ORDER BY id`),
       get: this.db.prepare(`SELECT ${cols} FROM leads WHERE id = ?`),
       remove: this.db.prepare('DELETE FROM leads WHERE id = ?'),
@@ -95,15 +128,27 @@ export class LeadStore {
     this.files?.sync(this.list());
   }
 
+  /** The bracket new sign-ups join; survives restarts. */
+  bracket() {
+    const value = this.stmts.getSetting.get('bracket')?.value;
+    return Object.hasOwn(BRACKETS, value) ? value : 'normal';
+  }
+
+  setBracket(bracket) {
+    if (!Object.hasOwn(BRACKETS, bracket)) throw new Error(`unknown bracket ${bracket}`);
+    this.stmts.setSetting.run('bracket', bracket);
+  }
+
   /**
-   * Register a phone number once. A number that is already registered is left untouched and
+   * Register a phone number once per bracket. A number already in that bracket is left untouched and
    * reported as { created: false, existing }; the UNIQUE constraint decides, so there is no race.
    */
-  register({ name, phone, source, eventCode, noticeVersion }) {
+  register({ name, phone, source, eventCode, noticeVersion, bracket = this.bracket() }) {
     if (!SOURCES.includes(source)) throw new Error(`unknown source ${source}`);
+    if (!Object.hasOwn(BRACKETS, bracket)) throw new Error(`unknown bracket ${bracket}`);
     const ts = now();
-    const { changes, lastInsertRowid } = this.stmts.insert.run(phone, name, source, eventCode, ts, noticeVersion, ts, ts);
-    if (changes === 0) return { created: false, existing: { ...this.stmts.byPhone.get(phone) } };
+    const { changes, lastInsertRowid } = this.stmts.insert.run(phone, name, source, eventCode, ts, noticeVersion, ts, ts, bracket);
+    if (changes === 0) return { created: false, existing: { ...this.stmts.byPhone.get(phone, bracket) } };
     this.changed('lead.created', Number(lastInsertRowid));
     return { created: true };
   }

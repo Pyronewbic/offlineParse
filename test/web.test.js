@@ -109,7 +109,7 @@ describe('portal server', () => {
     for (const phone of ['98765 43210', '+91 98765 43210', '098765-43210']) {
       const res = await postForm(port, '/submit', { name: 'Someone Else', phone, consent: 'yes' });
       assert.equal(res.status, 409, phone);
-      assert.match(res.body, /<p class="field-error" id="phone-error" role="alert">This number is already registered\./);
+      assert.match(res.body, /<p class="field-error" id="phone-error" role="alert">This number is already registered for Normal\./);
       assert.match(res.body, /value="Someone Else"/, 'what they typed is kept');
       assert.ok(!res.body.includes('Asha'), 'the existing registration is not revealed');
     }
@@ -120,7 +120,7 @@ describe('portal server', () => {
     await postForm(port, '/submit', VALID);
     const res = await postForm(port, '/admin/add', { name: 'Ravi', phone: '9876543210', token: await adminToken() });
     assert.equal(res.status, 409);
-    assert.match(res.body, /\+91 98765 43210 is already registered, as Asha Rao\./);
+    assert.match(res.body, /\+91 98765 43210 is already registered for Normal, as Asha Rao\./);
     assert.equal(store.list().length, 1);
   });
 
@@ -276,6 +276,54 @@ describe('portal server', () => {
     assert.equal((await request({ port, path: '/admin' })).headers['referrer-policy'], 'same-origin');
     assert.equal((await request({ port, path: '/' })).headers['referrer-policy'], 'no-referrer');
     assert.equal((await request({ port, path: '/generate_204' })).headers['referrer-policy'], 'no-referrer');
+  });
+
+  test('the admin switch decides the bracket guests register into; tabs and CSV split them', async () => {
+    const token = await adminToken();
+    const flip = (bracket, extra = {}) => postForm(port, '/admin/bracket', { bracket, token, ...extra });
+    assert.match((await request({ port, path: '/' })).body, /Registering for <strong>Normal<\/strong>/);
+    await postForm(port, '/submit', VALID);
+
+    const flipped = await flip('lcq', { tab: 'lcq' });
+    assert.equal(flipped.headers.location, '/admin?tab=lcq&msg=bracket');
+    assert.match((await request({ port, path: '/' })).body, /Registering for <strong>LCQ<\/strong>/);
+    const thanks = await postForm(port, '/submit', VALID);
+    assert.equal(thanks.status, 200, 'the same number can register in LCQ too');
+    assert.match(thanks.body, /down for <strong>LCQ<\/strong>/);
+    const dup = await postForm(port, '/submit', VALID);
+    assert.equal(dup.status, 409);
+    assert.match(dup.body, /already registered for LCQ\./);
+    await postForm(port, '/submit', { ...VALID, name: 'Ravi', phone: '9123456789' });
+
+    const admin = (await request({ port, path: '/admin?tab=lcq&msg=bracket' })).body;
+    assert.match(admin, /New sign-ups now go to LCQ\./);
+    assert.match(admin, /aria-pressed="true">LCQ</);
+    assert.match(admin, /<a href="\/admin">All \(3\)<\/a>/);
+    assert.match(admin, /aria-current="page">LCQ \(2\)</);
+    assert.match(admin, /Normal \(1\)/);
+    assert.equal((admin.match(/<tr><td class="num idx">/g) ?? []).length, 2, 'the LCQ tab lists only LCQ');
+    assert.match(admin, /href="\/admin\/export\.csv\?tab=lcq"/);
+
+    const csv = await request({ port, path: '/admin/export.csv?tab=lcq' });
+    assert.match(csv.headers['content-disposition'], /filename="leads-lcq\.csv"/);
+    assert.deepEqual(csv.body.trim().split('\r\n').slice(1).map((r) => r.split(',')[2]), ['LCQ', 'LCQ']);
+    const everyone = await request({ port, path: '/admin/export.csv?tab=nonsense' });
+    assert.match(everyone.headers['content-disposition'], /filename="leads\.csv"/);
+    assert.equal(everyone.body.trim().split('\r\n').length - 1, 3, 'an unknown tab means all');
+
+    assert.equal((await flip('finals')).status, 400);
+    assert.equal((await postForm(port, '/admin/bracket', { bracket: 'normal', token: 'wrong' })).status, 403);
+    assert.equal(store.bracket(), 'lcq', 'refused flips changed nothing');
+  });
+
+  test('the desk adds to the bracket it picks, and a repeat names the bracket', async () => {
+    const token = await adminToken();
+    await postForm(port, '/admin/add', { name: 'Ravi', phone: '9123456789', bracket: 'lcq', token });
+    const again = await postForm(port, '/admin/add', { name: 'Ravi', phone: '9123456789', bracket: 'lcq', token });
+    assert.equal(again.status, 409);
+    assert.match(again.body, /is already registered for LCQ, as Ravi\./);
+    assert.match(again.body, /<option value="lcq" selected>LCQ<\/option>/, 'the pick is kept');
+    assert.deepEqual(store.list().map((l) => [l.bracket, l.source]), [['lcq', 'whatsapp']]);
   });
 
   test('admin delete asks for confirmation, then removes the registration', async () => {

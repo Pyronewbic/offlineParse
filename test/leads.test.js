@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, test } from 'node:test';
+import { DatabaseSync } from 'node:sqlite';
 import { LeadStore, ValidationError, cleanName, normalizePhone } from '../src/leads.js';
 
 describe('normalizePhone', () => {
@@ -103,5 +104,60 @@ describe('LeadStore', () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe('brackets', () => {
+  let dir;
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'brackets-'));
+  });
+  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+  const reg = (store, phone, extra = {}) =>
+    store.register({ name: 'Asha', phone, source: 'form', eventCode: 'E', noticeVersion: 'v1', ...extra });
+
+  test('a number registers once per bracket, and new sign-ups join the bracket that is switched on', () => {
+    const store = new LeadStore(':memory:');
+    assert.equal(store.bracket(), 'normal');
+    assert.deepEqual(reg(store, '+919876543210'), { created: true });
+    store.setBracket('lcq');
+    assert.deepEqual(reg(store, '+919876543210'), { created: true }, 'same number, other bracket');
+    const again = reg(store, '+919876543210');
+    assert.equal(again.created, false);
+    assert.equal(again.existing.bracket, 'lcq');
+    assert.deepEqual(store.list().map((l) => l.bracket), ['normal', 'lcq']);
+    assert.throws(() => store.setBracket('finals'), /unknown bracket/);
+    assert.throws(() => reg(store, '+919123456789', { bracket: 'finals' }), /unknown bracket/);
+    store.close();
+  });
+
+  test('the switch survives a restart', () => {
+    const path = join(dir, 'leads.db');
+    const first = new LeadStore(path);
+    first.setBracket('lcq');
+    first.close();
+    const second = new LeadStore(path);
+    assert.equal(second.bracket(), 'lcq');
+    second.close();
+  });
+
+  test('a database from before brackets keeps every row as Normal and gains the per-bracket rule', () => {
+    const path = join(dir, 'leads.db');
+    const old = new DatabaseSync(path);
+    old.exec(`CREATE TABLE leads (id INTEGER PRIMARY KEY, phone TEXT NOT NULL UNIQUE, name TEXT NOT NULL,
+      source TEXT NOT NULL CHECK (source IN ('form', 'whatsapp')), eventCode TEXT NOT NULL, consentAt TEXT NOT NULL,
+      noticeVersion TEXT NOT NULL, createdAt TEXT NOT NULL, updatedAt TEXT NOT NULL, socialsSentAt TEXT);
+      INSERT INTO leads VALUES (3, '+919876543210', 'Asha', 'form', 'E', 't', 'v1', '2026-10-20T10:00:00Z', 't', NULL);
+      INSERT INTO leads VALUES (7, '+919123456789', 'Ravi', 'whatsapp', 'E', 't', 'none', '2026-10-20T11:00:00Z', 't', NULL);`);
+    old.close();
+
+    const store = new LeadStore(path);
+    assert.deepEqual(store.list().map((l) => [l.id, l.name, l.bracket]), [[3, 'Asha', 'normal'], [7, 'Ravi', 'normal']]);
+    assert.equal(reg(store, '+919876543210').created, false, 'still once per bracket');
+    assert.equal(reg(store, '+919876543210', { bracket: 'lcq' }).created, true, 'now allowed in LCQ');
+    store.close();
+    const reopened = new LeadStore(path);
+    assert.equal(reopened.list().length, 3, 'opening again changes nothing');
+    reopened.close();
   });
 });

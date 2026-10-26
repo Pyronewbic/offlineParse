@@ -66,7 +66,7 @@ npm start
 - **Linux:** ports below 1024 need root or `sudo setcap cap_net_bind_service=+ep "$(readlink -f "$(command -v node)")"`; open 80, 443 and 853/tcp and 53/udp in the firewall.
 - `npm run booth-ip -- --dry-run` shows the command; `--ip <address>` acts on another address. If `npm start` warns the booth address is gone, run `npm run booth-ip` again.
 
-**Admin:** `http://localhost/admin`, on the laptop only: search, add, delete, **Download CSV**, **Refresh** for new sign-ups.
+**Admin:** `http://localhost/admin`, on the laptop only. **New sign-ups go to** switches the bracket (Normal or LCQ) every new registration joins; the All / Normal / LCQ tabs split the list, and **Download CSV** exports the tab you're on. Also search, add, delete, **Refresh** for new sign-ups.
 
 **A phone gets no sign-in page:** run `npm start -- --verbose` and rejoin from the phone; each DNS question and web request is printed.
 - Nothing printed: the phone is not asking the laptop. A `169.254` address or none on the phone means the router's addresses ran out (see Router). Otherwise check the router's Primary DNS and that the phone's Private DNS is Off or Automatic.
@@ -81,7 +81,7 @@ npm start
 
 All in `data/`, owner-only on macOS and Linux; copy the folder to back up. On a Mac `npm start` keeps it out of Time Machine; on Windows keep the repo out of OneDrive and File History.
 
-- `leads.db`: the source of truth. A number registers once.
+- `leads.db`: the source of truth. A number registers once per bracket.
 - `leads.csv`: rewritten after every change, times in IST. Don't open it while the booth runs; open a **Download CSV** copy.
 - `leads.log`: one JSON line per registration or deletion, UTC.
 - **Delete** on the admin page erases a person from all three and frees the number; if a file can't be updated yet, the admin page says so and it is retried. Copies made elsewhere are not touched.

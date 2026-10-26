@@ -3,9 +3,10 @@ import {
   closeSync, constants, mkdirSync, openSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync, writeSync,
 } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
+import { BRACKETS } from './leads.js';
 
 const CSV_FORMULA_PREFIXES = ['=', '+', '-', '@', '\t', '\r'];
-const LOG_FIELDS = ['id', 'name', 'phone', 'source', 'eventCode'];
+const LOG_FIELDS = ['id', 'name', 'phone', 'source', 'eventCode', 'bracket'];
 const MAX_LOG_REWRITE_BYTES = 64 * 1024 * 1024;
 export const CSV_RETRY_MS = 15000;
 // Windows refuses to replace a file another app holds open, which is what Excel does with a CSV.
@@ -23,11 +24,15 @@ export function csvProblem(e, platform = process.platform) {
 const openLog = (path) =>
   openSync(path, constants.O_WRONLY | constants.O_APPEND | constants.O_CREAT | (constants.O_NOFOLLOW ?? 0), 0o600);
 
-/** Whether a log line belongs to a registration deleted at `until` (a later re-registration is kept). */
-function erases(line, { phone, until }) {
+// Log lines and pending erasures from before brackets have none; they were all Normal.
+const bracketOf = (x) => x.bracket ?? 'normal';
+const erasureKey = (lead) => `${lead.phone} ${bracketOf(lead)}`;
+
+/** Whether a log line belongs to a registration deleted at `until` (a later re-registration, or the other bracket, is kept). */
+function erases(line, { phone, until, bracket }) {
   try {
     const entry = JSON.parse(line);
-    return entry.phone === phone && !(Date.parse(entry.ts) > Date.parse(until));
+    return entry.phone === phone && bracketOf(entry) === (bracket ?? 'normal') && !(Date.parse(entry.ts) > Date.parse(until));
   } catch {
     return line.includes(phone);
   }
@@ -35,7 +40,7 @@ function erases(line, { phone, until }) {
 
 const MAX_PENDING_BYTES = 1024 * 1024;
 const validPending = (e) => e && Number.isSafeInteger(e.id) && typeof e.phone === 'string' && /^\+\d{8,15}$/.test(e.phone) &&
-  typeof e.until === 'string' && !Number.isNaN(Date.parse(e.until));
+  typeof e.until === 'string' && !Number.isNaN(Date.parse(e.until)) && ['normal', 'lcq', undefined].includes(e.bracket);
 const IST_OFFSET_MS = 330 * 60 * 1000; // India has no daylight saving, so a fixed +05:30 is exact
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -69,6 +74,7 @@ export const SOURCE_LABELS = { form: 'Wi-Fi form', whatsapp: 'WhatsApp message' 
 const SHEET = [
   ['ID', (l) => l.id, false],
   ['Name', (l) => l.name, true],
+  ['Bracket', (l) => BRACKETS[l.bracket] ?? l.bracket, true],
   ['WhatsApp number', (l) => l.phone, false],
   ['Came in via', (l) => SOURCE_LABELS[l.source] ?? l.source, true],
   ['Event', (l) => l.eventCode, true],
@@ -123,7 +129,7 @@ export class LeadFiles {
       if (e.code !== 'ENOENT') this.fail(this.pendingPath, new Error(`ignored, so these deletions may still be in the log: ${e.message}`));
       return;
     }
-    for (const e of entries) this.pendingErasures.set(e.phone, { id: e.id, phone: e.phone, until: e.until });
+    for (const e of entries) this.pendingErasures.set(erasureKey(e), { id: e.id, phone: e.phone, bracket: bracketOf(e), until: e.until });
   }
 
   savePending() {
@@ -183,7 +189,7 @@ export class LeadFiles {
 
   /** Whether a deleted person may still be in the log or the spreadsheet. */
   stillHolds(lead) {
-    return this.pendingErasures.has(lead.phone) || this.pendingCsv !== null;
+    return this.pendingErasures.has(erasureKey(lead)) || this.pendingCsv !== null;
   }
 
   /**
@@ -194,15 +200,15 @@ export class LeadFiles {
   forget(lead) {
     const until = new Date().toISOString();
     this.record('lead.deleted', lead, ['id']);
-    this.pendingErasures.set(lead.phone, { id: lead.id, phone: lead.phone, until });
+    this.pendingErasures.set(erasureKey(lead), { id: lead.id, phone: lead.phone, bracket: bracketOf(lead), until });
     this.flushErasures();
-    return !this.pendingErasures.has(lead.phone);
+    return !this.pendingErasures.has(erasureKey(lead));
   }
 
   flushErasures() {
     for (const entry of [...this.pendingErasures.values()]) {
       if (!this.scrub(entry)) break;
-      this.pendingErasures.delete(entry.phone);
+      this.pendingErasures.delete(erasureKey(entry));
     }
     this.savePending();
     const n = this.pendingErasures.size;

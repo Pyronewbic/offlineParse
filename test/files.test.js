@@ -30,11 +30,11 @@ test('toIST converts UTC to India time, including across midnight', () => {
 test('leadsCsv has readable headers, no socials columns, and India-time sign-up', () => {
   const lead = { id: 1, name: 'A', phone: '+919876543210', source: 'form', eventCode: 'E', consentAt: 'x',
     noticeVersion: 'v', createdAt: '2026-10-15T13:48:30Z', updatedAt: 'x', socialsSentAt: '2026-10-15T14:00:00Z' };
-  const csv = leadsCsv([lead, { ...lead, id: 2, source: 'whatsapp' }]);
+  const csv = leadsCsv([{ ...lead, bracket: 'normal' }, { ...lead, id: 2, source: 'whatsapp', bracket: 'lcq' }]);
   const [header, first, second] = csv.replace(/^\uFEFF/, '').split('\r\n');
-  assert.equal(header, 'ID,Name,WhatsApp number,Came in via,Event,Signed up (IST),Notice version');
-  assert.equal(first, '1,A,+919876543210,Wi-Fi form,E,2026-10-15 19:18 IST,v');
-  assert.equal(second, '2,A,+919876543210,WhatsApp message,E,2026-10-15 19:18 IST,v');
+  assert.equal(header, 'ID,Name,Bracket,WhatsApp number,Came in via,Event,Signed up (IST),Notice version');
+  assert.equal(first, '1,A,Normal,+919876543210,Wi-Fi form,E,2026-10-15 19:18 IST,v');
+  assert.equal(second, '2,A,LCQ,+919876543210,WhatsApp message,E,2026-10-15 19:18 IST,v');
   assert.ok(!/socials|Socials|2026-10-15T14:00/.test(csv), 'a stored socials date never reaches the sheet');
 });
 
@@ -75,8 +75,8 @@ describe('lead files', () => {
     assert.equal(readFileSync(csvPath, 'utf8'), leadsCsv(store.list()));
     const rows = csvRows(csvPath);
     assert.equal(rows.length, 2);
-    assert.match(rows[0], /^1,Asha,\+919876543210,Wi-Fi form,EVT26,\d{4}-\d\d-\d\d \d\d:\d\d IST,v1$/);
-    assert.match(rows[1], /^2,Ravi,\+919123456789,WhatsApp message,EVT26,/);
+    assert.match(rows[0], /^1,Asha,Normal,\+919876543210,Wi-Fi form,EVT26,\d{4}-\d\d-\d\d \d\d:\d\d IST,v1$/);
+    assert.match(rows[1], /^2,Ravi,Normal,\+919123456789,WhatsApp message,EVT26,/);
     assert.deepEqual(readdirSync(dir).filter((f) => f.endsWith('.tmp')), [], 'no temp files left behind');
   });
 
@@ -365,6 +365,18 @@ describe('deleting a registration', () => {
       server.close();
       server.closeAllConnections();
     }
+  });
+
+  test("deleting someone's LCQ registration keeps their Normal one in every file", () => {
+    reg('Zanzibar Quokka', '+919111122222');
+    store.setBracket('lcq');
+    reg('Zanzibar Quokka', '+919111122222');
+    const lcq = store.list().find((l) => l.bracket === 'lcq');
+    store.remove(lcq.id);
+    assert.deepEqual(store.list().map((l) => l.bracket), ['normal']);
+    assert.deepEqual(logEntries(paths().log).filter((e) => e.event === 'lead.created').map((e) => e.bracket), ['normal']);
+    assert.deepEqual(csvRows(paths().csv).map((r) => r.split(',')[2]), ['Normal']);
+    assert.deepEqual(files.warnings(), []);
   });
 
   test('an unknown id deletes nothing', () => {

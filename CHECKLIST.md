@@ -22,6 +22,7 @@ On each phone, forget the booth Wi-Fi, then scan the Wi-Fi QR:
 
 - [ ] Router on; laptop plugged in, on the booth Wi-Fi, with Auto-Join off for your other networks. "No internet connection" is normal.
 - [ ] `npm run booth-ip`, then `npm start` (Mac: `caffeinate -dims npm start`).
+- [ ] On the admin page, **New sign-ups go to** shows the bracket being played.
 - [ ] One test registration from a phone, then delete it.
 - [ ] Guests with no sign-in: follow the poster text (Samsung: Wi-Fi settings, the network's gear icon).
 - [ ] Watch sign-ups on the admin page; for a spreadsheet use **Download CSV**, never `data/leads.csv`.
