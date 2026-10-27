@@ -7,7 +7,6 @@ import { themeCss } from './theme.js';
 
 export const MAX_BODY = 8 * 1024;
 const MAX_FIELDS = 20;
-export const WHATSAPP_NOTICE = 'none (WhatsApp message)';
 const TOO_MANY = 'Too many sign-ups from this phone just now. Please wait a minute and try again.';
 const alreadyRegistered = (bracket) =>
   `This number is already registered for ${BRACKETS[bracket]}. Reach out to us at the desk if you need to change your details.`;
@@ -140,6 +139,7 @@ details.panel > summary h2{display:inline}
 .panel h2{margin:0 0 .2rem;font:900 1.1rem/1.2 ${HEAVY};text-transform:uppercase;letter-spacing:.03em}
 .panel .fields{display:flex;gap:10px 12px;align-items:flex-end;flex-wrap:wrap}
 .panel .fields > div{flex:1 1 170px}
+.panel .fields > label.check{flex:1 1 100%;margin-top:.4rem}
 .panel label{margin:.6rem 0 .3rem}
 .panel input[type=text],.panel input[type=tel],.panel input[type=search],.panel select{min-height:46px;font-size:16px}
 .panel input[type=search],.panel select{width:100%;padding:.6rem .85rem;font-family:inherit;color:var(--text);background:var(--surface);border:3px solid var(--line);border-radius:10px;-webkit-appearance:none;appearance:none}
@@ -158,7 +158,7 @@ table.reg{width:100%;border-collapse:separate;border-spacing:0;font-size:15px;ba
 .reg .idx{color:var(--muted);width:3.5rem}
 .reg .act{width:1%;text-align:right}
 .chip{display:inline-block;padding:2px 10px;border:2px solid var(--line);border-radius:999px;font-size:.8rem;font-weight:700;white-space:nowrap}
-.chip.whatsapp{background:var(--pink);color:var(--onPink)}
+.chip.desk{background:var(--pink);color:var(--onPink)}
 .toggle{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:0 0 16px;font-weight:800}
 .toggle button{padding:.5rem 1rem;box-shadow:none}
 .toggle button[aria-pressed=false]{color:var(--text);background:var(--surface)}
@@ -296,7 +296,7 @@ export function adminPage(cfg, {
     return `<tr><td class="num idx">${n}</td><th scope="row">${esc(lead.name)}</th>` +
       `<td><span class="chip">${esc(BRACKETS[lead.bracket] ?? lead.bracket)}</span></td>` +
       `<td class="num">${esc(displayPhone(lead.phone))}</td>` +
-      `<td><span class="chip ${lead.source === 'whatsapp' ? 'whatsapp' : 'form'}">${esc(SOURCE_LABELS[lead.source] ?? lead.source)}</span></td>` +
+      `<td><span class="chip ${lead.source === 'desk' ? 'desk' : 'form'}">${esc(SOURCE_LABELS[lead.source] ?? lead.source)}</span></td>` +
       `<td class="num">${esc(toISTShort(lead.createdAt))}</td>` +
       `<td class="act"><form class="inline" method="post" action="/admin/delete">${hidden(token, lead.id, tab)}` +
       `<button class="quiet" aria-label="Delete ${esc(lead.name)}">Delete</button></form></td></tr>`;
@@ -331,13 +331,13 @@ ${runner ? `<p class="hint">LCQ runner for a tablet on the booth Wi-Fi: <strong>
 <dl class="stats">
   <div class="stat"><dt>Total</dt><dd>${leads.length}</dd></div>
   <div class="stat"><dt>Wi-Fi form</dt><dd>${bySource('form')}</dd></div>
-  <div class="stat"><dt>WhatsApp</dt><dd>${bySource('whatsapp')}</dd></div>
+  <div class="stat"><dt>At the desk</dt><dd>${bySource('desk')}</dd></div>
   <div class="stat"><dt>Last sign-up</dt><dd>${last ? esc(toISTShort(last.createdAt)) : '-'}</dd></div>
 </dl>
 <div class="panels">
   <section class="panel" aria-labelledby="add-title">
     <h2 id="add-title">Add a registration</h2>
-    <p class="hint">For people who registered by WhatsApp message.</p>
+    <p class="hint">For on-spot registrations entered by staff.</p>
     ${errorBlock(error)}
     <form method="post" action="/admin/add" class="fields">
       <input type="hidden" name="token" value="${esc(token)}"><input type="hidden" name="tab" value="${esc(tab)}">
@@ -345,6 +345,8 @@ ${runner ? `<p class="hint">LCQ runner for a tablet on the booth Wi-Fi: <strong>
     `<option value="${b}"${b === addTo ? ' selected' : ''}>${label(b)}</option>`).join('')}</select></div>
       <div><label for="name">Name</label><input id="name" name="name" type="text" maxlength="${NAME_MAX}" required value="${esc(form.name ?? '')}"></div>
       <div><label for="phone">Mobile number</label><input id="phone" name="phone" type="tel" maxlength="20" required value="${esc(form.phone ?? '')}"></div>
+      <label class="check"><input type="checkbox" name="consent" value="yes" required${form.consent ? ' checked' : ''}>
+        <span>They agreed to ${esc(cfg.orgName)} keeping their name and number for this event's registration (read it to them).</span></label>
       <button type="submit">Add registration</button>
     </form>
   </section>
@@ -714,18 +716,20 @@ export function createPortalServer(cfg, store, {
     }
     if (path === '/admin/add') {
       const bracket = Object.hasOwn(BRACKETS, fields.bracket) ? fields.bracket : store.bracket();
-      const form = { name: String(fields.name ?? '').slice(0, NAME_MAX), phone: String(fields.phone ?? '').slice(0, 20), bracket };
+      const consent = fields.consent === 'yes';
+      const form = { name: String(fields.name ?? '').slice(0, NAME_MAX), phone: String(fields.phone ?? '').slice(0, 20), bracket, consent };
       let name;
       let phone;
       try {
         name = cleanName(fields.name);
         phone = normalizePhone(fields.phone);
+        if (!consent) throw new ValidationError('Tick that they agreed before adding them.');
       } catch (e) {
         if (!(e instanceof ValidationError)) throw e;
         return adminReply(400, { error: e.message, form });
       }
-      // They sent the prefilled WhatsApp text and never saw the form's notice, so do not record that one.
-      const result = store.register({ name, phone, source: 'whatsapp', eventCode: cfg.eventCode, noticeVersion: WHATSAPP_NOTICE, bracket });
+      // Staff read the same notice and ticked that the person agreed; source 'desk' tells these rows apart.
+      const result = store.register({ name, phone, source: 'desk', eventCode: cfg.eventCode, noticeVersion: cfg.noticeVersion, bracket });
       if (!result.created) {
         return adminReply(409, { error: `${displayPhone(phone)} is already registered for ${BRACKETS[bracket]}, as ${result.existing.name}.`, form });
       }

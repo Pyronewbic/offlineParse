@@ -3,7 +3,7 @@
 On-the-spot event registration where there is no cell signal. Guests join an offline Wi-Fi and register (name, mobile number, consent) on a form served from a laptop; staff manage registrations on a laptop-only admin page.
 
 - **Wi-Fi QR:** joins a router with no internet whose DNS is the laptop, so phones open the form as a sign-in page.
-- **WhatsApp QR (optional):** opens a prefilled message with the event code, sent once the guest has signal. Staff add these people on the admin page.
+- **At the desk:** staff can also register someone on the admin page, after reading them the consent line.
 - **Storage:** stays on the laptop in `data/`.
 
 Node 22.13+. The server has no dependencies; `qrcode` is only for the QR scripts. Before an event, do a dry run with [CHECKLIST.md](CHECKLIST.md).
@@ -20,8 +20,7 @@ npm test
 | Key | Meaning |
 |---|---|
 | `orgName` | Consent line, privacy note and the logo's alt text |
-| `eventName`, `eventCode` | WhatsApp prefilled message; `eventCode` also tags each registration |
-| `whatsappNumber` | For the WhatsApp QR, country code and no `+` (e.g. `919876543210`) |
+| `eventName`, `eventCode` | `eventCode` tags each registration |
 | `wifiSsid`, `wifiPassword` | Must match the router; empty password = open network |
 | `laptopIp` | The booth address, `"100.64.0.2"` |
 | `logoLight`, `logoDark` | PNG logos for light and dark phones; empty shows `orgName` |
@@ -47,7 +46,7 @@ Nothing in the WAN port. Join its Wi-Fi, open `http://192.168.0.1`, then:
 
 ### QR codes
 
-`npm run qr` writes `qr/wifi` and `qr/whatsapp` (print the `.svg`); `npm run qr:show` draws them in the terminal. Print under the Wi-Fi code:
+`npm run qr` writes `qr/wifi` (print the `.svg`); `npm run qr:show` draws it in the terminal. Print under it:
 
 > **Scan to join, then tap "Sign in"** (pull down from the top of the screen if it does not pop up).
 > Nothing? Turn off mobile data, then open **http://100.64.0.2**
@@ -77,8 +76,7 @@ npm start
 
 ## After the event
 
-1. Stop the server (Ctrl+C), then `npm run booth-ip:undo`. Required on macOS and Windows, or the laptop keeps `100.64.0.2` on every network.
-2. Add anyone who registered by WhatsApp (search WhatsApp for the event code) on the admin page.
+Stop the server (Ctrl+C), then run `npm run booth-ip:undo`. This is required on macOS and Windows, or the laptop keeps `100.64.0.2` on every network.
 
 ## Data
 

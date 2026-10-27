@@ -69,13 +69,13 @@ function csvCell(value) {
   return /[",;\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 
-export const SOURCE_LABELS = { form: 'Wi-Fi form', whatsapp: 'WhatsApp message' };
+export const SOURCE_LABELS = { form: 'Wi-Fi form', desk: 'Desk' };
 // Spreadsheet columns for people, not code: [header, value, guard against formula injection].
 const SHEET = [
   ['ID', (l) => l.id, false],
   ['Name', (l) => l.name, true],
   ['Bracket', (l) => BRACKETS[l.bracket] ?? l.bracket, true],
-  ['WhatsApp number', (l) => l.phone, false],
+  ['Mobile number', (l) => l.phone, false],
   ['Came in via', (l) => SOURCE_LABELS[l.source] ?? l.source, true],
   ['Event', (l) => l.eventCode, true],
   ['Signed up (IST)', (l) => toIST(l.createdAt), false],

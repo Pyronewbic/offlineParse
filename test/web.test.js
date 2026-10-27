@@ -118,7 +118,7 @@ describe('portal server', () => {
 
   test('admin add refuses an already-registered number and names who has it', async () => {
     await postForm(port, '/submit', VALID);
-    const res = await postForm(port, '/admin/add', { name: 'Ravi', phone: '9876543210', token: await adminToken() });
+    const res = await postForm(port, '/admin/add', { consent: 'yes', name: 'Ravi', phone: '9876543210', token: await adminToken() });
     assert.equal(res.status, 409);
     assert.match(res.body, /\+91 98765 43210 is already registered for Normal, as Asha Rao\./);
     assert.equal(store.list().length, 1);
@@ -163,7 +163,7 @@ describe('portal server', () => {
 
   test('admin lists registrations newest first, numbered down, with stats and no socials tools', async () => {
     await postForm(port, '/submit', VALID);
-    await postForm(port, '/admin/add', { name: 'Ravi Kumar', phone: '91234 56789', token: await adminToken() });
+    await postForm(port, '/admin/add', { consent: 'yes', name: 'Ravi Kumar', phone: '91234 56789', token: await adminToken() });
     await postForm(port, '/submit', { ...VALID, name: 'Meera', phone: '9000011111' });
     const res = await request({ port, path: '/admin' });
     assert.equal(res.status, 200);
@@ -171,9 +171,9 @@ describe('portal server', () => {
     assert.deepEqual(order, ['3 Meera', '2 Ravi Kumar', '1 Asha Rao']);
     assert.match(res.body, /<dt>Total<\/dt><dd>3<\/dd>/);
     assert.match(res.body, /<dt>Wi-Fi form<\/dt><dd>2<\/dd>/);
-    assert.match(res.body, /<dt>WhatsApp<\/dt><dd>1<\/dd>/);
+    assert.match(res.body, /<dt>At the desk<\/dt><dd>1<\/dd>/);
     assert.match(res.body, /<dt>Last sign-up<\/dt><dd>\d{1,2} [A-Z][a-z]{2}, \d{1,2}:\d\d [ap]m<\/dd>/);
-    assert.match(res.body, /<span class="chip whatsapp">WhatsApp message<\/span>/);
+    assert.match(res.body, /<span class="chip desk">Desk<\/span>/);
     assert.match(res.body, /<td class="num">\+91 98765 43210<\/td>/);
     assert.match(res.body, /<button class="quiet" aria-label="Delete Asha Rao">Delete<\/button>/);
     assert.match(res.body, /<caption class="sr-only">Registrations, newest first<\/caption>/);
@@ -205,7 +205,7 @@ describe('portal server', () => {
   });
 
   test('admin flash messages come from a fixed list; anything else in the URL is ignored', async () => {
-    const added = await postForm(port, '/admin/add', { name: 'Ravi', phone: '9123456789', token: await adminToken() });
+    const added = await postForm(port, '/admin/add', { consent: 'yes', name: 'Ravi', phone: '9123456789', token: await adminToken() });
     assert.equal(added.headers.location, '/admin?msg=added');
     assert.match((await request({ port, path: '/admin?msg=added' })).body, /<p class="flash" role="status">Registration added\.<\/p>/);
     for (const msg of ['<b>hi</b>', 'constructor', 'toString', '__proto__']) {
@@ -216,7 +216,7 @@ describe('portal server', () => {
   });
 
   test('a failed admin add keeps what was typed', async () => {
-    const res = await postForm(port, '/admin/add', { name: 'Ravi "R"', phone: '12345', token: await adminToken() });
+    const res = await postForm(port, '/admin/add', { consent: 'yes', name: 'Ravi "R"', phone: '12345', token: await adminToken() });
     assert.equal(res.status, 400);
     assert.match(res.body, /value="Ravi &quot;R&quot;"/);
     assert.match(res.body, /value="12345"/);
@@ -224,11 +224,11 @@ describe('portal server', () => {
 
   test('admin POSTs need the page token', async () => {
     for (const token of ['', 'wrong', '\u00FC'.repeat(43)]) {
-      const res = await postForm(port, '/admin/add', { name: 'Ravi', phone: '9123456789', token });
+      const res = await postForm(port, '/admin/add', { consent: 'yes', name: 'Ravi', phone: '9123456789', token });
       assert.equal(res.status, 403);
     }
     assert.equal(store.list().length, 0);
-    const ok = await postForm(port, '/admin/add', { name: 'Ravi', phone: '9123456789', token: await adminToken() });
+    const ok = await postForm(port, '/admin/add', { consent: 'yes', name: 'Ravi', phone: '9123456789', token: await adminToken() });
     assert.equal(ok.status, 303, 'positive control: the real token works');
     assert.equal(store.list().length, 1);
   });
@@ -256,7 +256,7 @@ describe('portal server', () => {
   test('admin POSTs from another origin are refused even with the token', async () => {
     const token = await adminToken();
     const add = (headers) => {
-      const body = new URLSearchParams({ name: 'Ravi', phone: '9123456789', token }).toString();
+      const body = new URLSearchParams({ name: 'Ravi', phone: '9123456789', token, consent: 'yes' }).toString();
       return request({ port, method: 'POST', path: '/admin/add', body, headers: {
         'Content-Type': 'application/x-www-form-urlencoded', 'Content-Length': Buffer.byteLength(body), ...headers } });
     };
@@ -318,12 +318,12 @@ describe('portal server', () => {
 
   test('the desk adds to the bracket it picks, and a repeat names the bracket', async () => {
     const token = await adminToken();
-    await postForm(port, '/admin/add', { name: 'Ravi', phone: '9123456789', bracket: 'lcq', token });
-    const again = await postForm(port, '/admin/add', { name: 'Ravi', phone: '9123456789', bracket: 'lcq', token });
+    await postForm(port, '/admin/add', { consent: 'yes', name: 'Ravi', phone: '9123456789', bracket: 'lcq', token });
+    const again = await postForm(port, '/admin/add', { consent: 'yes', name: 'Ravi', phone: '9123456789', bracket: 'lcq', token });
     assert.equal(again.status, 409);
     assert.match(again.body, /is already registered for LCQ, as Ravi\./);
     assert.match(again.body, /<option value="lcq" selected>LCQ<\/option>/, 'the pick is kept');
-    assert.deepEqual(store.list().map((l) => [l.bracket, l.source]), [['lcq', 'whatsapp']]);
+    assert.deepEqual(store.list().map((l) => [l.bracket, l.source]), [['lcq', 'desk']]);
   });
 
   test('admin delete asks for confirmation, then removes the registration', async () => {
@@ -352,22 +352,27 @@ describe('portal server', () => {
     assert.equal((await postForm(port, '/submit', VALID)).status, 200, 'the number can register again');
   });
 
-  test('admin can add a WhatsApp lead and rejects a bad number', async () => {
+  test('admin can add an on-spot registration and rejects a bad number', async () => {
     const token = await adminToken();
-    const bad = await postForm(port, '/admin/add', { name: 'Ravi', phone: '123', token });
+    const bad = await postForm(port, '/admin/add', { consent: 'yes', name: 'Ravi', phone: '123', token });
     assert.equal(bad.status, 400);
-    const ok = await postForm(port, '/admin/add', { name: 'Ravi', phone: '+91 91234 56789', token });
+    const ok = await postForm(port, '/admin/add', { consent: 'yes', name: 'Ravi', phone: '+91 91234 56789', token });
     assert.equal(ok.status, 303);
-    assert.deepEqual(store.list().map((l) => [l.phone, l.source]), [['+919123456789', 'whatsapp']]);
+    assert.deepEqual(store.list().map((l) => [l.phone, l.source]), [['+919123456789', 'desk']]);
   });
 
-  test('a desk-added WhatsApp registration does not claim the form notice the person never saw', async () => {
+  test('a desk entry needs the consent tick, then records the form notice and shows as Desk', async () => {
     await postForm(port, '/submit', VALID);
-    await postForm(port, '/admin/add', { name: 'Ravi', phone: '9123456789', token: await adminToken() });
-    assert.deepEqual(store.list().map((l) => [l.source, l.noticeVersion]),
-      [['form', cfg.noticeVersion], ['whatsapp', 'none (WhatsApp message)']]);
+    const token = await adminToken();
+    const unticked = await postForm(port, '/admin/add', { name: 'Ravi', phone: '9123456789', token });
+    assert.equal(unticked.status, 400);
+    assert.match(unticked.body, /Tick that they agreed before adding them\./);
+    assert.equal(store.list().length, 1, 'nothing added without the tick');
+    await postForm(port, '/admin/add', { consent: 'yes', name: 'Ravi', phone: '9123456789', token });
+    assert.deepEqual(store.list().map((l) => [l.source, l.noticeVersion]), [['form', cfg.noticeVersion], ['desk', cfg.noticeVersion]]);
     const csv = (await request({ port, path: '/admin/export.csv' })).body;
-    assert.match(csv, /,WhatsApp message,[^,]*,[^,]*,none \(WhatsApp message\)\r\n/);
+    assert.match(csv, new RegExp(`,Desk,[^,]*,[^,]*,${cfg.noticeVersion}\\r\\n`));
+    assert.ok(!/whatsapp/i.test(csv + (await request({ port, path: '/admin' })).body), 'no WhatsApp left on the page or sheet');
   });
 
   test('CSV export guards formula-looking names and keeps phones intact', async () => {
@@ -394,7 +399,7 @@ describe('portal server', () => {
       const res = await request({ host, port, path });
       assert.equal(res.status, 404, path);
     }
-    const post = await postForm(port, '/admin/add', { name: 'X', phone: '9876543210', token: await adminToken() }, { host });
+    const post = await postForm(port, '/admin/add', { consent: 'yes', name: 'X', phone: '9876543210', token: await adminToken() }, { host });
     assert.equal(post.status, 404);
     await postForm(port, '/submit', VALID);
     const del = await postForm(port, '/admin/delete', { id: store.list()[0].id, token: await adminToken(), confirm: 'yes' }, { host });

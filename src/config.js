@@ -1,14 +1,10 @@
 import { readFileSync } from 'node:fs';
 import { isIPv4 } from 'node:net';
-import { fill } from './payloads.js';
-
-export const SOCIAL_KEYS = ['instagram', 'youtube', 'discord'];
 
 const FIELD_TYPES = {
   orgName: 'string',
   eventName: 'string',
   eventCode: 'string',
-  whatsappNumber: 'string',
   wifiSsid: 'string',
   wifiPassword: 'string',
   laptopIp: 'string',
@@ -18,14 +14,13 @@ const FIELD_TYPES = {
   logoLight: 'string',
   logoDark: 'string',
   noticeVersion: 'string',
-  socials: 'object',
-  socialsMessage: 'string',
-  prefillMessage: 'string',
   lcqWinsToQualify: 'count',
   lcqLossesOut: 'count',
 };
 // Keys older config files lack: the LCQ rules default to qualify at 4 wins, out at 2 losses.
 const DEFAULTS = { lcqWinsToQualify: 4, lcqLossesOut: 2 };
+// Keys from the WhatsApp follow-up days. Named in the error so an old config.json is easy to fix.
+const RETIRED = ['whatsappNumber', 'socials', 'socialsMessage', 'prefillMessage'];
 
 export class ConfigError extends Error {}
 
@@ -45,6 +40,8 @@ export function configFromObject(raw) {
   }
   raw = { ...DEFAULTS, ...raw };
   const names = Object.keys(FIELD_TYPES);
+  const retired = Object.keys(raw).filter((k) => RETIRED.includes(k));
+  if (retired.length) throw new ConfigError(`no longer used, delete from config.json: ${retired.join(', ')}`);
   const unknown = Object.keys(raw).filter((k) => !names.includes(k));
   const missing = names.filter((k) => !(k in raw));
   if (unknown.length) throw new ConfigError(`unknown config keys: ${unknown.join(', ')}`);
@@ -55,7 +52,6 @@ export function configFromObject(raw) {
     const ok =
       type === 'port' ? Number.isInteger(value) && value >= 1 && value <= 65535
       : type === 'count' ? Number.isInteger(value) && value >= 1 && value <= 20
-      : type === 'object' ? value !== null && typeof value === 'object' && !Array.isArray(value)
       : typeof value === type;
     if (!ok) throw new ConfigError(`${key} must be ${type === 'port' ? 'an integer 1-65535' : type === 'count' ? 'a whole number 1-20' : `a ${type}`}`);
   }
@@ -65,9 +61,6 @@ export function configFromObject(raw) {
   }
   if (!/^[A-Za-z0-9_-]{1,32}$/.test(raw.eventCode)) {
     throw new ConfigError('eventCode must be 1-32 chars of A-Z a-z 0-9 _ -');
-  }
-  if (!/^[0-9]{8,15}$/.test(raw.whatsappNumber)) {
-    throw new ConfigError('whatsappNumber must be 8-15 digits with country code, no +, e.g. 919876543210');
   }
   const ssidBytes = Buffer.byteLength(raw.wifiSsid, 'utf8');
   if (ssidBytes < 1 || ssidBytes > 32) throw new ConfigError('wifiSsid must be 1-32 bytes');
@@ -85,23 +78,5 @@ export function configFromObject(raw) {
     if (raw[key].length > 512 || /\p{C}/u.test(raw[key])) throw new ConfigError(`${key} must be a file path or empty`);
   }
 
-  const socialKeys = Object.keys(raw.socials).sort();
-  if (socialKeys.join() !== [...SOCIAL_KEYS].sort().join()) {
-    throw new ConfigError(`socials must have exactly the keys ${SOCIAL_KEYS.join(', ')}`);
-  }
-  for (const [key, url] of Object.entries(raw.socials)) {
-    if (typeof url !== 'string' || !url.startsWith('https://')) {
-      throw new ConfigError(`socials.${key} must be an https:// URL`);
-    }
-  }
-
-  const sample = { name: 'x', orgName: 'x', eventName: 'x', eventCode: 'x', ...raw.socials };
-  for (const key of ['socialsMessage', 'prefillMessage']) {
-    try {
-      fill(raw[key], sample);
-    } catch (e) {
-      throw new ConfigError(`${key}: ${e.message}`);
-    }
-  }
-  return Object.freeze({ ...raw, socials: Object.freeze({ ...raw.socials }) });
+  return Object.freeze({ ...raw });
 }

@@ -30,11 +30,11 @@ test('toIST converts UTC to India time, including across midnight', () => {
 test('leadsCsv has readable headers, no socials columns, and India-time sign-up', () => {
   const lead = { id: 1, name: 'A', phone: '+919876543210', source: 'form', eventCode: 'E', consentAt: 'x',
     noticeVersion: 'v', createdAt: '2026-10-15T13:48:30Z', updatedAt: 'x', socialsSentAt: '2026-10-15T14:00:00Z' };
-  const csv = leadsCsv([{ ...lead, bracket: 'normal' }, { ...lead, id: 2, source: 'whatsapp', bracket: 'lcq' }]);
+  const csv = leadsCsv([{ ...lead, bracket: 'normal' }, { ...lead, id: 2, source: 'desk', bracket: 'lcq' }]);
   const [header, first, second] = csv.replace(/^\uFEFF/, '').split('\r\n');
-  assert.equal(header, 'ID,Name,Bracket,WhatsApp number,Came in via,Event,Signed up (IST),Notice version');
+  assert.equal(header, 'ID,Name,Bracket,Mobile number,Came in via,Event,Signed up (IST),Notice version');
   assert.equal(first, '1,A,Normal,+919876543210,Wi-Fi form,E,2026-10-15 19:18 IST,v');
-  assert.equal(second, '2,A,LCQ,+919876543210,WhatsApp message,E,2026-10-15 19:18 IST,v');
+  assert.equal(second, '2,A,LCQ,+919876543210,Desk,E,2026-10-15 19:18 IST,v');
   assert.ok(!/socials|Socials|2026-10-15T14:00/.test(csv), 'a stored socials date never reaches the sheet');
 });
 
@@ -71,12 +71,12 @@ describe('lead files', () => {
     assert.deepEqual(csvRows(csvPath), [], 'header-only sheet exists from startup');
     add();
     add({ name: 'Asha Again' });
-    add({ name: 'Ravi', phone: '+919123456789', source: 'whatsapp' });
+    add({ name: 'Ravi', phone: '+919123456789', source: 'desk' });
     assert.equal(readFileSync(csvPath, 'utf8'), leadsCsv(store.list()));
     const rows = csvRows(csvPath);
     assert.equal(rows.length, 2);
     assert.match(rows[0], /^1,Asha,Normal,\+919876543210,Wi-Fi form,EVT26,\d{4}-\d\d-\d\d \d\d:\d\d IST,v1$/);
-    assert.match(rows[1], /^2,Ravi,Normal,\+919123456789,WhatsApp message,EVT26,/);
+    assert.match(rows[1], /^2,Ravi,Normal,\+919123456789,Desk,EVT26,/);
     assert.deepEqual(readdirSync(dir).filter((f) => f.endsWith('.tmp')), [], 'no temp files left behind');
   });
 

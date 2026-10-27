@@ -14,7 +14,6 @@ On each phone, forget the booth Wi-Fi, then scan the Wi-Fi QR:
 - [ ] **Android:** "Sign in" appears (as a pop-up or in the notification shade), and the terminal shows `generate_204`.
 - [ ] **iPhone:** the sign-in sheet opens within about 10 seconds, and the terminal shows `hotspot-detect.html`.
 - [ ] Register a test name: the thank-you page shows, the name is on the admin page, the same number again is refused. Delete it.
-- [ ] WhatsApp QR (if used): with mobile data off it opens a chat with the message filled in.
 - [ ] LCQ tablet: join the booth Wi-Fi and stay on it (if a sign-in sheet appears, do not tap Cancel; choose to stay connected or use without internet), open the runner address, enter the PIN, and check it is still connected and updating after 15 minutes.
 
 **Windows:** the commands run in an administrator Command Prompt ("No rules match the specified criteria" on the first run is fine); sleep is off; after `npm run booth-ip:undo`, home Wi-Fi works again.
@@ -33,4 +32,3 @@ On each phone, forget the booth Wi-Fi, then scan the Wi-Fi QR:
 
 - [ ] Stop the server (Ctrl+C), then `npm run booth-ip:undo`.
 - [ ] **Download CSV** and copy `data/` somewhere safe.
-- [ ] Add anyone who registered by WhatsApp on the admin page.

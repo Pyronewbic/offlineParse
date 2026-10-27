@@ -1,4 +1,4 @@
-// Writes the two booth QR codes (Wi-Fi join + WhatsApp chat) to qr/, or with --terminal draws them in the
+// Writes the booth's Wi-Fi QR code to qr/, or with --terminal draws it in the
 // terminal to scan straight off the screen. Needs `npm install` once, with internet.
 import { mkdirSync } from 'node:fs';
 import { isIPv4 } from 'node:net';
@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { parseArgs } from 'node:util';
 import { ConfigError, loadConfig } from '../src/config.js';
 import { detectAddress } from '../src/netaddr.js';
-import { prefillText, whatsappLink, wifiPayload } from '../src/payloads.js';
+import { wifiPayload } from '../src/payloads.js';
 
 const { values } = parseArgs({
   options: {
@@ -27,11 +27,9 @@ try {
 
 const payloads = {
   wifi: wifiPayload(cfg.wifiSsid, cfg.wifiPassword),
-  whatsapp: whatsappLink(cfg.whatsappNumber, prefillText(cfg)),
 };
 const labels = {
   wifi: `Wi-Fi: join "${cfg.wifiSsid}"${cfg.wifiPassword ? '' : ' (open network)'}`,
-  whatsapp: `WhatsApp: message ${cfg.orgName}`,
 };
 if (!values.terminal) for (const [name, payload] of Object.entries(payloads)) console.log(`${name}: ${payload}`);
 if (isIPv4(cfg.laptopIp)) {

@@ -2,7 +2,8 @@ import { mkdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 
-export const SOURCES = ['form', 'whatsapp'];
+// Where a registration came from: the guest's own phone, or staff entering it at the desk.
+export const SOURCES = ['form', 'desk'];
 // Gaming brackets. Staff pick which one new sign-ups join; a number can register once in each.
 export const BRACKETS = { normal: 'Normal', lcq: 'LCQ' };
 export const NAME_MAX = 80;
@@ -23,7 +24,7 @@ CREATE TABLE IF NOT EXISTS leads (
   id INTEGER PRIMARY KEY,
   phone TEXT NOT NULL,
   name TEXT NOT NULL,
-  source TEXT NOT NULL CHECK (source IN ('form', 'whatsapp')),
+  source TEXT NOT NULL CHECK (source IN ('form', 'desk')),
   eventCode TEXT NOT NULL,
   consentAt TEXT NOT NULL,
   noticeVersion TEXT NOT NULL,
@@ -37,22 +38,24 @@ const SCHEMA = `${LEADS_TABLE}
 CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);`;
 
 /**
- * Databases from before brackets had one row per number. Rebuild the table with the per-bracket rule,
- * every existing row as Normal, all in one transaction that keeps the old table unless every row copied.
+ * Older databases had one row per number (before brackets) and called desk entries 'whatsapp'. Rebuild
+ * the table to today's schema in one transaction that keeps the old table unless every row copied.
  */
-function addBrackets(db) {
-  const cols = db.prepare('PRAGMA table_info(leads)').all().map((c) => c.name);
-  if (cols.length === 0 || cols.includes('bracket')) return;
-  const count = (table) => db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get().n;
+function upgrade(db) {
+  const table = db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'leads'").get();
+  if (!table || (table.sql.includes('bracket') && !table.sql.includes("'whatsapp'"))) return;
+  const hasBracket = table.sql.includes('bracket');
+  const count = (name) => db.prepare(`SELECT COUNT(*) AS n FROM ${name}`).get().n;
   const before = count('leads');
   const v1 = V1_COLUMNS.join(', ');
+  const select = V1_COLUMNS.map((c) => (c === 'source' ? "CASE source WHEN 'whatsapp' THEN 'desk' ELSE source END" : c)).join(', ');
   db.exec('BEGIN IMMEDIATE');
   try {
-    db.exec(`ALTER TABLE leads RENAME TO leads_v1; ${LEADS_TABLE}
-      INSERT INTO leads (${v1}, bracket) SELECT ${v1}, 'normal' FROM leads_v1;`);
+    db.exec(`ALTER TABLE leads RENAME TO leads_old; ${LEADS_TABLE}
+      INSERT INTO leads (${v1}, bracket) SELECT ${select}, ${hasBracket ? 'bracket' : "'normal'"} FROM leads_old;`);
     const after = count('leads');
-    if (after !== before) throw new Error(`bracket upgrade copied ${after} of ${before} registrations`);
-    db.exec('DROP TABLE leads_v1; COMMIT;');
+    if (after !== before) throw new Error(`database upgrade copied ${after} of ${before} registrations`);
+    db.exec('DROP TABLE leads_old; COMMIT;');
   } catch (e) {
     db.exec('ROLLBACK');
     throw e;
@@ -76,7 +79,7 @@ function indianMobile(digits) {
 
 export function normalizePhone(raw) {
   let s = String(raw ?? '').replace(PHONE_SEPARATORS, '');
-  if (!s) throw new ValidationError('Please enter your WhatsApp number.', 'phone');
+  if (!s) throw new ValidationError('Please enter your mobile number.', 'phone');
   if (s.length > 20) throw new ValidationError('That number is too long.', 'phone');
   if (s.startsWith('00')) s = `+${s.slice(2)}`;
   if (s.startsWith('+')) {
@@ -111,7 +114,7 @@ export class LeadStore {
     this.db.exec('PRAGMA journal_mode = WAL;');
     // Overwrite deleted rows with zeros instead of leaving them in free pages: deletion must erase.
     this.db.exec('PRAGMA secure_delete = ON;');
-    addBrackets(this.db);
+    upgrade(this.db);
     this.db.exec(SCHEMA);
     const cols = COLUMNS.join(', ');
     this.stmts = {

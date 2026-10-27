@@ -79,7 +79,7 @@ describe('LeadStore', () => {
     assert.deepEqual(add(), { created: true });
     const { id } = store.list()[0];
     const before = store.list();
-    const repeat = add({ name: 'Someone Else', source: 'whatsapp', noticeVersion: 'v2' });
+    const repeat = add({ name: 'Someone Else', source: 'desk', noticeVersion: 'v2' });
     assert.equal(repeat.created, false);
     assert.equal(repeat.existing.name, 'Asha');
     assert.equal(repeat.existing.id, id);
@@ -141,6 +141,23 @@ describe('brackets', () => {
     second.close();
   });
 
+  test('a database with brackets but WhatsApp desk entries keeps each bracket and relabels the source', () => {
+    const path = join(dir, 'leads.db');
+    const old = new DatabaseSync(path);
+    old.exec(`CREATE TABLE leads (id INTEGER PRIMARY KEY, phone TEXT NOT NULL, name TEXT NOT NULL,
+      source TEXT NOT NULL CHECK (source IN ('form', 'whatsapp')), eventCode TEXT NOT NULL, consentAt TEXT NOT NULL,
+      noticeVersion TEXT NOT NULL, createdAt TEXT NOT NULL, updatedAt TEXT NOT NULL, socialsSentAt TEXT,
+      bracket TEXT NOT NULL DEFAULT 'normal' CHECK (bracket IN ('normal', 'lcq')), UNIQUE (phone, bracket));
+      INSERT INTO leads VALUES (1, '+919876543210', 'Asha', 'form', 'E', 't', 'v1', '2026-10-20T10:00:00Z', 't', NULL, 'normal');
+      INSERT INTO leads VALUES (2, '+919876543210', 'Asha', 'whatsapp', 'E', 't', 'none', '2026-10-20T11:00:00Z', 't', NULL, 'lcq');`);
+    old.close();
+    const store = new LeadStore(path);
+    assert.deepEqual(store.list().map((l) => [l.id, l.bracket, l.source]), [[1, 'normal', 'form'], [2, 'lcq', 'desk']]);
+    assert.equal(reg(store, '+919123456789', { source: 'desk' }).created, true, 'new desk entries are accepted');
+    assert.throws(() => reg(store, '+919000011111', { source: 'whatsapp' }), /unknown source/);
+    store.close();
+  });
+
   test('a database from before brackets keeps every row as Normal and gains the per-bracket rule', () => {
     const path = join(dir, 'leads.db');
     const old = new DatabaseSync(path);
@@ -152,7 +169,8 @@ describe('brackets', () => {
     old.close();
 
     const store = new LeadStore(path);
-    assert.deepEqual(store.list().map((l) => [l.id, l.name, l.bracket]), [[3, 'Asha', 'normal'], [7, 'Ravi', 'normal']]);
+    assert.deepEqual(store.list().map((l) => [l.id, l.name, l.bracket, l.source]), [[3, 'Asha', 'normal', 'form'], [7, 'Ravi', 'normal', 'desk']],
+      'old WhatsApp desk entries become desk entries');
     assert.equal(reg(store, '+919876543210').created, false, 'still once per bracket');
     assert.equal(reg(store, '+919876543210', { bracket: 'lcq' }).created, true, 'now allowed in LCQ');
     store.close();

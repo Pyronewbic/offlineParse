@@ -26,16 +26,16 @@ function runTerminal(overrides) {
   }
 }
 
-test('qr:show prints the Wi-Fi and WhatsApp codes in order, without the Wi-Fi password', { skip: !hasQrcode && 'run npm install' }, () => {
+test('qr:show prints only the Wi-Fi code, without the Wi-Fi password', { skip: !hasQrcode && 'run npm install' }, () => {
   const r = runTerminal({ laptopIp: '100.64.0.2' });
   assert.equal(r.status, 0, r.stderr);
   const labels = r.stdout.split('\n').filter((l) => /^(Wi-Fi|Register|WhatsApp):/.test(l));
-  assert.deepEqual(labels, ['Wi-Fi: join "Versus Booth"', `WhatsApp: message ${rawConfig().orgName}`]);
+  assert.deepEqual(labels, ['Wi-Fi: join "Versus Booth"']);
   assert.ok(!r.stdout.includes('secret-pass-1'));
   assert.ok(r.stdout.includes('\u2580') || r.stdout.includes('\u2584'), 'QR blocks were drawn');
 });
 
-test('qr writes only the Wi-Fi and WhatsApp images', { skip: !hasQrcode && 'run npm install' }, () => {
+test('qr writes only the Wi-Fi images', { skip: !hasQrcode && 'run npm install' }, () => {
   const dir = mkdtempSync(join(tmpdir(), 'qr-'));
   try {
     const config = join(dir, 'config.json');
@@ -43,7 +43,7 @@ test('qr writes only the Wi-Fi and WhatsApp images', { skip: !hasQrcode && 'run 
     const out = join(dir, 'out');
     const r = spawnSync(process.execPath, [SCRIPT, '--config', config, '--out', out], { encoding: 'utf8' });
     assert.equal(r.status, 0, r.stderr);
-    assert.deepEqual(readdirSync(out).sort(), ['whatsapp.png', 'whatsapp.svg', 'wifi.png', 'wifi.svg']);
+    assert.deepEqual(readdirSync(out).sort(), ['wifi.png', 'wifi.svg']);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
