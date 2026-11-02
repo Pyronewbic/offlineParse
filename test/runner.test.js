@@ -104,6 +104,8 @@ describe('LCQ runner over HTTP', () => {
     assert.match(body, /P1 vs P3 <span class="chip">1W<\/span>/, 'both 1W players are offered a match');
     assert.match(body, /P2 vs P4 <span class="chip">0W<\/span>/);
     await post('/lcq/start', { a: String(m1.a), b: String(m2.a) }, cookie);
+    assert.match(await page(), /<strong>P1<\/strong> <span class="hint">1W 0L<\/span> vs <strong>P3<\/strong> <span class="hint">1W 0L<\/span>/,
+      'Playing shows each player\'s record');
     const final = lcq.state().open[0];
     await post('/lcq/result', { match: String(final.id), winner: String(final.a) }, cookie);
     assert.match(await page(), /<h3>Qualified, 2W \(1\)<\/h3><ul class="names"><li>P1 <span class="hint">2W 0L<\/span>/);

@@ -428,7 +428,9 @@ export function runnerPage(cfg, state, { brand = NO_BRAND, error = '', notice = 
   });
   const unpaired = groups.filter((g) => !g.paired).length;
 
-  const playing = open.map((m) => `<li><p class="match"><strong>${esc(m.aName)}</strong> vs <strong>${esc(m.bName)}</strong>` +
+  const byId = new Map(players.map((p) => [p.id, p]));
+  const who = (id, name) => `<strong>${esc(name)}</strong>${byId.has(id) ? ` <span class="hint">${record(byId.get(id))}</span>` : ''}`;
+  const playing = open.map((m) => `<li><p class="match">${who(m.a, m.aName)} vs ${who(m.b, m.bName)}` +
     `${m.groupId ? ` <span class="chip">Group ${m.groupId}</span>` : ''}</p><div class="won">` +
     `${runnerButton('result', { match: m.id, winner: m.a }, `${esc(m.aName)} won`)}` +
     `${runnerButton('result', { match: m.id, winner: m.b }, `${esc(m.bName)} won`)}</div>` +
