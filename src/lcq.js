@@ -113,7 +113,7 @@ export class Lcq {
         : decided.length === 0 && !groupPaired ? 'grouped'
         : 'free';
       const freeSince = decided.map((m) => m.decidedAt).sort().at(-1) ?? groupPaired ?? null;
-      return { id: l.id, name: l.name, wins, losses, status, groupId: groupOf.get(l.id) ?? null, freeSince };
+      return { id: l.id, name: l.name, phone: l.phone, wins, losses, status, groupId: groupOf.get(l.id) ?? null, freeSince };
     });
     const byId = new Map(players.map((p) => [p.id, p]));
     const name = (id) => byId.get(id)?.name ?? '(deleted)';

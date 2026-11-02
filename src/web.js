@@ -22,7 +22,17 @@ const ADMIN_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]']);
 const CSP = "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'";
 // The LCQ runner page alone runs a script: its own, which reloads the page when something changes.
 const RUNNER_CSP = CSP.replace("default-src 'none';", "default-src 'none'; script-src 'self'; connect-src 'self';");
+const waitText = (ms) => {
+  const m = Math.max(0, Math.floor(ms / 60000));
+  return m < 1 ? 'under 1 min' : m < 60 ? `${m} min` : `${Math.floor(m / 60)} h ${m % 60} min`;
+};
 const RUNNER_JS = `(() => {
+  // Waiting times count up from the server's figure, so the tablet's own clock does not matter.
+  const waitText = ${waitText};
+  let loadedAt = Date.now();
+  setInterval(() => {
+    for (const s of document.querySelectorAll('[data-wait]')) s.textContent = waitText(Number(s.dataset.wait) + Date.now() - loadedAt);
+  }, 30000);
   // Folded sections are remembered per tablet; storage can throw (private mode), so it is best effort.
   const KEY = 'lcq-open';
   const load = () => { try { return JSON.parse(localStorage.getItem(KEY)) || {}; } catch { return {}; } };
@@ -58,6 +68,7 @@ const RUNNER_JS = `(() => {
       next.querySelectorAll('script').forEach((s) => s.remove());
       document.querySelector('main').replaceWith(next);
       version = document.getElementById('version').dataset.version;
+      loadedAt = Date.now();
       apply();
     } catch {}
   }, 3000);
@@ -401,7 +412,7 @@ const fieldsOf = (fields) => Object.entries(fields).map(([k, v]) => `<input type
 const runnerButton = (action, fields, label, cls = '') =>
   `<form class="inline" method="post" action="/lcq/${action}">${fieldsOf(fields)}<button type="submit"${cls ? ` class="${cls}"` : ''}>${label}</button></form>`;
 
-export function runnerPage(cfg, state, { brand = NO_BRAND, error = '', notice = '', version = '' } = {}) {
+export function runnerPage(cfg, state, { brand = NO_BRAND, error = '', notice = '', version = '', now = Date.now() } = {}) {
   const { rules, players, groups, proposals, open, decided } = state;
   const record = (p) => `${p.wins}W ${p.losses}L`;
   const none = (text) => `<li class="hint">${text}</li>`;
@@ -451,15 +462,23 @@ export function runnerPage(cfg, state, { brand = NO_BRAND, error = '', notice = 
   const results = `<ul class="plain">${decided.slice(0, 5).map(resultRow).join('') || none('No results yet.')}</ul>` +
     (older.length ? `<details id="lcq-older"><summary>Older results (${older.length})</summary><ul class="plain">${older.map(resultRow).join('')}</ul></details>` : '');
 
-  const nameRows = (list) => `<ul class="names">${list.map((p) =>
-    `<li>${esc(p.name)} <span class="hint">${record(p)}${p.status === 'playing' ? ', playing' : ''}</span></li>`).join('')}</ul>`;
+  const waited = (p) => (p.status === 'free' && p.freeSince
+    ? `, waiting <span data-wait="${now - Date.parse(p.freeSince)}">${waitText(now - Date.parse(p.freeSince))}</span>` : '');
+  // Tap a name for the number, to call someone who has wandered off.
+  const nameRows = (list) => `<ul class="names">${list.map((p) => `<li><details><summary>${esc(p.name)} ` +
+    `<span class="hint">${record(p)}${p.status === 'playing' ? ', playing' : ''}${waited(p)}</span></summary>` +
+    `<span class="nowrap">${esc(displayPhone(p.phone))}</span></details></li>`).join('')}</ul>`;
   const bucket = (title, list, extra = '') => (list.length ? `<li><h3>${title} (${list.length})</h3>${nameRows(list)}${extra}</li>` : '');
   const active = players.filter((p) => ['grouped', 'playing', 'free'].includes(p.status));
   const queued = players.filter((p) => p.status === 'queued');
   const closeGroup = queued.length >= 2 ? runnerButton('close', {}, `Make a group of these ${queued.length}`, 'secondary') : '';
+  const count = (...statuses) => players.filter((p) => statuses.includes(p.status)).length;
+  const stats = `<dl class="stats">${[['Matches on', open.length], ['Waiting for a match', count('free', 'grouped')],
+    ['Waiting for a group', queued.length], ['Eliminated', count('out')], ['Dropped', count('dropped')]]
+    .map(([k, v]) => `<div class="stat"><dt>${k}</dt><dd>${v}</dd></div>`).join('')}</dl>`;
   const standings = bucket(`Qualified, ${rules.winsToQualify}W`, players.filter((p) => p.status === 'qualified')) +
     [...new Set(active.map((p) => p.wins))].sort((x, y) => y - x).map((w) => bucket(`${w}W`, active.filter((p) => p.wins === w))).join('') +
-    bucket(`Out, ${rules.lossesOut}L`, players.filter((p) => p.status === 'out')) +
+    bucket(`Eliminated, ${rules.lossesOut}L`, players.filter((p) => p.status === 'out')) +
     bucket('Dropped', players.filter((p) => p.status === 'dropped')) +
     bucket(`Waiting for a group, ${queued.length}/4`, queued, closeGroup) || none('No LCQ registrations yet.');
   const droppable = players.filter((p) => ['free', 'playing'].includes(p.status));
@@ -476,7 +495,7 @@ ${section('lcq-playing', 'Playing', open.length, `<ul class="plain">${playing}</
 ${section('lcq-ready', 'Ready to play', proposals.length, `<ul class="plain">${ready}</ul>${manual}`, true)}
 </div>
 ${section('lcq-results', 'Results', decided.length, results, true)}
-${section('lcq-standings', 'Standings', players.length, `<p class="hint">Group matches count toward wins and losses.</p><ul class="plain">${standings}</ul>`, false)}
+${section('lcq-standings', 'Standings', players.length, `${stats}<p class="hint">Group matches count toward wins and losses. Tap a name for their number.</p><ul class="plain">${standings}</ul>`, false)}
 ${section('lcq-drop', 'Drop a no-show', null, dropForm, false)}
 <script src="/lcq/app.js"></script>`, 'admin');
 }

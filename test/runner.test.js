@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { after, before, beforeEach, describe, test } from 'node:test';
 import { Lcq } from '../src/lcq.js';
 import { LeadStore } from '../src/leads.js';
-import { createPortalServer } from '../src/web.js';
+import { createPortalServer, runnerPage } from '../src/web.js';
 import { makeConfig, request } from './helpers.js';
 
 describe('LCQ runner over HTTP', () => {
@@ -108,7 +108,7 @@ describe('LCQ runner over HTTP', () => {
       'Playing shows each player\'s record');
     const final = lcq.state().open[0];
     await post('/lcq/result', { match: String(final.id), winner: String(final.a) }, cookie);
-    assert.match(await page(), /<h3>Qualified, 2W \(1\)<\/h3><ul class="names"><li>P1 <span class="hint">2W 0L<\/span>/);
+    assert.match(await page(), /<h3>Qualified, 2W \(1\)<\/h3><ul class="names"><li><details><summary>P1 <span class="hint">2W 0L<\/span>/);
   });
 
   test('layout: the most-tapped sections first and open, history and standings folded, pickers start blank', async () => {
@@ -141,6 +141,30 @@ describe('LCQ runner over HTTP', () => {
       assert.match(body, new RegExp(`name="${name}" required><option value="">Choose player</option>`), `${name} starts blank`);
     }
     assert.ok(!body.includes('id="lcq-pair"'), 'Groups to pair is hidden when there is nothing to pair');
+  });
+
+  test('standings count matches, waiting and eliminated players, show how long each has waited, and reveal a number on tap', () => {
+    signUp(13);
+    lcq.syncGroups();
+    lcq.pairGroup(1, 0);
+    lcq.pairGroup(2, 0);
+    const [m1, m2] = lcq.state().open;
+    lcq.result(m1.id, m1.a);
+    lcq.result(m2.id, m2.a);
+    lcq.start(m1.b, m2.b);
+    lcq.result(lcq.state().open.at(-1).id, m1.b);
+    const st = lcq.state();
+    const loser = st.players.find((p) => p.id === m2.b);
+    assert.equal(loser.status, 'out', 'precondition: 2 losses is eliminated');
+    const p1 = st.players.find((p) => p.id === m1.a);
+    const body = runnerPage(makeConfig(), st, { now: Date.parse(p1.freeSince) + 75 * 60_000 });
+    const stat = (k) => body.match(new RegExp(`<dt>${k}</dt><dd>(\\d+)</dd>`))?.[1];
+    assert.deepEqual([stat('Matches on'), stat('Waiting for a match'), stat('Waiting for a group'), stat('Eliminated'), stat('Dropped')],
+      ['2', '7', '1', '1', '0'], 'group 2 plays 2 matches; P1, P3, P2 free and group 3 unpaired; P13 has no group; P4 is out');
+    assert.match(body, new RegExp(`<summary>P1 <span class="hint">1W 0L, waiting <span data-wait="4500000">1 h 15 min</span></span></summary><span class="nowrap">\\+91 98765 00000</span></details>`));
+    assert.match(body, /<h3>Eliminated, 2L \(1\)<\/h3><ul class="names"><li><details><summary>P4 <span class="hint">0W 2L<\/span><\/summary>/,
+      'no waiting time once eliminated');
+    assert.match(body, /<summary>P9 <span class="hint">0W 0L<\/span><\/summary>/, 'no waiting time before a first match');
   });
 
   test('a refused action is explained once on the next page load', async () => {
