@@ -71,6 +71,14 @@ describe('entry point', () => {
     }
   });
 
+  test('--db keeps a practice run away from the configured database', async () => {
+    const { port, outcome, err } = await start({ laptopIp: '127.0.0.1' }, ['--db', join(dir, 'try', 'leads.db')]);
+    assert.equal(outcome, 'ready', err());
+    assert.equal((await postForm(port, '/submit', { name: 'Asha', phone: '9876543210', consent: 'yes' })).status, 200);
+    assert.ok(statSync(join(dir, 'try', 'leads.db')).size > 0, 'the sign-up went to the --db file');
+    assert.throws(() => statSync(join(dir, 'data', 'leads.db')), { code: 'ENOENT' }, 'the configured database was never created');
+  });
+
   test('a web port held by another program is explained, and nothing starts', async () => {
     const holder = createServer().listen(0, '0.0.0.0');
     await new Promise((r) => holder.once('listening', r));

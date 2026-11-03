@@ -29,6 +29,7 @@ async function main(argv) {
     options: {
       config: { type: 'string', default: 'config.json' },
       ip: { type: 'string' },
+      db: { type: 'string' },
       'no-dns': { type: 'boolean', default: false },
       quiet: { type: 'boolean', default: false },
       verbose: { type: 'boolean', default: false },
@@ -43,6 +44,7 @@ async function main(argv) {
     console.error(`config error: ${e.message}`);
     return 2;
   }
+  if (values.db) cfg = Object.freeze({ ...cfg, dbPath: values.db });
   let brand;
   try {
     brand = loadBrand(cfg);

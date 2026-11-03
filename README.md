@@ -13,6 +13,7 @@ Node 22.13+. The server has no dependencies; `qrcode` is only for the QR scripts
 ```sh
 npm install   # needs internet once
 npm test
+npm run try   # practice on this laptop, no router: http://localhost/admin and http://127.0.0.1/lcq, data in data/try/
 ```
 
 ### config.json
