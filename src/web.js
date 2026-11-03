@@ -68,7 +68,7 @@ const RUNNER_JS = `(() => {
     try {
       const r = await fetch('/lcq/version', { cache: 'no-store' });
       if (!r.ok || (await r.json()).v === version || busy()) return;
-      const page = await fetch('/lcq', { cache: 'no-store' });
+      const page = await fetch(location.pathname + location.search, { cache: 'no-store' });
       const next = new DOMParser().parseFromString(await page.text(), 'text/html').querySelector('main');
       if (!page.ok || !next || !next.querySelector('#version') || busy()) return;
       next.querySelectorAll('script').forEach((s) => s.remove());
@@ -140,6 +140,7 @@ details.panel > summary h2{display:inline}
 @media (orientation: portrait){.won{grid-template-columns:1fr}}
 .names{list-style:none;margin:.2rem 0 .4rem;padding:0;columns:2 14rem;column-gap:16px}
 .names li{padding:.2rem 0;break-inside:avoid;overflow-wrap:anywhere}
+.names details[open]{padding-bottom:.8rem}
 .jump{position:sticky;top:0;z-index:2;display:flex;gap:8px;overflow-x:auto;margin:0 -20px 16px;padding:8px 20px;background:var(--bg);border-bottom:2px solid var(--line)}
 .jump a{flex:none;display:flex;align-items:center;min-height:48px;padding:0 14px;border:2px solid var(--line);border-radius:999px;background:var(--surface);font-weight:700;text-decoration:none;white-space:nowrap}
 .attention{margin:0 0 16px;padding:.6rem .9rem;border:3px solid var(--line);border-left:12px solid var(--error);border-radius:10px;background:var(--errorBg)}
@@ -439,7 +440,7 @@ export const runnerVersion = (cfg, lcq, state, now = Date.now()) => {
   return `${lcq.version()}-${waiting.length}-${long.length}`;
 };
 
-export function runnerPage(cfg, state, { brand = NO_BRAND, error = '', notice = '', version = '', now = Date.now() } = {}) {
+export function runnerPage(cfg, state, { brand = NO_BRAND, error = '', notice = '', version = '', now = Date.now(), q = '' } = {}) {
   const { rules, players, groups, proposals, open, decided } = state;
   const record = (p) => `${p.wins}W ${p.losses}L`;
   const none = (text) => `<li class="hint">${text}</li>`;
@@ -491,10 +492,15 @@ export function runnerPage(cfg, state, { brand = NO_BRAND, error = '', notice = 
 
   const elapsed = (iso) => `<span data-wait="${now - Date.parse(iso)}">${waitText(now - Date.parse(iso))}</span>`;
   const waited = (p) => (p.status === 'free' && p.freeSince ? `, waiting ${elapsed(p.freeSince)}` : '');
-  // Tap a name for the number, to call someone who has wandered off.
-  const nameRows = (list) => `<ul class="names">${list.map((p) => `<li><details><summary>${esc(p.name)} ` +
-    `<span class="hint">${record(p)}${p.status === 'playing' ? ', playing' : ''}${waited(p)}</span></summary>` +
-    `<span class="nowrap">${esc(displayPhone(p.phone))}</span></details></li>`).join('')}</ul>`;
+  // A required tick stands in for "are you sure", so a stray tap cannot drop anyone.
+  const dropOne = (p) => (['free', 'playing'].includes(p.status) ? `<form method="post" action="/lcq/drop" class="fields">${fieldsOf({ player: p.id })}` +
+    `<label class="check"><input type="checkbox" name="confirm" value="yes" required><span>${esc(p.name)} is not here` +
+    `${p.status === 'playing' ? '; their match goes to the opponent' : ''}</span></label><button class="secondary" type="submit">Drop</button></form>` : '');
+  const STATUS = { playing: 'playing', qualified: 'qualified', out: 'eliminated', dropped: 'dropped', queued: 'waiting for a group', grouped: 'group not paired yet' };
+  // Tap a name for the number, to call someone who has wandered off, and to drop them.
+  const nameRows = (list, found = false) => `<ul class="names">${list.map((p) => `<li><details${found ? ' open' : ''}><summary>${esc(p.name)} ` +
+    `<span class="hint">${record(p)}${(found || p.status === 'playing') && STATUS[p.status] ? `, ${STATUS[p.status]}` : ''}${waited(p)}</span></summary>` +
+    `<span class="nowrap">${esc(displayPhone(p.phone))}</span>${dropOne(p)}</details></li>`).join('')}</ul>`;
   // Each bucket folds on its own, by a stable id; only the ones still in play start open.
   const bucket = (key, title, list, isOpen, extra = '') => (list.length ? `<li><details id="lcq-b-${key}"${isOpen ? ' open' : ''}>` +
     `<summary><h3>${title} (${list.length})</h3></summary>${nameRows(list)}${extra}</details></li>` : '');
@@ -525,23 +531,29 @@ export function runnerPage(cfg, state, { brand = NO_BRAND, error = '', notice = 
     toPair.length && ['lcq-pair', `Pair (${unpaired})`], ['lcq-playing', `Playing (${open.length})`], ['lcq-ready', `Ready (${proposals.length})`],
     ['lcq-results', 'Results'], ['lcq-standings', `Players (${players.length})`],
   ].filter(Boolean).map(([id, label]) => `<a href="#${id}">${label}</a>`).join('');
-  const droppable = players.filter((p) => ['free', 'playing'].includes(p.status));
-  const dropForm = droppable.length ? `<p class="hint">Their match, if any, goes to the opponent.</p>
-<form method="post" action="/lcq/drop" class="fields">${choose(droppable, 'drop', 'player', 'Player')}
-  <button class="secondary" type="submit">Drop</button></form>` : '<p class="hint">Nobody to drop.</p>';
+  const query = q.trim();
+  const found = query ? players.filter((p) => matchesSearch(p, query)) : [];
+  const FOUND_MAX = 20;
+  const foundRows = !query ? ''
+    : !found.length ? `<p class="hint">Nobody matches "${esc(query)}".</p>`
+    : `<p class="hint">${found.length > FOUND_MAX ? `First ${FOUND_MAX} of ${found.length}; type more of the name.` : `${found.length} found.`}</p>${nameRows(found.slice(0, FOUND_MAX), true)}`;
+  const search = `<section class="panel" id="lcq-find" aria-labelledby="lcq-find-title"><h2 id="lcq-find-title" class="sr-only">Find a player</h2>` +
+    `<form method="get" action="/lcq" class="fields" role="search"><div><label for="lcq-q">Find a player, by name or number</label>` +
+    `<input id="lcq-q" name="q" type="search" maxlength="60" value="${esc(q)}"></div><button class="secondary" type="submit">Find</button>` +
+    `${query ? '<a class="btn secondary" href="/lcq">Clear</a>' : ''}</form>${foundRows}</section>`;
 
   return page('LCQ runner', `<div id="version" data-version="${esc(version)}" hidden></div>
 ${adminHeader(cfg, brand, 'LCQ runner', `<span>Qualify at ${rules.winsToQualify} wins, out at ${rules.lossesOut} losses</span>`)}
 <nav class="jump" aria-label="Sections">${jumps}</nav>
 ${errorBlock(error)}${notice ? `<p class="flash" role="status">${esc(notice)}</p>` : ''}${banner}${attention}
+${search}
 ${toPair.length ? section('lcq-pair', 'Groups to pair', unpaired, `<ul class="plain">${toPair.join('')}</ul>`, true) : ''}
 <div class="duo">
 ${section('lcq-playing', 'Playing', open.length, `<ul class="plain">${playing}</ul>`, true)}
 ${section('lcq-ready', 'Ready to play', proposals.length, `<ul class="plain">${ready}</ul>${manual}`, true)}
 </div>
 ${section('lcq-results', 'Results', decided.length, results, true)}
-${section('lcq-standings', 'Standings', players.length, `${stats}<p class="hint">Group matches count toward wins and losses. Tap a name for their number.</p><ul class="plain">${standings}</ul>`, false)}
-${section('lcq-drop', 'Drop a no-show', null, dropForm, false)}
+${section('lcq-standings', 'Standings', players.length, `${stats}<p class="hint">Group matches count toward wins and losses. Tap a name for their number, or to drop a no-show.</p><ul class="plain">${standings}</ul>`, false)}
 <script src="/lcq/app.js"></script>`, 'admin');
 }
 
@@ -705,7 +717,10 @@ export function createPortalServer(cfg, store, {
         } else if (path === '/lcq/cancel') lcq.cancel(n('match'));
         else if (path === '/lcq/seen') lcq.markSeen();
         else if (path === '/lcq/close') lcq.closeGroup();
-        else if (path === '/lcq/drop') lcq.drop(n('player'));
+        else if (path === '/lcq/drop') {
+          if (fields.confirm === 'yes') lcq.drop(n('player'));
+          else flashes.set(session, { error: 'Tick that they are not here, then tap Drop.' });
+        }
         else return plain(res, 404, 'not found');
       } catch (e) {
         if (!(e instanceof LcqError)) throw e;
@@ -722,7 +737,8 @@ export function createPortalServer(cfg, store, {
     if (path === '/lcq/version') return send(res, 200, 'application/json', JSON.stringify({ v: version }));
     const { error = '', notice = '' } = flashes.get(session) ?? {};
     flashes.delete(session);
-    return send(res, 200, 'text/html; charset=utf-8', runnerPage(cfg, state, { brand, error, notice, version, now }),
+    const q = (new URL(req.url, 'http://x').searchParams.get('q') ?? '').slice(0, 60);
+    return send(res, 200, 'text/html; charset=utf-8', runnerPage(cfg, state, { brand, error, notice, version, now, q }),
       { 'Content-Security-Policy': RUNNER_CSP });
   }
 

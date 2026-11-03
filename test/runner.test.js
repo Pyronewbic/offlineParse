@@ -26,7 +26,7 @@ describe('LCQ runner over HTTP', () => {
   });
   beforeEach(() => {
     now += 120_000;
-    store.db.exec('DELETE FROM leads; DELETE FROM lcq_members; DELETE FROM lcq_groups; DELETE FROM lcq_matches;');
+    store.db.exec('DELETE FROM leads; DELETE FROM lcq_members; DELETE FROM lcq_groups; DELETE FROM lcq_matches; DELETE FROM lcq_drops;');
   });
 
   const post = (path, fields, headers = {}) => {
@@ -133,16 +133,17 @@ describe('LCQ runner over HTTP', () => {
     lcq.start(next.a.id, next.b.id);
     const body = (await request({ port, path: '/lcq', headers: cookie })).body;
     const at = (id) => body.indexOf(`id="${id}"`);
-    assert.ok(at('lcq-playing') < at('lcq-ready') && at('lcq-ready') < at('lcq-results') && at('lcq-results') < at('lcq-standings')
-      && at('lcq-standings') < at('lcq-drop'), 'Playing, Ready, Results, Standings, Drop');
-    for (const [id, open] of [['lcq-playing', true], ['lcq-ready', true], ['lcq-results', true], ['lcq-standings', false], ['lcq-drop', false]]) {
+    assert.ok(at('lcq-find') < at('lcq-playing') && at('lcq-playing') < at('lcq-ready') && at('lcq-ready') < at('lcq-results')
+      && at('lcq-results') < at('lcq-standings') && at('lcq-find') > 0, 'Find, Playing, Ready, Results, Standings');
+    for (const [id, open] of [['lcq-playing', true], ['lcq-ready', true], ['lcq-results', true], ['lcq-standings', false]]) {
       assert.equal(new RegExp(`<details class="panel" id="${id}" open>`).test(body), open, id);
     }
     assert.match(body, /<summary><h2>Results \(6\)<\/h2><\/summary>/);
     assert.match(body, /<summary>Older results \(1\)<\/summary>/, 'the newest 5 stay out, the rest fold away');
     assert.match(body, /<div class="won"><form class="inline" method="post" action="\/lcq\/result">/);
     assert.ok(!/action="\/lcq\/start">.*?<button type="submit">/.test(body), 'Start is never the pink primary button');
-    for (const name of ['a', 'b', 'player']) {
+    assert.ok(!body.includes('name="player" required>'), 'no list of every player to drop from');
+    for (const name of ['a', 'b']) {
       assert.match(body, new RegExp(`name="${name}" required><option value="">Choose player</option>`), `${name} starts blank`);
     }
     assert.ok(!body.includes('id="lcq-pair"'), 'Groups to pair is hidden when there is nothing to pair');
@@ -166,7 +167,7 @@ describe('LCQ runner over HTTP', () => {
     const stat = (k) => body.match(new RegExp(`<dt>${k}</dt><dd>(\\d+)</dd>`))?.[1];
     assert.deepEqual([stat('Matches on'), stat('Waiting for a match'), stat('Waiting for a group'), stat('Eliminated'), stat('Dropped')],
       ['2', '7', '1', '1', '0'], 'group 2 plays 2 matches; P1, P3, P2 free and group 3 unpaired; P13 has no group; P4 is out');
-    assert.match(body, new RegExp(`<summary>P1 <span class="hint">1W 0L, waiting <span data-wait="4500000">1 h 15 min</span></span></summary><span class="nowrap">\\+91 98765 00000</span></details>`));
+    assert.match(body, new RegExp(`<summary>P1 <span class="hint">1W 0L, waiting <span data-wait="4500000">1 h 15 min</span></span></summary><span class="nowrap">\\+91 98765 00000</span><form method="post" action="/lcq/drop"`));
     assert.match(body, /<h3>Eliminated, 2L \(1\)<\/h3><\/summary><ul class="names"><li><details><summary>P4 <span class="hint">0W 2L<\/span><\/summary>/,
       'no waiting time once eliminated');
     assert.match(body, /<summary>P9 <span class="hint">0W 0L<\/span><\/summary>/, 'no waiting time before a first match');
@@ -207,6 +208,42 @@ describe('LCQ runner over HTTP', () => {
     assert.match(body, /<nav class="jump" aria-label="Sections"><a href="#lcq-pair">Pair \(1\)<\/a><a href="#lcq-playing">Playing \(0\)<\/a>/ );
     assert.match(body, /<a href="#lcq-results">Results<\/a><a href="#lcq-standings">Players \(4\)<\/a><\/nav>/);
     for (const id of ['lcq-pair', 'lcq-playing', 'lcq-ready', 'lcq-results', 'lcq-standings']) assert.ok(body.includes(`id="${id}"`), `${id} exists`);
+  });
+
+  test('find a player by name or number: matches open with status and number; the tablet keeps the search while it updates', async () => {
+    const cookie = await signIn();
+    signUp(25);
+    lcq.syncGroups();
+    lcq.pairGroup(1, 0);
+    const find = async (q) => (await request({ port, path: `/lcq?q=${encodeURIComponent(q)}`, headers: cookie })).body;
+    const panel = (body) => body.match(/<section class="panel" id="lcq-find".*?<\/section>/)[0];
+    const byName = panel(await find('p1'));
+    assert.match(byName, /11 found\./, 'P1 and P10-P19, any case');
+    assert.match(byName, /<details open><summary>P1 <span class="hint">0W 0L, playing<\/span><\/summary><span class="nowrap">\+91 98765 00000<\/span><form method="post" action="\/lcq\/drop"/);
+    assert.match(byName, /<summary>P13 <span class="hint">0W 0L, group not paired yet<\/span>/);
+    assert.match(panel(await find('98765 00024')), /1 found\.<\/p><ul class="names"><li><details open><summary>P25 <span class="hint">0W 0L, waiting for a group/, 'by number');
+    assert.match(panel(await find('P')), /First 20 of 25; type more of the name\./);
+    assert.match(panel(await find('zz')), /Nobody matches "zz"\./);
+    const hostile = panel(await find('"><b>'));
+    assert.match(hostile, /value="&quot;&gt;&lt;b&gt;"/, 'the query is escaped in the box');
+    assert.match(hostile, /Nobody matches "&quot;&gt;&lt;b&gt;"\./, 'and in the message');
+    assert.ok(!panel(await request({ port, path: '/lcq', headers: cookie }).then((r) => r.body)).includes('found'), 'no search, no results');
+    assert.match((await request({ port, path: '/lcq/app.js' })).body, /fetch\(location\.pathname \+ location\.search,/, 'updates fetch the searched page');
+  });
+
+  test('drop needs the tick: without it nothing happens and the tablet says why', async () => {
+    const cookie = await signIn();
+    signUp(4);
+    lcq.syncGroups();
+    lcq.pairGroup(1, 0);
+    const p1 = lcq.state().players.find((p) => p.name === 'P1');
+    await post('/lcq/drop', { player: String(p1.id) }, cookie);
+    assert.equal(lcq.state().players.find((p) => p.id === p1.id).status, 'playing', 'not dropped');
+    assert.match((await request({ port, path: '/lcq', headers: cookie })).body, /Tick that they are not here, then tap Drop\./);
+    await post('/lcq/drop', { player: String(p1.id), confirm: 'yes' }, cookie);
+    assert.equal(lcq.state().players.find((p) => p.id === p1.id).status, 'dropped', 'positive control: dropped with the tick');
+    const body = (await request({ port, path: '/lcq?q=P1', headers: cookie })).body;
+    assert.match(body, /<summary>P1 <span class="hint">0W 1L, dropped<\/span><\/summary><span class="nowrap">[^<]*<\/span><\/details>/, 'no Drop for someone already dropped');
   });
 
   test('a refused action is explained once on the next page load', async () => {
