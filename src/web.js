@@ -51,6 +51,12 @@ const RUNNER_JS = `(() => {
     sessionStorage.removeItem('lcq-y');
     if (y !== null) addEventListener('load', () => scrollTo(0, Number(y)));
   } catch {}
+  // A jump link opens the folded section it points at.
+  addEventListener('click', (e) => {
+    const a = e.target.closest('a[href^="#lcq-"]');
+    const d = a && document.querySelector(a.hash);
+    if (d && d.tagName === 'DETAILS') d.open = true;
+  });
   let touching = false;
   addEventListener('touchstart', () => { touching = true; }, { passive: true });
   addEventListener('touchend', () => setTimeout(() => { touching = false; }, 400), { passive: true });
@@ -82,7 +88,7 @@ const CSS = `${themeCss()}
 body{margin:0;background:var(--bg);color:var(--text);font:500 17px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;-webkit-text-size-adjust:100%}
 main{max-width:28rem;margin:0 auto;padding:14px 16px 40px}
 main.admin{max-width:72rem;padding:16px 20px 48px}
-html{scroll-padding-top:64px}
+html{scroll-padding-top:84px}
 a{color:inherit}
 .brand{margin:0 0 14px}
 .brand img{display:block;width:100%;max-width:250px;height:auto;margin:0 auto}
@@ -134,6 +140,12 @@ details.panel > summary h2{display:inline}
 @media (orientation: portrait){.won{grid-template-columns:1fr}}
 .names{list-style:none;margin:.2rem 0 .4rem;padding:0;columns:2 14rem;column-gap:16px}
 .names li{padding:.2rem 0;break-inside:avoid;overflow-wrap:anywhere}
+.jump{position:sticky;top:0;z-index:2;display:flex;gap:8px;overflow-x:auto;margin:0 -20px 16px;padding:8px 20px;background:var(--bg);border-bottom:2px solid var(--line)}
+.jump a{flex:none;display:flex;align-items:center;min-height:48px;padding:0 14px;border:2px solid var(--line);border-radius:999px;background:var(--surface);font-weight:700;text-decoration:none;white-space:nowrap}
+.attention{margin:0 0 16px;padding:.6rem .9rem;border:3px solid var(--line);border-left:12px solid var(--error);border-radius:10px;background:var(--errorBg)}
+.attention h2{margin:0;font-size:1rem}
+.attention ul{list-style:none;margin:0;padding:0}
+.attention a{display:block;padding:12px 0;font-weight:700}
 .topbar{display:flex;align-items:center;gap:14px 18px;flex-wrap:wrap;padding:0 0 14px;margin:0 0 18px;border-bottom:3px solid var(--line)}
 .topbar img{display:block;height:58px;width:auto}
 .topbar .wordmark{margin:0;font-size:1.4rem}
@@ -412,6 +424,21 @@ const fieldsOf = (fields) => Object.entries(fields).map(([k, v]) => `<input type
 const runnerButton = (action, fields, label, cls = '') =>
   `<form class="inline" method="post" action="/lcq/${action}">${fieldsOf(fields)}<button type="submit"${cls ? ` class="${cls}"` : ''}>${label}</button></form>`;
 
+/** Players waiting and matches running past the config limits, longest first. */
+export function overdue(cfg, { players, open }, now = Date.now()) {
+  const since = (iso) => now - Date.parse(iso);
+  return {
+    waiting: players.filter((p) => p.status === 'free' && p.freeSince && since(p.freeSince) >= cfg.lcqWaitAlertMin * 60_000)
+      .sort((x, y) => x.freeSince.localeCompare(y.freeSince)),
+    long: open.filter((m) => since(m.createdAt) >= cfg.lcqMatchAlertMin * 60_000),
+  };
+}
+// The tablet reloads when the data changes or someone newly crosses a time limit.
+export const runnerVersion = (cfg, lcq, state, now = Date.now()) => {
+  const { waiting, long } = overdue(cfg, state, now);
+  return `${lcq.version()}-${waiting.length}-${long.length}`;
+};
+
 export function runnerPage(cfg, state, { brand = NO_BRAND, error = '', notice = '', version = '', now = Date.now() } = {}) {
   const { rules, players, groups, proposals, open, decided } = state;
   const record = (p) => `${p.wins}W ${p.losses}L`;
@@ -462,13 +489,15 @@ export function runnerPage(cfg, state, { brand = NO_BRAND, error = '', notice = 
   const results = `<ul class="plain">${decided.slice(0, 5).map(resultRow).join('') || none('No results yet.')}</ul>` +
     (older.length ? `<details id="lcq-older"><summary>Older results (${older.length})</summary><ul class="plain">${older.map(resultRow).join('')}</ul></details>` : '');
 
-  const waited = (p) => (p.status === 'free' && p.freeSince
-    ? `, waiting <span data-wait="${now - Date.parse(p.freeSince)}">${waitText(now - Date.parse(p.freeSince))}</span>` : '');
+  const elapsed = (iso) => `<span data-wait="${now - Date.parse(iso)}">${waitText(now - Date.parse(iso))}</span>`;
+  const waited = (p) => (p.status === 'free' && p.freeSince ? `, waiting ${elapsed(p.freeSince)}` : '');
   // Tap a name for the number, to call someone who has wandered off.
   const nameRows = (list) => `<ul class="names">${list.map((p) => `<li><details><summary>${esc(p.name)} ` +
     `<span class="hint">${record(p)}${p.status === 'playing' ? ', playing' : ''}${waited(p)}</span></summary>` +
     `<span class="nowrap">${esc(displayPhone(p.phone))}</span></details></li>`).join('')}</ul>`;
-  const bucket = (title, list, extra = '') => (list.length ? `<li><h3>${title} (${list.length})</h3>${nameRows(list)}${extra}</li>` : '');
+  // Each bucket folds on its own, by a stable id; only the ones still in play start open.
+  const bucket = (key, title, list, isOpen, extra = '') => (list.length ? `<li><details id="lcq-b-${key}"${isOpen ? ' open' : ''}>` +
+    `<summary><h3>${title} (${list.length})</h3></summary>${nameRows(list)}${extra}</details></li>` : '');
   const active = players.filter((p) => ['grouped', 'playing', 'free'].includes(p.status));
   const queued = players.filter((p) => p.status === 'queued');
   const closeGroup = queued.length >= 2 ? runnerButton('close', {}, `Make a group of these ${queued.length}`, 'secondary') : '';
@@ -476,11 +505,26 @@ export function runnerPage(cfg, state, { brand = NO_BRAND, error = '', notice = 
   const stats = `<dl class="stats">${[['Matches on', open.length], ['Waiting for a match', count('free', 'grouped')],
     ['Waiting for a group', queued.length], ['Eliminated', count('out')], ['Dropped', count('dropped')]]
     .map(([k, v]) => `<div class="stat"><dt>${k}</dt><dd>${v}</dd></div>`).join('')}</dl>`;
-  const standings = bucket(`Qualified, ${rules.winsToQualify}W`, players.filter((p) => p.status === 'qualified')) +
-    [...new Set(active.map((p) => p.wins))].sort((x, y) => y - x).map((w) => bucket(`${w}W`, active.filter((p) => p.wins === w))).join('') +
-    bucket(`Eliminated, ${rules.lossesOut}L`, players.filter((p) => p.status === 'out')) +
-    bucket('Dropped', players.filter((p) => p.status === 'dropped')) +
-    bucket(`Waiting for a group, ${queued.length}/4`, queued, closeGroup) || none('No LCQ registrations yet.');
+  const standings = bucket('qualified', `Qualified, ${rules.winsToQualify}W`, players.filter((p) => p.status === 'qualified'), false) +
+    [...new Set(active.map((p) => p.wins))].sort((x, y) => y - x)
+      .map((w) => bucket(`w${w}`, `${w}W`, active.filter((p) => p.wins === w), true)).join('') +
+    bucket('out', `Eliminated, ${rules.lossesOut}L`, players.filter((p) => p.status === 'out'), false) +
+    bucket('dropped', 'Dropped', players.filter((p) => p.status === 'dropped'), false) +
+    bucket('queued', `Waiting for a group, ${queued.length}/4`, queued, true, closeGroup) || none('No LCQ registrations yet.');
+
+  const { waiting, long } = overdue(cfg, state, now);
+  const MAX = 5;
+  const more = (list) => (list.length > MAX ? `<li>and ${list.length - MAX} more</li>` : '');
+  const flags = [
+    unpaired ? `<li><a href="#lcq-pair">${unpaired} group${unpaired > 1 ? 's' : ''} to pair</a></li>` : '',
+    ...waiting.slice(0, MAX).map((p) => `<li><a href="#lcq-ready">${esc(p.name)} waiting ${elapsed(p.freeSince)}</a></li>`), more(waiting),
+    ...long.slice(0, MAX).map((m) => `<li><a href="#lcq-playing">${esc(m.aName)} vs ${esc(m.bName)} running ${elapsed(m.createdAt)}</a></li>`), more(long),
+  ].join('');
+  const attention = flags ? `<section class="attention" aria-labelledby="lcq-attention"><h2 id="lcq-attention">Needs attention</h2><ul>${flags}</ul></section>` : '';
+  const jumps = [
+    toPair.length && ['lcq-pair', `Pair (${unpaired})`], ['lcq-playing', `Playing (${open.length})`], ['lcq-ready', `Ready (${proposals.length})`],
+    ['lcq-results', 'Results'], ['lcq-standings', `Players (${players.length})`],
+  ].filter(Boolean).map(([id, label]) => `<a href="#${id}">${label}</a>`).join('');
   const droppable = players.filter((p) => ['free', 'playing'].includes(p.status));
   const dropForm = droppable.length ? `<p class="hint">Their match, if any, goes to the opponent.</p>
 <form method="post" action="/lcq/drop" class="fields">${choose(droppable, 'drop', 'player', 'Player')}
@@ -488,7 +532,8 @@ export function runnerPage(cfg, state, { brand = NO_BRAND, error = '', notice = 
 
   return page('LCQ runner', `<div id="version" data-version="${esc(version)}" hidden></div>
 ${adminHeader(cfg, brand, 'LCQ runner', `<span>Qualify at ${rules.winsToQualify} wins, out at ${rules.lossesOut} losses</span>`)}
-${errorBlock(error)}${notice ? `<p class="flash" role="status">${esc(notice)}</p>` : ''}${banner}
+<nav class="jump" aria-label="Sections">${jumps}</nav>
+${errorBlock(error)}${notice ? `<p class="flash" role="status">${esc(notice)}</p>` : ''}${banner}${attention}
 ${toPair.length ? section('lcq-pair', 'Groups to pair', unpaired, `<ul class="plain">${toPair.join('')}</ul>`, true) : ''}
 <div class="duo">
 ${section('lcq-playing', 'Playing', open.length, `<ul class="plain">${playing}</ul>`, true)}
@@ -671,10 +716,13 @@ export function createPortalServer(cfg, store, {
     if (method !== 'GET' || (path !== '/lcq' && path !== '/lcq/version')) return plain(res, 404, 'not found');
     if (!session) return path === '/lcq' ? html(res, 200, pinPage(cfg, brand)) : plain(res, 401, 'enter the PIN at /lcq');
     lcq.syncGroups();
-    if (path === '/lcq/version') return send(res, 200, 'application/json', JSON.stringify({ v: lcq.version() }));
+    const state = lcq.state();
+    const now = Date.now();
+    const version = runnerVersion(cfg, lcq, state, now);
+    if (path === '/lcq/version') return send(res, 200, 'application/json', JSON.stringify({ v: version }));
     const { error = '', notice = '' } = flashes.get(session) ?? {};
     flashes.delete(session);
-    return send(res, 200, 'text/html; charset=utf-8', runnerPage(cfg, lcq.state(), { brand, error, notice, version: lcq.version() }),
+    return send(res, 200, 'text/html; charset=utf-8', runnerPage(cfg, state, { brand, error, notice, version, now }),
       { 'Content-Security-Policy': RUNNER_CSP });
   }
 

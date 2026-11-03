@@ -16,9 +16,11 @@ const FIELD_TYPES = {
   noticeVersion: 'string',
   lcqWinsToQualify: 'count',
   lcqLossesOut: 'count',
+  lcqWaitAlertMin: 'minutes',
+  lcqMatchAlertMin: 'minutes',
 };
-// Keys older config files lack: the LCQ rules default to qualify at 4 wins, out at 2 losses.
-const DEFAULTS = { lcqWinsToQualify: 4, lcqLossesOut: 2 };
+// Keys older config files lack: qualify at 4 wins, out at 2 losses; flag a 10-minute wait or a 15-minute match.
+const DEFAULTS = { lcqWinsToQualify: 4, lcqLossesOut: 2, lcqWaitAlertMin: 10, lcqMatchAlertMin: 15 };
 // Keys from the WhatsApp follow-up days. Named in the error so an old config.json is easy to fix.
 const RETIRED = ['whatsappNumber', 'socials', 'socialsMessage', 'prefillMessage'];
 
@@ -52,8 +54,12 @@ export function configFromObject(raw) {
     const ok =
       type === 'port' ? Number.isInteger(value) && value >= 1 && value <= 65535
       : type === 'count' ? Number.isInteger(value) && value >= 1 && value <= 20
+      : type === 'minutes' ? Number.isInteger(value) && value >= 1 && value <= 240
       : typeof value === type;
-    if (!ok) throw new ConfigError(`${key} must be ${type === 'port' ? 'an integer 1-65535' : type === 'count' ? 'a whole number 1-20' : `a ${type}`}`);
+    if (!ok) {
+      const want = { port: 'an integer 1-65535', count: 'a whole number 1-20', minutes: 'a whole number of minutes, 1-240' }[type] ?? `a ${type}`;
+      throw new ConfigError(`${key} must be ${want}`);
+    }
   }
 
   for (const key of ['orgName', 'eventName', 'dbPath', 'noticeVersion']) {

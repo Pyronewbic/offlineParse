@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { after, before, beforeEach, describe, test } from 'node:test';
 import { Lcq } from '../src/lcq.js';
 import { LeadStore } from '../src/leads.js';
-import { createPortalServer, runnerPage } from '../src/web.js';
+import { createPortalServer, overdue, runnerPage, runnerVersion } from '../src/web.js';
 import { makeConfig, request } from './helpers.js';
 
 describe('LCQ runner over HTTP', () => {
@@ -108,7 +108,12 @@ describe('LCQ runner over HTTP', () => {
       'Playing shows each player\'s record');
     const final = lcq.state().open[0];
     await post('/lcq/result', { match: String(final.id), winner: String(final.a) }, cookie);
-    assert.match(await page(), /<h3>Qualified, 2W \(1\)<\/h3><ul class="names"><li><details><summary>P1 <span class="hint">2W 0L<\/span>/);
+    const done = await page();
+    assert.match(done, /<details id="lcq-b-qualified"><summary>/, 'Qualified starts folded');
+    assert.match(done, /<details id="lcq-b-w1" open><summary><h3>1W \(1\)/, 'a win bucket still in play starts open');
+    assert.equal(done.match(/data-version="([^"]+)"/)[1], JSON.parse((await request({ port, path: '/lcq/version', headers: cookie })).body).v,
+      'the page and the poll agree, or the tablet would reload forever');
+    assert.match(await page(), /<h3>Qualified, 2W \(1\)<\/h3><\/summary><ul class="names"><li><details><summary>P1 <span class="hint">2W 0L<\/span>/);
   });
 
   test('layout: the most-tapped sections first and open, history and standings folded, pickers start blank', async () => {
@@ -162,9 +167,46 @@ describe('LCQ runner over HTTP', () => {
     assert.deepEqual([stat('Matches on'), stat('Waiting for a match'), stat('Waiting for a group'), stat('Eliminated'), stat('Dropped')],
       ['2', '7', '1', '1', '0'], 'group 2 plays 2 matches; P1, P3, P2 free and group 3 unpaired; P13 has no group; P4 is out');
     assert.match(body, new RegExp(`<summary>P1 <span class="hint">1W 0L, waiting <span data-wait="4500000">1 h 15 min</span></span></summary><span class="nowrap">\\+91 98765 00000</span></details>`));
-    assert.match(body, /<h3>Eliminated, 2L \(1\)<\/h3><ul class="names"><li><details><summary>P4 <span class="hint">0W 2L<\/span><\/summary>/,
+    assert.match(body, /<h3>Eliminated, 2L \(1\)<\/h3><\/summary><ul class="names"><li><details><summary>P4 <span class="hint">0W 2L<\/span><\/summary>/,
       'no waiting time once eliminated');
     assert.match(body, /<summary>P9 <span class="hint">0W 0L<\/span><\/summary>/, 'no waiting time before a first match');
+  });
+
+  test('needs attention: groups to pair, long waits and long matches, capped at 5 each; the version moves only when someone crosses a limit', () => {
+    const cfg = makeConfig();
+    signUp(16);
+    lcq.syncGroups();
+    for (const g of [1, 2, 3]) lcq.pairGroup(g, 0);
+    for (const m of lcq.state().open.slice(0, 4)) lcq.result(m.id, m.a);
+    const st = lcq.state();
+    const t0 = Date.now();
+    const min = (n) => t0 + n * 60_000;
+    assert.deepEqual(runnerPage(cfg, st, { now: t0 }).match(/<section class="attention".*?<\/section>/)[0].match(/<li>.*?<\/li>/g),
+      ['<li><a href="#lcq-pair">1 group to pair</a></li>'], 'at the start only the unpaired group needs attention');
+    lcq.pairGroup(4, 0);
+    assert.ok(!runnerPage(cfg, lcq.state(), { now: t0 }).includes('Needs attention'), 'nothing to flag, no strip');
+    assert.deepEqual([overdue(cfg, st, min(9)).waiting.length, overdue(cfg, st, min(11)).waiting.length], [0, 8], 'free players flag at 10 minutes');
+    assert.deepEqual([overdue(cfg, st, min(14)).long.length, overdue(cfg, st, min(16)).long.length], [0, 2], 'open matches flag at 15 minutes');
+    const body = runnerPage(cfg, st, { now: min(16) });
+    const strip = body.match(/<section class="attention".*?<\/section>/)[0];
+    assert.match(strip, /<a href="#lcq-pair">1 group to pair<\/a>/);
+    assert.equal(strip.match(/href="#lcq-ready"/g).length, 5, 'five waiting names, then a count');
+    assert.match(strip, /<li>and 3 more<\/li>/);
+    assert.match(strip, /<a href="#lcq-playing">P9 vs P10 running <span data-wait="\d+">\d+ min<\/span><\/a>/);
+    assert.equal(runnerVersion(cfg, lcq, st, min(11)), runnerVersion(cfg, lcq, st, min(13)), 'no reload while nothing new is overdue');
+    assert.notEqual(runnerVersion(cfg, lcq, st, min(9)), runnerVersion(cfg, lcq, st, min(11)));
+    assert.notEqual(runnerVersion(cfg, lcq, st, min(14)), runnerVersion(cfg, lcq, st, min(16)));
+    const later = makeConfig({ lcqWaitAlertMin: 30 });
+    assert.equal(overdue(later, st, min(16)).waiting.length, 0, 'the limit comes from config');
+  });
+
+  test('a sticky bar jumps to each section, with counts', () => {
+    signUp(4);
+    lcq.syncGroups();
+    const body = runnerPage(makeConfig(), lcq.state());
+    assert.match(body, /<nav class="jump" aria-label="Sections"><a href="#lcq-pair">Pair \(1\)<\/a><a href="#lcq-playing">Playing \(0\)<\/a>/ );
+    assert.match(body, /<a href="#lcq-results">Results<\/a><a href="#lcq-standings">Players \(4\)<\/a><\/nav>/);
+    for (const id of ['lcq-pair', 'lcq-playing', 'lcq-ready', 'lcq-results', 'lcq-standings']) assert.ok(body.includes(`id="${id}"`), `${id} exists`);
   });
 
   test('a refused action is explained once on the next page load', async () => {

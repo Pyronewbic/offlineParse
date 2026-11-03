@@ -16,6 +16,12 @@ describe('config', () => {
     assert.deepEqual([set.lcqWinsToQualify, set.lcqLossesOut], [3, 1]);
   });
 
+  test('the LCQ attention limits default to 10 and 15 minutes, and can be set', () => {
+    assert.deepEqual([makeConfig().lcqWaitAlertMin, makeConfig().lcqMatchAlertMin], [10, 15]);
+    const set = makeConfig({ lcqWaitAlertMin: 5, lcqMatchAlertMin: 240 });
+    assert.deepEqual([set.lcqWaitAlertMin, set.lcqMatchAlertMin], [5, 240]);
+  });
+
   test('shipped config.json loads', () => {
     const cfg = loadConfig(fileURLToPath(new URL('../config.json', import.meta.url)));
     assert.ok(Object.isFrozen(cfg));
@@ -37,6 +43,10 @@ describe('config', () => {
       'LCQ wins zero': { lcqWinsToQualify: 0 },
       'LCQ losses too many': { lcqLossesOut: 21 },
       'LCQ wins as text': { lcqWinsToQualify: '4' },
+      'LCQ wait limit zero': { lcqWaitAlertMin: 0 },
+      'LCQ match limit too long': { lcqMatchAlertMin: 241 },
+      'LCQ wait limit fractional': { lcqWaitAlertMin: 7.5 },
+      'LCQ match limit as text': { lcqMatchAlertMin: '15' },
       'port fractional': { dnsPort: 53.5 },
       'port out of range': { dnsPort: 70000 },
       'short WPA password': { wifiPassword: 'short' },
