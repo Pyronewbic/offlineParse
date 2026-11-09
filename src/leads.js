@@ -11,7 +11,7 @@ const V1_COLUMNS = [
   'id', 'name', 'phone', 'source', 'eventCode', 'consentAt',
   'noticeVersion', 'createdAt', 'updatedAt', 'socialsSentAt',
 ];
-export const COLUMNS = [...V1_COLUMNS, 'bracket'];
+export const COLUMNS = [...V1_COLUMNS, 'bracket', 'game'];
 
 // Bidi overrides can make a stored name render as different text in the admin view.
 const STRIP_CHARS = /[\p{Cc}\p{Cs}\p{Co}\p{Cn}\u202A-\u202E\u2066-\u2069]/gu;
@@ -19,8 +19,8 @@ const STRIP_CHARS = /[\p{Cc}\p{Cs}\p{Co}\p{Cn}\u202A-\u202E\u2066-\u2069]/gu;
 // Contacts autofill and copy-paste wrap numbers in invisible format characters (\p{Cf}) and Unicode dashes.
 const PHONE_SEPARATORS = /[\s().\-\u2010-\u2015\u2212\p{Cf}]/gu;
 
-// A number registers once per bracket in each event.
-const UNIQUE_RULE = 'UNIQUE (phone, bracket, eventCode)';
+// A number registers once per game and bracket in each event. '' is no game (before games, or none set).
+const UNIQUE_RULE = 'UNIQUE (phone, bracket, game, eventCode)';
 const LEADS_TABLE = `
 CREATE TABLE IF NOT EXISTS leads (
   id INTEGER PRIMARY KEY,
@@ -34,6 +34,7 @@ CREATE TABLE IF NOT EXISTS leads (
   updatedAt TEXT NOT NULL,
   socialsSentAt TEXT,
   bracket TEXT NOT NULL DEFAULT 'normal' CHECK (bracket IN ('normal', 'lcq')),
+  game TEXT NOT NULL DEFAULT '',
   ${UNIQUE_RULE}
 );`;
 const SCHEMA = `${LEADS_TABLE}
@@ -42,7 +43,7 @@ CREATE TABLE IF NOT EXISTS events (code TEXT PRIMARY KEY, name TEXT NOT NULL, cr
 
 /**
  * Older databases had one row per number (before brackets), called desk entries 'whatsapp', or allowed a
- * number once per bracket across all events. Rebuild the table to today's schema in one transaction that
+ * number once per bracket across all events and games. Rebuild the table to today's schema in one transaction that
  * keeps the old table unless every row copied; columns it lacked take their defaults.
  */
 function upgrade(db) {
@@ -124,10 +125,10 @@ export class LeadStore {
     this.db.exec(SCHEMA);
     const cols = COLUMNS.join(', ');
     this.stmts = {
-      byPhone: this.db.prepare(`SELECT ${cols} FROM leads WHERE phone = ? AND bracket = ? AND eventCode = ?`),
+      byPhone: this.db.prepare(`SELECT ${cols} FROM leads WHERE phone = ? AND bracket = ? AND game = ? AND eventCode = ?`),
       insert: this.db.prepare(
-        'INSERT INTO leads (phone, name, source, eventCode, consentAt, noticeVersion, createdAt, updatedAt, bracket)' +
-        ' VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(phone, bracket, eventCode) DO NOTHING'),
+        'INSERT INTO leads (phone, name, source, eventCode, consentAt, noticeVersion, createdAt, updatedAt, bracket, game)' +
+        ' VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(phone, bracket, game, eventCode) DO NOTHING'),
       getSetting: this.db.prepare('SELECT value FROM settings WHERE key = ?'),
       setSetting: this.db.prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value'),
       list: this.db.prepare(`SELECT ${cols} FROM leads ORDER BY id`),
@@ -173,7 +174,7 @@ export class LeadStore {
 
   /** The event new sign-ups join; survives restarts. */
   currentEvent() {
-    return this.event(this.stmts.getSetting.get('currentEvent')?.value) ?? this.events()[0];
+    return this.event(this.stmts.getSetting.get('currentEvent')?.value ?? '') ?? this.events()[0];
   }
 
   /** Start a new event and send new sign-ups to it. Earlier events keep their registrations. */
@@ -210,16 +211,17 @@ export class LeadStore {
   }
 
   /**
-   * Register a phone number once per bracket in an event. A number already there is left untouched and
+   * Register a phone number once per game and bracket in an event. A number already there is left untouched and
    * reported as { created: false, existing }; the UNIQUE constraint decides, so there is no race.
    */
-  register({ name, phone, source, noticeVersion, bracket = this.bracket(), eventCode = this.currentEvent().code }) {
+  register({ name, phone, source, noticeVersion, bracket = this.bracket(), game = '', eventCode = this.currentEvent().code }) {
     if (!SOURCES.includes(source)) throw new Error(`unknown source ${source}`);
     if (!Object.hasOwn(BRACKETS, bracket)) throw new Error(`unknown bracket ${bracket}`);
     if (!this.stmts.event.get(eventCode)) throw new Error(`unknown event ${eventCode}`);
+    if (typeof game !== 'string') throw new Error('game must be a string');
     const ts = now();
-    const { changes, lastInsertRowid } = this.stmts.insert.run(phone, name, source, eventCode, ts, noticeVersion, ts, ts, bracket);
-    if (changes === 0) return { created: false, existing: { ...this.stmts.byPhone.get(phone, bracket, eventCode) } };
+    const { changes, lastInsertRowid } = this.stmts.insert.run(phone, name, source, eventCode, ts, noticeVersion, ts, ts, bracket, game);
+    if (changes === 0) return { created: false, existing: { ...this.stmts.byPhone.get(phone, bracket, game, eventCode) } };
     this.changed('lead.created', Number(lastInsertRowid));
     return { created: true };
   }

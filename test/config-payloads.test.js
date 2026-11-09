@@ -22,6 +22,14 @@ describe('config', () => {
     assert.deepEqual([set.lcqWaitAlertMin, set.lcqMatchAlertMin], [5, 240]);
   });
 
+  test('games default to none and keep their order; the list cannot be changed after loading', () => {
+    assert.deepEqual(makeConfig().games, []);
+    const cfg = makeConfig({ games: ['SSBU', 'SF6', 'Avatar Legends'] });
+    assert.deepEqual(cfg.games, ['SSBU', 'SF6', 'Avatar Legends']);
+    assert.ok(Object.isFrozen(cfg.games));
+    assert.equal(makeConfig({ games: Array.from({ length: 12 }, (_, i) => `G${i}`) }).games.length, 12, 'twelve is allowed');
+  });
+
   test('shipped config.json loads', () => {
     const cfg = loadConfig(fileURLToPath(new URL('../config.json', import.meta.url)));
     assert.ok(Object.isFrozen(cfg));
@@ -52,6 +60,14 @@ describe('config', () => {
       'short WPA password': { wifiPassword: 'short' },
       'long SSID': { wifiSsid: 'x'.repeat(33) },
       'event code with space': { eventCode: 'EVT 26' },
+      'games not a list': { games: 'SSBU' },
+      'game not text': { games: [5] },
+      'game empty': { games: [''] },
+      'game with spaces at the ends': { games: [' SF6'] },
+      'game with a hidden character': { games: ['SF6\u202E'] },
+      'game too long': { games: ['x'.repeat(41)] },
+      'same game twice, any case': { games: ['SSBU', 'ssbu'] },
+      'too many games': { games: Array.from({ length: 13 }, (_, i) => `G${i}`) },
       'empty org': { orgName: '  ' },
     };
     for (const [label, override] of Object.entries(cases)) {

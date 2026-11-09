@@ -6,7 +6,7 @@ import { dirname, join, resolve } from 'node:path';
 import { BRACKETS, EVENT_CODE } from './leads.js';
 
 const CSV_FORMULA_PREFIXES = ['=', '+', '-', '@', '\t', '\r'];
-const LOG_FIELDS = ['id', 'name', 'phone', 'source', 'eventCode', 'bracket'];
+const LOG_FIELDS = ['id', 'name', 'phone', 'source', 'eventCode', 'bracket', 'game'];
 const MAX_LOG_REWRITE_BYTES = 64 * 1024 * 1024;
 export const CSV_RETRY_MS = 15000;
 // Windows refuses to replace a file another app holds open, which is what Excel does with a CSV.
@@ -26,16 +26,18 @@ const openLog = (path) =>
 
 // Log lines and pending erasures from before brackets have none; they were all Normal.
 const bracketOf = (x) => x.bracket ?? 'normal';
-const erasureKey = (lead) => `${lead.phone} ${bracketOf(lead)} ${lead.eventCode ?? ''}`;
+const erasureKey = (lead) => JSON.stringify([lead.phone, bracketOf(lead), lead.eventCode ?? '', lead.game ?? '']);
 
 /**
  * Whether a log line belongs to a registration deleted at `until`: a later re-registration, the other
- * bracket, or another event is kept. A pending erasure from before events has no event and matches any.
+ * bracket, another event or another game is kept. A pending erasure from before events or games has
+ * no event or game and matches any; a log line from before games has none, which is game ''.
  */
-function erases(line, { phone, until, bracket, eventCode }) {
+function erases(line, { phone, until, bracket, eventCode, game }) {
   try {
     const entry = JSON.parse(line);
     return entry.phone === phone && bracketOf(entry) === (bracket ?? 'normal') && (eventCode === undefined || entry.eventCode === eventCode) &&
+      (game === undefined || (entry.game ?? '') === game) &&
       !(Date.parse(entry.ts) > Date.parse(until));
   } catch {
     return line.includes(phone);
@@ -45,7 +47,8 @@ function erases(line, { phone, until, bracket, eventCode }) {
 const MAX_PENDING_BYTES = 1024 * 1024;
 const validPending = (e) => e && Number.isSafeInteger(e.id) && typeof e.phone === 'string' && /^\+\d{8,15}$/.test(e.phone) &&
   typeof e.until === 'string' && !Number.isNaN(Date.parse(e.until)) && ['normal', 'lcq', undefined].includes(e.bracket) &&
-  (e.eventCode === undefined || (typeof e.eventCode === 'string' && EVENT_CODE.test(e.eventCode)));
+  (e.eventCode === undefined || (typeof e.eventCode === 'string' && EVENT_CODE.test(e.eventCode))) &&
+  (e.game === undefined || (typeof e.game === 'string' && e.game.length <= 40 && !/\p{C}/u.test(e.game)));
 const IST_OFFSET_MS = 330 * 60 * 1000; // India has no daylight saving, so a fixed +05:30 is exact
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -80,6 +83,7 @@ const SHEET = [
   ['ID', (l) => l.id, false],
   ['Name', (l) => l.name, true],
   ['Bracket', (l) => BRACKETS[l.bracket] ?? l.bracket, true],
+  ['Game', (l) => l.game, true],
   ['Mobile number', (l) => l.phone, false],
   ['Came in via', (l) => SOURCE_LABELS[l.source] ?? l.source, true],
   ['Event', (l) => l.eventCode, true],
@@ -134,7 +138,7 @@ export class LeadFiles {
       if (e.code !== 'ENOENT') this.fail(this.pendingPath, new Error(`ignored, so these deletions may still be in the log: ${e.message}`));
       return;
     }
-    for (const e of entries) this.pendingErasures.set(erasureKey(e), { id: e.id, phone: e.phone, bracket: bracketOf(e), eventCode: e.eventCode, until: e.until });
+    for (const e of entries) this.pendingErasures.set(erasureKey(e), { id: e.id, phone: e.phone, bracket: bracketOf(e), eventCode: e.eventCode, game: e.game, until: e.until });
   }
 
   savePending() {
@@ -205,7 +209,7 @@ export class LeadFiles {
   forget(lead) {
     const until = new Date().toISOString();
     this.record('lead.deleted', lead, ['id']);
-    this.pendingErasures.set(erasureKey(lead), { id: lead.id, phone: lead.phone, bracket: bracketOf(lead), eventCode: lead.eventCode, until });
+    this.pendingErasures.set(erasureKey(lead), { id: lead.id, phone: lead.phone, bracket: bracketOf(lead), eventCode: lead.eventCode, game: lead.game, until });
     this.flushErasures();
     return !this.pendingErasures.has(erasureKey(lead));
   }

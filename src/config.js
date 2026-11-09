@@ -18,9 +18,13 @@ const FIELD_TYPES = {
   lcqLossesOut: 'count',
   lcqWaitAlertMin: 'minutes',
   lcqMatchAlertMin: 'minutes',
+  games: 'games',
 };
 // Keys older config files lack: qualify at 4 wins, out at 2 losses; flag a 10-minute wait or a 15-minute match.
-const DEFAULTS = { lcqWinsToQualify: 4, lcqLossesOut: 2, lcqWaitAlertMin: 10, lcqMatchAlertMin: 15 };
+// No games means guests pick none and registrations carry no game.
+const DEFAULTS = { lcqWinsToQualify: 4, lcqLossesOut: 2, lcqWaitAlertMin: 10, lcqMatchAlertMin: 15, games: [] };
+export const MAX_GAMES = 12;
+const GAME_MAX = 40;
 // Keys from the WhatsApp follow-up days. Named in the error so an old config.json is easy to fix.
 const RETIRED = ['whatsappNumber', 'socials', 'socialsMessage', 'prefillMessage'];
 
@@ -55,9 +59,11 @@ export function configFromObject(raw) {
       type === 'port' ? Number.isInteger(value) && value >= 1 && value <= 65535
       : type === 'count' ? Number.isInteger(value) && value >= 1 && value <= 20
       : type === 'minutes' ? Number.isInteger(value) && value >= 1 && value <= 240
+      : type === 'games' ? Array.isArray(value)
       : typeof value === type;
     if (!ok) {
-      const want = { port: 'an integer 1-65535', count: 'a whole number 1-20', minutes: 'a whole number of minutes, 1-240' }[type] ?? `a ${type}`;
+      const want = { port: 'an integer 1-65535', count: 'a whole number 1-20', minutes: 'a whole number of minutes, 1-240',
+        games: 'a list of game names' }[type] ?? `a ${type}`;
       throw new ConfigError(`${key} must be ${want}`);
     }
   }
@@ -84,5 +90,14 @@ export function configFromObject(raw) {
     if (raw[key].length > 512 || /\p{C}/u.test(raw[key])) throw new ConfigError(`${key} must be a file path or empty`);
   }
 
-  return Object.freeze({ ...raw });
+  if (raw.games.length > MAX_GAMES) throw new ConfigError(`games: at most ${MAX_GAMES}`);
+  for (const game of raw.games) {
+    if (typeof game !== 'string' || !game || game.trim() !== game || [...game].length > GAME_MAX || /\p{C}/u.test(game)) {
+      throw new ConfigError(`games: each must be a name of 1-${GAME_MAX} characters with no spaces at the ends or hidden characters`);
+    }
+  }
+  const lower = raw.games.map((g) => g.toLocaleLowerCase());
+  if (new Set(lower).size !== lower.length) throw new ConfigError('games: each name must be different');
+
+  return Object.freeze({ ...raw, games: Object.freeze([...raw.games]) });
 }

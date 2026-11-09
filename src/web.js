@@ -8,18 +8,36 @@ import { themeCss } from './theme.js';
 export const MAX_BODY = 8 * 1024;
 const MAX_FIELDS = 20;
 const TOO_MANY = 'Too many sign-ups from this phone just now. Please wait a minute and try again.';
-const alreadyRegistered = (bracket) =>
-  `This number is already registered for ${BRACKETS[bracket]}. Reach out to us at the desk if you need to change your details.`;
+// "A", "A and B", "A, B and C".
+const listText = (items) => (items.length < 2 ? items.join('') : `${items.slice(0, -1).join(', ')} and ${items.at(-1)}`);
+const inGames = (games) => (games.filter(Boolean).length ? ` in ${listText(games)}` : '');
+const alreadyRegistered = (bracket, games) =>
+  `This number is already registered for ${BRACKETS[bracket]}${inGames(games)}. Reach out to us at the desk if you need to change your details.`;
+
+/**
+ * The games ticked, in config order, or [''] when no games are set up. Throws when none is ticked;
+ * null means a game this booth never offered (a tampered form).
+ */
+function gamesOf(cfg, posted) {
+  const ticked = Array.isArray(posted) ? posted : [];
+  if (!cfg.games.length) return ticked.length ? null : [''];
+  if (ticked.some((g) => !cfg.games.includes(g))) return null;
+  const games = cfg.games.filter((g) => ticked.includes(g));
+  if (!games.length) throw new ValidationError('Pick at least one game.', 'game');
+  return games;
+}
+const tickedOf = (posted) => (Array.isArray(posted) ? posted : []);
 const TABS = ['all', ...Object.keys(BRACKETS)];
 const tabOf = (value) => (TABS.includes(value) ? value : 'all');
 const query = (params) => {
   const s = new URLSearchParams(Object.entries(params).filter(([, v]) => v)).toString();
   return s ? `?${s}` : '';
 };
-// What the admin page shows: a bracket tab, and an event ('' is the current one).
-const adminUrl = ({ tab = 'all', event = '' }, msg = '') => `/admin${query({ tab: tab === 'all' ? '' : tab, event, msg })}`;
-const viewFields = ({ tab = 'all', event = '' }) =>
-  `<input type="hidden" name="tab" value="${esc(tab)}"><input type="hidden" name="event" value="${esc(event)}">`;
+// What the admin page shows: a bracket tab, an event ('' is the current one) and a game ('' is every game).
+const adminUrl = ({ tab = 'all', event = '', game = '' }, msg = '') => `/admin${query({ tab: tab === 'all' ? '' : tab, event, game, msg })}`;
+const viewFields = ({ tab = 'all', event = '', game = '' }) =>
+  `<input type="hidden" name="tab" value="${esc(tab)}"><input type="hidden" name="event" value="${esc(event)}">` +
+  `<input type="hidden" name="game" value="${esc(game)}">`;
 export const BRAND_PATHS = { '/brand/logo-light.png': 'light', '/brand/logo-dark.png': 'dark' };
 const LOOPBACK = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
 // Names the admin desk answers to. A loopback socket alone is not enough: a page the operator opens
@@ -113,6 +131,11 @@ input[aria-invalid=true]{border-color:var(--error)}
 .field-error::before{content:"!";display:inline-block;width:1.25em;height:1.25em;margin-right:.4em;border-radius:50%;background:var(--error);color:var(--surface);text-align:center;line-height:1.25em;font-weight:900}
 .check{display:flex;gap:.75rem;align-items:flex-start;font-weight:500;margin-top:1.2rem;cursor:pointer}
 .check input{flex:none;width:28px;height:28px;margin:0;accent-color:var(--pink)}
+fieldset.games{border:0;margin:1rem 0 0;padding:0;min-width:0}
+fieldset.games legend{font-weight:700;padding:0}
+fieldset.games .hint{margin:.1rem 0 0}
+fieldset.games .check{margin-top:.8rem}
+.panel .fields > fieldset.games{flex:1 1 100%;margin:0}
 button,.btn{display:inline-block;padding:.75rem 1.1rem;font:800 1rem/1.1 system-ui,sans-serif;color:var(--onPink);background:var(--pink);border:3px solid var(--line);border-radius:12px;box-shadow:4px 4px 0 var(--shadow);text-decoration:none;cursor:pointer}
 button:active,.btn:active{transform:translate(3px,3px);box-shadow:1px 1px 0 var(--shadow)}
 form:not(.inline) > button:not(.primary){margin-top:1rem}
@@ -248,9 +271,15 @@ function portalPage(cfg, brand, title, card, after = '') {
     `<section class="card">${CONFETTI}${card}</section>${after}`);
 }
 
-const FIELDS = ['name', 'phone', 'consent'];
+const FIELDS = ['name', 'phone', 'game', 'consent'];
 
-export function formPage(cfg, { error = '', field = null, name = '', phone = '', consent = false, bracket = 'normal' } = {}, brand = NO_BRAND) {
+/** A checkbox per game; with one game it is ticked already. */
+const gameBoxes = (cfg, ticked, extra = '') => cfg.games.map((g) => `<label class="check"><input type="checkbox" name="games" value="${esc(g)}"` +
+  `${cfg.games.length === 1 || ticked.includes(g) ? ' checked' : ''}${extra}><span>${esc(g)}</span></label>`).join('');
+
+export function formPage(cfg, {
+  error = '', field = null, name = '', phone = '', consent = false, bracket = 'normal', games = [],
+} = {}, brand = NO_BRAND) {
   const inline = error && FIELDS.includes(field);
   const fieldError = (id) => (inline && field === id
     ? `<p class="field-error" id="${id}-error" role="alert">${esc(error)}</p>` : '');
@@ -271,6 +300,8 @@ ${inline ? '' : errorBlock(error)}
   <input id="phone" name="phone" type="tel" inputmode="tel" autocomplete="tel" maxlength="20" placeholder="98765 43210" required value="${esc(phone)}"${attrs('phone', 'phone-hint')}>
   <p class="hint" id="phone-hint">10-digit mobile number, or start with + and your country code.</p>
   ${fieldError('phone')}
+  ${cfg.games.length ? `<fieldset class="games"${attrs('game')}><legend>Games</legend><p class="hint">Tick every game you want to play.</p>` +
+    `${gameBoxes(cfg, games)}</fieldset>${fieldError('game')}` : ''}
   <label class="check"><input type="checkbox" name="consent" value="yes" required${consent ? ' checked' : ''}${attrs('consent')}>
     <span>I agree to ${esc(cfg.orgName)} keeping my name and number for this event's registration.</span></label>
   ${fieldError('consent')}
@@ -280,10 +311,12 @@ ${inline ? '' : errorBlock(error)}
 Reach out to us at the desk any time to have your details deleted.</p>`);
 }
 
-export function thanksPage(cfg, name, phone, brand = NO_BRAND, bracket = 'normal') {
+export function thanksPage(cfg, name, phone, brand = NO_BRAND, bracket = 'normal', games = [], already = []) {
+  const strong = (list) => listText(list.map((g) => `<strong>${esc(g)}</strong>`));
   return portalPage(cfg, brand, "You're registered", `
 <h1>You're registered, ${esc(firstName(name))}!</h1>
-<p class="lede">We've got you down for <strong>${esc(BRACKETS[bracket])}</strong> as <strong>${esc(name)}</strong> on <strong class="nowrap">${esc(displayPhone(phone))}</strong>.</p>
+<p class="lede">We've got you down for <strong>${esc(BRACKETS[bracket])}</strong>${games.filter(Boolean).length ? ` in ${strong(games)}` : ''} as <strong>${esc(name)}</strong> on <strong class="nowrap">${esc(displayPhone(phone))}</strong>.</p>
+${already.length ? `<p>You were already registered for ${strong(already)}.</p>` : ''}
 <p>You can leave this Wi-Fi now.</p>
 <p><strong>iPhone:</strong> tap <strong>Cancel</strong> at the top of this screen. To stop it joining again, go to Settings, Wi-Fi, tap (i) next to this network, then <strong>Forget This Network</strong>.</p>
 <p><strong>Android:</strong> in Wi-Fi settings, tap this network, then <strong>Forget</strong>.</p>`, `
@@ -292,6 +325,7 @@ export function thanksPage(cfg, name, phone, brand = NO_BRAND, bracket = 'normal
 
 const FLASH = {
   added: 'Registration added.',
+  'added-some': 'Added for the games they were not in yet; they were already registered for the others.',
   deleted: 'Registration deleted from the database, the spreadsheet and the log.',
   'deleted-partial': 'Registration deleted from the database. The spreadsheet or the log still has it (see the warning above); ' +
     `that is retried every ${CSV_RETRY_MS / 1000} seconds.`,
@@ -323,7 +357,9 @@ export function adminPage(cfg, {
 }) {
   const { tab } = view;
   const shownEvent = events.find((e) => e.code === view.event) ?? current;
-  const all = everyone.filter((l) => l.eventCode === shownEvent.code);
+  const atEvent = everyone.filter((l) => l.eventCode === shownEvent.code);
+  const all = view.game ? atEvent.filter((l) => l.game === view.game) : atEvent;
+  const gameCol = cfg.games.length > 0 || atEvent.some((l) => l.game);
   const leads = tab === 'all' ? all : all.filter((l) => l.bracket === tab);
   const newestFirst = [...leads].reverse();
   const shown = newestFirst.filter((lead) => matchesSearch(lead, q));
@@ -333,6 +369,7 @@ export function adminPage(cfg, {
     const n = leads.length - newestFirst.indexOf(lead);
     return `<tr><td class="num idx">${n}</td><th scope="row">${esc(lead.name)}</th>` +
       `<td><span class="chip">${esc(BRACKETS[lead.bracket] ?? lead.bracket)}</span></td>` +
+      `${gameCol ? `<td>${lead.game ? esc(lead.game) : '-'}</td>` : ''}` +
       `<td class="num">${esc(displayPhone(lead.phone))}</td>` +
       `<td><span class="chip ${lead.source === 'desk' ? 'desk' : 'form'}">${esc(SOURCE_LABELS[lead.source] ?? lead.source)}</span></td>` +
       `<td class="num">${esc(toISTShort(lead.createdAt))}</td>` +
@@ -348,11 +385,15 @@ export function adminPage(cfg, {
   const label = (b) => esc(BRACKETS[b]);
   const flash = msg === 'bracket' ? `New sign-ups now go to ${label(active)}.`
     : msg === 'event' ? `New sign-ups now go to ${esc(current.name)}.` : Object.hasOwn(FLASH, msg) ? FLASH[msg] : '';
-  const exportUrl = `/admin/export.csv${query({ tab: tab === 'all' ? '' : tab, event: view.event })}`;
+  const exportUrl = `/admin/export.csv${query({ tab: tab === 'all' ? '' : tab, event: view.event, game: view.game })}`;
   const tabs = TABS.map((t) => {
     const count = t === 'all' ? all.length : all.filter((l) => l.bracket === t).length;
     return `<a href="${esc(adminUrl({ ...view, tab: t }))}"${t === tab ? ' aria-current="page"' : ''}>${t === 'all' ? 'All' : label(t)} (${count})</a>`;
   }).join('');
+  // Game names in this event that are no longer configured still get a filter, so their rows stay reachable.
+  const gameNames = [...new Set([...cfg.games, ...atEvent.map((l) => l.game).filter(Boolean)])];
+  const gameLinks = gameNames.length ? [['', 'All games', atEvent.length], ...gameNames.map((g) => [g, g, atEvent.filter((l) => l.game === g).length])]
+    .map(([g, text, n]) => `<a href="${esc(adminUrl({ ...view, game: g }))}"${g === view.game ? ' aria-current="page"' : ''}>${esc(text)} (${n})</a>`).join('') : '';
   const eventLinks = events.map((e) => `<a href="${esc(adminUrl({ tab, event: e.code === current.code ? '' : e.code }))}"` +
     `${e.code === shownEvent.code ? ' aria-current="page"' : ''}>${esc(e.name)}${e.code === current.code ? ' (now)' : ''}</a>`).join('');
   const past = shownEvent.code !== current.code
@@ -381,6 +422,7 @@ ${past}
   <span>New sign-ups go to</span>${toggle}
 </form>
 <nav class="tabs" aria-label="Brackets">${tabs}</nav>
+${gameLinks ? `<nav class="tabs" aria-label="Games">${gameLinks}</nav>` : ''}
 ${runner ? `<p class="hint">LCQ runner for a tablet on the booth Wi-Fi: <strong>${esc(runner.url)}</strong>, PIN <strong>${esc(runner.pin)}</strong></p>` : ''}
 <dl class="stats">
   <div class="stat"><dt>Total</dt><dd>${leads.length}</dd></div>
@@ -399,6 +441,7 @@ ${runner ? `<p class="hint">LCQ runner for a tablet on the booth Wi-Fi: <strong>
     `<option value="${b}"${b === addTo ? ' selected' : ''}>${label(b)}</option>`).join('')}</select></div>
       <div><label for="name">Name</label><input id="name" name="name" type="text" maxlength="${NAME_MAX}" required value="${esc(form.name ?? '')}"></div>
       <div><label for="phone">Mobile number</label><input id="phone" name="phone" type="tel" maxlength="20" required value="${esc(form.phone ?? '')}"></div>
+      ${cfg.games.length ? `<fieldset class="games"><legend>Games</legend>${gameBoxes(cfg, form.games ?? (view.game ? [view.game] : []))}</fieldset>` : ''}
       <label class="check"><input type="checkbox" name="consent" value="yes" required${form.consent ? ' checked' : ''}>
         <span>They agreed to ${esc(cfg.orgName)} keeping their name and number for this event's registration (read it to them).</span></label>
       <button type="submit">Add registration</button>
@@ -408,7 +451,7 @@ ${runner ? `<p class="hint">LCQ runner for a tablet on the booth Wi-Fi: <strong>
     <h2 id="find-title">Find someone</h2>
     <p class="hint">Search by name or any part of the number.</p>
     <form method="get" action="/admin" class="fields" role="search">
-      ${tab === 'all' ? '' : `<input type="hidden" name="tab" value="${esc(tab)}">`}${view.event ? `<input type="hidden" name="event" value="${esc(view.event)}">` : ''}
+      ${tab === 'all' ? '' : `<input type="hidden" name="tab" value="${esc(tab)}">`}${view.event ? `<input type="hidden" name="event" value="${esc(view.event)}">` : ''}${view.game ? `<input type="hidden" name="game" value="${esc(view.game)}">` : ''}
       <div><label for="q">Name or number</label><input id="q" name="q" type="search" maxlength="60" value="${esc(q)}"></div>
       <button class="secondary" type="submit">Search</button>
     </form>
@@ -417,8 +460,8 @@ ${runner ? `<p class="hint">LCQ runner for a tablet on the booth Wi-Fi: <strong>
 <p class="showing">${showing}</p>
 <table class="reg">
 <caption class="sr-only">Registrations, newest first</caption>
-<thead><tr><th scope="col">#</th><th scope="col">Name</th><th scope="col">Bracket</th><th scope="col">Mobile</th><th scope="col">Came in via</th><th scope="col">Signed up (IST)</th><th scope="col"><span class="sr-only">Actions</span></th></tr></thead>
-<tbody>${rows.join('') || `<tr><td colspan="7" class="empty">${empty}</td></tr>`}</tbody>
+<thead><tr><th scope="col">#</th><th scope="col">Name</th><th scope="col">Bracket</th>${gameCol ? '<th scope="col">Game</th>' : ''}<th scope="col">Mobile</th><th scope="col">Came in via</th><th scope="col">Signed up (IST)</th><th scope="col"><span class="sr-only">Actions</span></th></tr></thead>
+<tbody>${rows.join('') || `<tr><td colspan="${gameCol ? 8 : 7}" class="empty">${empty}</td></tr>`}</tbody>
 </table>`, 'admin');
 }
 
@@ -427,7 +470,7 @@ export function confirmDeletePage(cfg, lead, token, brand = NO_BRAND, view = { t
 ${adminHeader(cfg, brand, 'Delete registration')}
 <section class="panel confirm">
 <h2>Delete this registration?</h2>
-<p><strong>${esc(lead.name)}</strong>, <span class="nowrap">${esc(displayPhone(lead.phone))}</span>, ${esc(BRACKETS[lead.bracket] ?? lead.bracket)}, signed up ${esc(toISTShort(lead.createdAt))} IST.</p>
+<p><strong>${esc(lead.name)}</strong>, <span class="nowrap">${esc(displayPhone(lead.phone))}</span>, ${esc(BRACKETS[lead.bracket] ?? lead.bracket)}${lead.game ? `, ${esc(lead.game)}` : ''}, signed up ${esc(toISTShort(lead.createdAt))} IST.</p>
 <p>This removes them from the database, the spreadsheet and the log. It cannot be undone. Spreadsheets you
 already downloaded or copied, and backups of this laptop, are not changed.</p>
 <form method="post" action="/admin/delete">${hidden(token, lead.id, view)}<input type="hidden" name="confirm" value="yes">
@@ -645,8 +688,12 @@ function readForm(req) {
       }
       const params = new URLSearchParams(text);
       if ([...params.keys()].length > MAX_FIELDS) return reject(new HttpError(400, 'too many fields'));
+      // Ticking several games sends "games" once per tick; every other field keeps its first value.
       const fields = {};
-      for (const [key, value] of params) if (!(key in fields)) fields[key] = value;
+      for (const [key, value] of params) {
+        if (key === 'games') (fields.games ??= []).push(value);
+        else if (!(key in fields)) fields[key] = value;
+      }
       resolvePromise(fields);
     });
   });
@@ -708,7 +755,15 @@ export function createPortalServer(cfg, store, {
   const pinOverLimit = limiter({ max: 5, windowMs: 60_000 }, 'LCQ PIN tries');
   const runnerInfo = () => (lcq ? { url: `${portalUrl}lcq`, pin: lcq.pin() } : null);
   // A tab and event from the URL or a form; anything unknown means the default.
-  const viewOf = (params) => ({ tab: tabOf(params.tab), event: typeof params.event === 'string' && store.event(params.event) ? params.event : '' });
+  const viewOf = (params) => {
+    const { game } = params;
+    return {
+      tab: tabOf(params.tab),
+      event: typeof params.event === 'string' && store.event(params.event) ? params.event : '',
+      // Any game a row carries is a valid filter, so a game dropped from the config stays reachable.
+      game: typeof game === 'string' && game && (cfg.games.includes(game) || store.list().some((l) => l.game === game)) ? game : '',
+    };
+  };
   const adminData = () => ({
     leads: store.list(), token: adminToken, brand, warnings: warningsOf(store), active: store.bracket(), runner: runnerInfo(),
     events: store.events(), current: store.currentEvent(),
@@ -780,36 +835,36 @@ export function createPortalServer(cfg, store, {
 
   async function submit(req, res) {
     const fields = await readForm(req);
-    const rawName = fields.name ?? '';
-    const rawPhone = fields.phone ?? '';
+    const rawName = typeof fields.name === 'string' ? fields.name : '';
+    const rawPhone = typeof fields.phone === 'string' ? fields.phone : '';
     // The bracket staff have on now, read once so the stored row and the reply agree.
     const bracket = store.bracket();
-    if (overLimit(req.socket.remoteAddress)) {
-      return html(res, 429, formPage(cfg, {
-        error: TOO_MANY, name: rawName.slice(0, NAME_MAX), phone: rawPhone.slice(0, 20), consent: fields.consent === 'yes', bracket,
-      }, brand));
-    }
+    const again = { name: rawName.slice(0, NAME_MAX), phone: rawPhone.slice(0, 20), consent: fields.consent === 'yes', bracket, games: tickedOf(fields.games) };
+    if (overLimit(req.socket.remoteAddress)) return html(res, 429, formPage(cfg, { ...again, error: TOO_MANY }, brand));
     let name;
     let phone;
+    let games;
     try {
       name = cleanName(rawName);
       phone = normalizePhone(rawPhone);
+      games = gamesOf(cfg, fields.games);
       if (fields.consent !== 'yes') throw new ValidationError('Please tick the box to register.', 'consent');
     } catch (e) {
       if (!(e instanceof ValidationError)) throw e;
-      return html(res, 400, formPage(cfg, {
-        error: e.message, field: e.field, name: rawName.slice(0, NAME_MAX), phone: rawPhone.slice(0, 20), consent: fields.consent === 'yes', bracket,
-      }, brand));
+      return html(res, 400, formPage(cfg, { ...again, error: e.message, field: e.field }, brand));
     }
-    const { created } = store.register({ name, phone, source: 'form', noticeVersion: cfg.noticeVersion, bracket });
-    if (!created) {
+    if (!games) return plain(res, 400, 'unknown game');
+    const created = [];
+    const already = [];
+    for (const game of games) {
+      (store.register({ name, phone, source: 'form', noticeVersion: cfg.noticeVersion, bracket, game }).created ? created : already).push(game);
+    }
+    if (!created.length) {
       log('duplicate registration refused');
-      return html(res, 409, formPage(cfg, {
-        error: alreadyRegistered(bracket), field: 'phone', name: rawName.slice(0, NAME_MAX), phone: rawPhone.slice(0, 20), consent: true, bracket,
-      }, brand));
+      return html(res, 409, formPage(cfg, { ...again, error: alreadyRegistered(bracket, already), field: 'phone' }, brand));
     }
-    log(`registration added via form (${BRACKETS[bracket]})`);
-    html(res, 200, thanksPage(cfg, name, phone, brand, bracket));
+    log(`registration added via form (${BRACKETS[bracket]}${inGames(created)})`);
+    html(res, 200, thanksPage(cfg, name, phone, brand, bracket, created, already));
   }
 
   async function adminPost(req, res, path) {
@@ -836,24 +891,32 @@ export function createPortalServer(cfg, store, {
     if (path === '/admin/add') {
       const bracket = Object.hasOwn(BRACKETS, fields.bracket) ? fields.bracket : store.bracket();
       const consent = fields.consent === 'yes';
-      const form = { name: String(fields.name ?? '').slice(0, NAME_MAX), phone: String(fields.phone ?? '').slice(0, 20), bracket, consent };
+      const form = {
+        name: String(fields.name ?? '').slice(0, NAME_MAX), phone: String(fields.phone ?? '').slice(0, 20), bracket, consent, games: tickedOf(fields.games),
+      };
       let name;
       let phone;
+      let games;
       try {
         name = cleanName(fields.name);
         phone = normalizePhone(fields.phone);
+        games = gamesOf(cfg, fields.games);
         if (!consent) throw new ValidationError('Tick that they agreed before adding them.');
       } catch (e) {
         if (!(e instanceof ValidationError)) throw e;
         return adminReply(400, { error: e.message, form });
       }
+      if (!games) return plain(res, 400, 'unknown game');
       // Staff read the same notice and ticked that the person agreed; source 'desk' tells these rows apart.
-      const result = store.register({ name, phone, source: 'desk', noticeVersion: cfg.noticeVersion, bracket });
-      if (!result.created) {
-        return adminReply(409, { error: `${displayPhone(phone)} is already registered for ${BRACKETS[bracket]}, as ${result.existing.name}.`, form });
+      const results = games.map((game) => [game, store.register({ name, phone, source: 'desk', noticeVersion: cfg.noticeVersion, bracket, game })]);
+      const already = results.filter(([, r]) => !r.created);
+      if (already.length === results.length) {
+        return adminReply(409, {
+          error: `${displayPhone(phone)} is already registered for ${BRACKETS[bracket]}${inGames(games)}, as ${already[0][1].existing.name}.`, form,
+        });
       }
       // Desk entries always join the current event, so show that one.
-      return redirect(res, adminUrl({ ...view, event: '' }, 'added'), 303);
+      return redirect(res, adminUrl({ ...view, event: '' }, already.length ? 'added-some' : 'added'), 303);
     }
     if (path === '/admin/event') {
       let event;
@@ -892,11 +955,12 @@ export function createPortalServer(cfg, store, {
         }));
       }
       if (method === 'GET' && path === '/admin/export.csv') {
-        const { tab, event } = viewOf(Object.fromEntries(new URL(req.url, 'http://x').searchParams));
+        const { tab, event, game } = viewOf(Object.fromEntries(new URL(req.url, 'http://x').searchParams));
         const code = event || store.currentEvent().code;
-        const leads = store.list().filter((l) => l.eventCode === code && (tab === 'all' || l.bracket === tab));
-        return send(res, 200, 'text/csv; charset=utf-8', leadsCsv(leads),
-          { 'Content-Disposition': `attachment; filename="leads-${code}${tab === 'all' ? '' : `-${tab}`}.csv"` });
+        const leads = store.list().filter((l) => l.eventCode === code && (tab === 'all' || l.bracket === tab) && (!game || l.game === game));
+        // Game names may hold spaces or quotes; the file name keeps letters and digits only.
+        const name = ['leads', code, tab === 'all' ? '' : tab, game.replace(/[^A-Za-z0-9]+/g, '-').replace(/^-|-$/g, '')].filter(Boolean).join('-');
+        return send(res, 200, 'text/csv; charset=utf-8', leadsCsv(leads), { 'Content-Disposition': `attachment; filename="${name}.csv"` });
       }
       if (method === 'POST') {
         if (!sameOriginPost(req)) return plain(res, 403, 'cross-site request refused; use the admin page itself', { Connection: 'close' });
