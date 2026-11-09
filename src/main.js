@@ -30,6 +30,7 @@ async function main(argv) {
       config: { type: 'string', default: 'config.json' },
       ip: { type: 'string' },
       db: { type: 'string' },
+      'dns-port': { type: 'string' },
       'no-dns': { type: 'boolean', default: false },
       quiet: { type: 'boolean', default: false },
       verbose: { type: 'boolean', default: false },
@@ -45,6 +46,14 @@ async function main(argv) {
     return 2;
   }
   if (values.db) cfg = Object.freeze({ ...cfg, dbPath: values.db });
+  if (values['dns-port'] !== undefined) {
+    const dnsPort = Number(values['dns-port']);
+    if (!Number.isInteger(dnsPort) || dnsPort < 1 || dnsPort > 65535) {
+      console.error('--dns-port must be a whole number 1-65535');
+      return 2;
+    }
+    cfg = Object.freeze({ ...cfg, dnsPort });
+  }
   let brand;
   try {
     brand = loadBrand(cfg);

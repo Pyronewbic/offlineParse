@@ -9,7 +9,8 @@
   },
   "scripts": {
     "start": "node src/main.js",
-    "try": "node src/main.js --ip 127.0.0.1 --no-dns --db data/try/leads.db",
+    "try": "node src/main.js --ip 127.0.0.1 --dns-port 5300 --db data/try/leads.db",
+    "try:check": "node scripts/try-check.js",
     "qr": "node scripts/make-qr.js",
     "qr:show": "node scripts/make-qr.js --terminal",
     "booth-ip": "node scripts/booth-ip.js",

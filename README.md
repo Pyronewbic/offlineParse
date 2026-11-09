@@ -13,8 +13,11 @@ Node 22.13+. The server has no dependencies; `qrcode` is only for the QR scripts
 ```sh
 npm install   # needs internet once
 npm test
-npm run try   # practice on this laptop, no router: http://localhost/admin and http://127.0.0.1/lcq, data in data/try/
+npm run try         # the whole booth on this laptop, no router, data in data/try/ (see below)
+npm run try:check   # with try running: checks DNS, sign-in, sign-up, desk and tablet; deletes its test sign-up
 ```
+
+**Practice on this laptop:** with `npm run try` running, open the phone form at `http://127.0.0.1/`, the desk at `http://localhost/admin` and the tablet runner at `http://127.0.0.1/lcq` (PIN on the desk page). Its DNS answers on port 5300 instead of 53, so it does not clash with anything else on this laptop.
 
 ### config.json
 
