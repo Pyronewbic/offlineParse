@@ -9,7 +9,7 @@ describe('LCQ runner', () => {
   let n;
   const signUp = (bracket = 'lcq') => {
     n++;
-    store.register({ name: `P${n}`, phone: `+9198765${String(n).padStart(5, '0')}`, source: 'form', eventCode: 'E', noticeVersion: 'v', bracket });
+    store.register({ name: `P${n}`, phone: `+9198765${String(n).padStart(5, '0')}`, source: 'form', noticeVersion: 'v', bracket });
   };
   const player = (name) => lcq.state().players.find((p) => p.name === name);
   const id = (name) => player(name).id;

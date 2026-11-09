@@ -74,7 +74,7 @@ async function main(argv) {
     console.error(`cannot open the lead log: ${e.message}`);
     return 1;
   }
-  const store = new LeadStore(cfg.dbPath, { files });
+  const store = new LeadStore(cfg.dbPath, { files, firstEvent: { code: cfg.eventCode, name: cfg.eventName } });
   const backupWarning = excludeFromBackups(dataDir);
   if (backupWarning) console.error(`WARNING ${printable(backupWarning)}`);
   const trace = values.verbose ? (line) => console.log(`${new Date().toISOString().slice(11, 19)} ${line}`) : null;
@@ -139,6 +139,7 @@ async function main(argv) {
     console.error(`WARNING ${rivals.map((r) => r.address).join(', ')} is also on the booth network, so DNS replies may leave ` +
       `from it and phones will ignore them. Run "npm run booth-ip" so ${address.ip} is the only address.`);
   }
+  console.log(`Current event:       ${printable(store.currentEvent().name)} (change it on the admin page)`);
   console.log(`Leads database:      ${cfg.dbPath}`);
   console.log(`Synced spreadsheet:  ${files.csvPath}`);
   console.log(`Append-only log:     ${files.logPath}`);

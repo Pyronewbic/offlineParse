@@ -1,6 +1,7 @@
 // The LCQ runner: LCQ registrations form groups of 4 in sign-up order, each group plays two 1v1 matches,
 // then free players with the same number of wins are paired, until they qualify, are out, or are dropped.
 // Only registration ids are stored here, so deleting a registration still erases the person everywhere.
+// Each group belongs to an event; the runner shows the current event only.
 
 import { randomInt } from 'node:crypto';
 
@@ -33,19 +34,30 @@ export class Lcq {
     this.rules = { winsToQualify, lossesOut };
     this.random = random;
     this.db.exec(SCHEMA);
+    // Groups from before events belong to the event their members registered in.
+    if (!this.db.prepare('PRAGMA table_info(lcq_groups)').all().some((c) => c.name === 'eventCode')) {
+      this.db.exec(`ALTER TABLE lcq_groups ADD COLUMN eventCode TEXT;
+        UPDATE lcq_groups SET eventCode = (SELECT l.eventCode FROM lcq_members m JOIN leads l ON l.id = m.leadId
+          WHERE m.groupId = lcq_groups.id LIMIT 1);`);
+    }
+  }
+
+  event() {
+    return this.store.currentEvent().code;
   }
 
   /** Put every 4 ungrouped LCQ registrations, oldest first, into a new group. Returns how many groups were made. */
   syncGroups() {
     const grouped = new Set(this.db.prepare('SELECT leadId FROM lcq_members').all().map((r) => r.leadId));
-    const waiting = this.store.list().filter((l) => l.bracket === 'lcq' && !grouped.has(l.id));
+    const event = this.event();
+    const waiting = this.store.list().filter((l) => l.bracket === 'lcq' && l.eventCode === event && !grouped.has(l.id));
     const made = Math.floor(waiting.length / 4);
     if (!made) return 0;
     this.db.exec('BEGIN');
     try {
       const add = this.db.prepare('INSERT INTO lcq_members (leadId, groupId, seat) VALUES (?, ?, ?)');
       for (let i = 0; i < made * 4; i += 4) {
-        const groupId = Number(this.db.prepare('INSERT INTO lcq_groups (createdAt) VALUES (?)').run(now()).lastInsertRowid);
+        const groupId = Number(this.db.prepare('INSERT INTO lcq_groups (createdAt, eventCode) VALUES (?, ?)').run(now(), event).lastInsertRowid);
         waiting.slice(i, i + 4).forEach((lead, seat) => add.run(lead.id, groupId, seat));
       }
       this.db.exec('COMMIT');
@@ -61,7 +73,7 @@ export class Lcq {
     this.syncGroups();
     const queued = this.state().players.filter((p) => p.status === 'queued');
     if (queued.length < 2) throw new LcqError('A group needs at least 2 waiting players.');
-    const groupId = Number(this.db.prepare('INSERT INTO lcq_groups (createdAt, seen) VALUES (?, 1)').run(now()).lastInsertRowid);
+    const groupId = Number(this.db.prepare('INSERT INTO lcq_groups (createdAt, seen, eventCode) VALUES (?, 1, ?)').run(now(), this.event()).lastInsertRowid);
     const add = this.db.prepare('INSERT INTO lcq_members (leadId, groupId, seat) VALUES (?, ?, ?)');
     queued.forEach((p, seat) => add.run(p.id, groupId, seat));
   }
@@ -81,7 +93,7 @@ export class Lcq {
   version() {
     const n = (sql) => Object.values(this.db.prepare(sql).get())[0] ?? 0;
     return [
-      n("SELECT COUNT(*) FROM leads WHERE bracket = 'lcq'"), n('SELECT COUNT(*) FROM lcq_groups'),
+      this.event(), n("SELECT COUNT(*) FROM leads WHERE bracket = 'lcq'"), n('SELECT COUNT(*) FROM lcq_groups'),
       n('SELECT MAX(id) FROM lcq_matches'), n('SELECT COUNT(*) FROM lcq_matches'),
       n('SELECT COUNT(*) FROM lcq_matches WHERE winner IS NOT NULL'), n('SELECT COUNT(*) FROM lcq_groups WHERE seen = 0'),
       n('SELECT COUNT(*) FROM lcq_drops'),
@@ -90,9 +102,14 @@ export class Lcq {
 
   /** Everything the runner page shows, derived from registrations, groups and matches. */
   state() {
-    const leads = new Map(this.store.list().filter((l) => l.bracket === 'lcq').map((l) => [l.id, l]));
-    const members = this.db.prepare('SELECT leadId, groupId, seat FROM lcq_members ORDER BY groupId, seat').all();
-    const matches = this.db.prepare('SELECT * FROM lcq_matches ORDER BY id').all().map((m) => ({ ...m }));
+    const event = this.event();
+    const leads = new Map(this.store.list().filter((l) => l.bracket === 'lcq' && l.eventCode === event).map((l) => [l.id, l]));
+    const groupRows = this.db.prepare('SELECT * FROM lcq_groups WHERE eventCode = ? ORDER BY id').all(event);
+    const ours = new Set(groupRows.map((g) => g.id));
+    const members = this.db.prepare('SELECT leadId, groupId, seat FROM lcq_members ORDER BY groupId, seat').all().filter((m) => ours.has(m.groupId));
+    // Ladder matches have no group; they are between players of one event.
+    const matches = this.db.prepare('SELECT * FROM lcq_matches ORDER BY id').all().map((m) => ({ ...m }))
+      .filter((m) => (m.groupId !== null ? ours.has(m.groupId) : leads.has(m.a) || leads.has(m.b)));
     const groupOf = new Map(members.map((m) => [m.leadId, m.groupId]));
     const dropped = new Set(this.db.prepare('SELECT leadId FROM lcq_drops').all().map((r) => r.leadId));
     // When each group was paired: a member left out of the pairing (a group of 3) is free from then.
@@ -117,7 +134,7 @@ export class Lcq {
     });
     const byId = new Map(players.map((p) => [p.id, p]));
     const name = (id) => byId.get(id)?.name ?? '(deleted)';
-    const groups = this.db.prepare('SELECT * FROM lcq_groups ORDER BY id').all().map((g) => ({
+    const groups = groupRows.map((g) => ({
       id: g.id, seen: g.seen === 1, createdAt: g.createdAt,
       seats: members.filter((m) => m.groupId === g.id).map((m) => ({ id: m.leadId, name: name(m.leadId) })),
       paired: matches.some((m) => m.groupId === g.id),

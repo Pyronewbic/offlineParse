@@ -20,7 +20,7 @@ describe('portal server', () => {
   const cfg = makeConfig();
 
   before(async () => {
-    store = new LeadStore(':memory:');
+    store = new LeadStore(':memory:', { firstEvent: { code: cfg.eventCode, name: cfg.eventName } });
     // Every test here signs up from 127.0.0.1, so the per-address sign-up limit is lifted (tested below).
     server = createPortalServer(cfg, store, { laptopIp: '127.0.0.1', quiet: true, submitLimit: { max: 1e6, windowMs: 60_000 } });
     await new Promise((r) => server.listen(0, '0.0.0.0', r));
@@ -305,10 +305,10 @@ describe('portal server', () => {
     assert.match(admin, /href="\/admin\/export\.csv\?tab=lcq"/);
 
     const csv = await request({ port, path: '/admin/export.csv?tab=lcq' });
-    assert.match(csv.headers['content-disposition'], /filename="leads-lcq\.csv"/);
+    assert.match(csv.headers['content-disposition'], /filename="leads-EVT26-lcq\.csv"/);
     assert.deepEqual(csv.body.trim().split('\r\n').slice(1).map((r) => r.split(',')[2]), ['LCQ', 'LCQ']);
     const everyone = await request({ port, path: '/admin/export.csv?tab=nonsense' });
-    assert.match(everyone.headers['content-disposition'], /filename="leads\.csv"/);
+    assert.match(everyone.headers['content-disposition'], /filename="leads-EVT26\.csv"/);
     assert.equal(everyone.body.trim().split('\r\n').length - 1, 3, 'an unknown tab means all');
 
     assert.equal((await flip('finals')).status, 400);

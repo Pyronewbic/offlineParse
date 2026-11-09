@@ -12,8 +12,14 @@ const alreadyRegistered = (bracket) =>
   `This number is already registered for ${BRACKETS[bracket]}. Reach out to us at the desk if you need to change your details.`;
 const TABS = ['all', ...Object.keys(BRACKETS)];
 const tabOf = (value) => (TABS.includes(value) ? value : 'all');
-const adminUrl = (tab, msg = '') =>
-  `/admin${[tab !== 'all' && `tab=${tab}`, msg && `msg=${msg}`].filter(Boolean).map((x, i) => `${i ? '&' : '?'}${x}`).join('')}`;
+const query = (params) => {
+  const s = new URLSearchParams(Object.entries(params).filter(([, v]) => v)).toString();
+  return s ? `?${s}` : '';
+};
+// What the admin page shows: a bracket tab, and an event ('' is the current one).
+const adminUrl = ({ tab = 'all', event = '' }, msg = '') => `/admin${query({ tab: tab === 'all' ? '' : tab, event, msg })}`;
+const viewFields = ({ tab = 'all', event = '' }) =>
+  `<input type="hidden" name="tab" value="${esc(tab)}"><input type="hidden" name="event" value="${esc(event)}">`;
 export const BRAND_PATHS = { '/brand/logo-light.png': 'light', '/brand/logo-dark.png': 'dark' };
 const LOOPBACK = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
 // Names the admin desk answers to. A loopback socket alone is not enough: a page the operator opens
@@ -189,6 +195,11 @@ table.reg{width:100%;border-collapse:separate;border-spacing:0;font-size:15px;ba
 .tabs{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 16px}
 .tabs a{padding:.4rem .9rem;border:3px solid var(--line);border-radius:999px;font-weight:800;text-decoration:none;background:var(--surface)}
 .tabs a[aria-current=page]{background:var(--pink);color:var(--onPink)}
+.tabs.events{align-items:center}
+.tabs.events > span{font-weight:800;margin-right:4px}
+.new-event{margin:0 0 16px}
+.new-event > summary{min-height:44px;padding:.5rem 0;cursor:pointer;font-weight:800}
+.new-event form{max-width:36rem}
 button.quiet{min-height:40px;padding:.4rem .8rem;font-size:.85rem;color:var(--error);background:transparent;border:2px solid var(--error);box-shadow:none}
 .empty{padding:28px 14px;text-align:center;color:var(--muted)}
 .confirm{max-width:36rem}
@@ -286,9 +297,8 @@ const FLASH = {
     `that is retried every ${CSV_RETRY_MS / 1000} seconds.`,
 };
 
-const hidden = (token, id, tab = 'all') =>
-  `<input type="hidden" name="token" value="${esc(token)}"><input type="hidden" name="id" value="${esc(id)}">` +
-  `<input type="hidden" name="tab" value="${esc(tab)}">`;
+const hidden = (token, id, view) =>
+  `<input type="hidden" name="token" value="${esc(token)}"><input type="hidden" name="id" value="${esc(id)}">${viewFields(view)}`;
 
 const phoneDigits = (phone) => phone.replace(/\D/g, '');
 
@@ -308,8 +318,12 @@ function adminHeader(cfg, brand, title, actions = '') {
 }
 
 export function adminPage(cfg, {
-  leads: all, token, brand = NO_BRAND, q = '', msg = '', error = '', warnings = [], form = {}, tab = 'all', active = 'normal', runner = null,
+  leads: everyone, token, brand = NO_BRAND, q = '', msg = '', error = '', warnings = [], form = {}, view = { tab: 'all', event: '' },
+  active = 'normal', runner = null, events, current, eventError = '', eventName = '',
 }) {
+  const { tab } = view;
+  const shownEvent = events.find((e) => e.code === view.event) ?? current;
+  const all = everyone.filter((l) => l.eventCode === shownEvent.code);
   const leads = tab === 'all' ? all : all.filter((l) => l.bracket === tab);
   const newestFirst = [...leads].reverse();
   const shown = newestFirst.filter((lead) => matchesSearch(lead, q));
@@ -322,32 +336,48 @@ export function adminPage(cfg, {
       `<td class="num">${esc(displayPhone(lead.phone))}</td>` +
       `<td><span class="chip ${lead.source === 'desk' ? 'desk' : 'form'}">${esc(SOURCE_LABELS[lead.source] ?? lead.source)}</span></td>` +
       `<td class="num">${esc(toISTShort(lead.createdAt))}</td>` +
-      `<td class="act"><form class="inline" method="post" action="/admin/delete">${hidden(token, lead.id, tab)}` +
+      `<td class="act"><form class="inline" method="post" action="/admin/delete">${hidden(token, lead.id, view)}` +
       `<button class="quiet" aria-label="Delete ${esc(lead.name)}">Delete</button></form></td></tr>`;
   });
   const empty = leads.length === 0
     ? 'No registrations yet. They will appear here as people sign up.'
     : `No matches for "${esc(q.trim())}".`;
   const showing = q.trim()
-    ? `${shown.length} ${shown.length === 1 ? 'match' : 'matches'} for "${esc(q.trim())}" out of ${leads.length}. <a href="${adminUrl(tab)}">Clear search</a>`
+    ? `${shown.length} ${shown.length === 1 ? 'match' : 'matches'} for "${esc(q.trim())}" out of ${leads.length}. <a href="${esc(adminUrl(view))}">Clear search</a>`
     : `Showing all ${leads.length}, newest first.`;
   const label = (b) => esc(BRACKETS[b]);
-  const flash = msg === 'bracket' ? `New sign-ups now go to ${label(active)}.` : Object.hasOwn(FLASH, msg) ? FLASH[msg] : '';
-  const exportUrl = `/admin/export.csv${tab === 'all' ? '' : `?tab=${tab}`}`;
+  const flash = msg === 'bracket' ? `New sign-ups now go to ${label(active)}.`
+    : msg === 'event' ? `New sign-ups now go to ${esc(current.name)}.` : Object.hasOwn(FLASH, msg) ? FLASH[msg] : '';
+  const exportUrl = `/admin/export.csv${query({ tab: tab === 'all' ? '' : tab, event: view.event })}`;
   const tabs = TABS.map((t) => {
     const count = t === 'all' ? all.length : all.filter((l) => l.bracket === t).length;
-    return `<a href="${adminUrl(t)}"${t === tab ? ' aria-current="page"' : ''}>${t === 'all' ? 'All' : label(t)} (${count})</a>`;
+    return `<a href="${esc(adminUrl({ ...view, tab: t }))}"${t === tab ? ' aria-current="page"' : ''}>${t === 'all' ? 'All' : label(t)} (${count})</a>`;
   }).join('');
+  const eventLinks = events.map((e) => `<a href="${esc(adminUrl({ tab, event: e.code === current.code ? '' : e.code }))}"` +
+    `${e.code === shownEvent.code ? ' aria-current="page"' : ''}>${esc(e.name)}${e.code === current.code ? ' (now)' : ''}</a>`).join('');
+  const past = shownEvent.code !== current.code
+    ? `<p class="flash" role="status">You are looking at ${esc(shownEvent.name)}. New sign-ups go to ${esc(current.name)}.</p>` : '';
+  const newEvent = `<details class="new-event"${eventError ? ' open' : ''}><summary>Start a new event</summary>
+<form method="post" action="/admin/event" class="fields">
+  <input type="hidden" name="token" value="${esc(token)}">${viewFields(view)}
+  ${errorBlock(eventError)}
+  <div><label for="event-name">Event name</label><input id="event-name" name="name" type="text" maxlength="60" required value="${esc(eventName)}"></div>
+  <p class="hint">New sign-ups go to it straight away, and the LCQ runner starts fresh. Earlier events stay here to view and download.</p>
+  <button type="submit">Start event</button>
+</form></details>`;
   const toggle = Object.keys(BRACKETS).map((b) =>
     `<button type="submit" name="bracket" value="${b}" aria-pressed="${b === active}">${label(b)}</button>`).join('');
   const addTo = form.bracket ?? (tab === 'all' ? active : tab);
   return page('Registrations', `
 ${adminHeader(cfg, brand, 'Registrations',
-    `<a href="${adminUrl(tab)}">Refresh</a><a class="btn secondary" href="${exportUrl}">Download CSV</a>`)}
+    `<a href="${esc(adminUrl(view))}">Refresh</a><a class="btn secondary" href="${esc(exportUrl)}">Download CSV</a>`)}
 ${warnings.map((w) => `<p class="error" role="alert">${esc(w)}</p>`).join('')}
 ${flash ? `<p class="flash" role="status">${flash}</p>` : ''}
+<nav class="tabs events" aria-label="Events"><span>Event</span>${eventLinks}</nav>
+${newEvent}
+${past}
 <form method="post" action="/admin/bracket" class="toggle">
-  <input type="hidden" name="token" value="${esc(token)}"><input type="hidden" name="tab" value="${esc(tab)}">
+  <input type="hidden" name="token" value="${esc(token)}">${viewFields(view)}
   <span>New sign-ups go to</span>${toggle}
 </form>
 <nav class="tabs" aria-label="Brackets">${tabs}</nav>
@@ -364,7 +394,7 @@ ${runner ? `<p class="hint">LCQ runner for a tablet on the booth Wi-Fi: <strong>
     <p class="hint">For on-spot registrations entered by staff.</p>
     ${errorBlock(error)}
     <form method="post" action="/admin/add" class="fields">
-      <input type="hidden" name="token" value="${esc(token)}"><input type="hidden" name="tab" value="${esc(tab)}">
+      <input type="hidden" name="token" value="${esc(token)}">${viewFields(view)}
       <div><label for="add-bracket">Bracket</label><select id="add-bracket" name="bracket">${Object.keys(BRACKETS).map((b) =>
     `<option value="${b}"${b === addTo ? ' selected' : ''}>${label(b)}</option>`).join('')}</select></div>
       <div><label for="name">Name</label><input id="name" name="name" type="text" maxlength="${NAME_MAX}" required value="${esc(form.name ?? '')}"></div>
@@ -378,7 +408,7 @@ ${runner ? `<p class="hint">LCQ runner for a tablet on the booth Wi-Fi: <strong>
     <h2 id="find-title">Find someone</h2>
     <p class="hint">Search by name or any part of the number.</p>
     <form method="get" action="/admin" class="fields" role="search">
-      ${tab === 'all' ? '' : `<input type="hidden" name="tab" value="${esc(tab)}">`}
+      ${tab === 'all' ? '' : `<input type="hidden" name="tab" value="${esc(tab)}">`}${view.event ? `<input type="hidden" name="event" value="${esc(view.event)}">` : ''}
       <div><label for="q">Name or number</label><input id="q" name="q" type="search" maxlength="60" value="${esc(q)}"></div>
       <button class="secondary" type="submit">Search</button>
     </form>
@@ -392,7 +422,7 @@ ${runner ? `<p class="hint">LCQ runner for a tablet on the booth Wi-Fi: <strong>
 </table>`, 'admin');
 }
 
-export function confirmDeletePage(cfg, lead, token, brand = NO_BRAND, tab = 'all') {
+export function confirmDeletePage(cfg, lead, token, brand = NO_BRAND, view = { tab: 'all', event: '' }) {
   return page('Delete registration', `
 ${adminHeader(cfg, brand, 'Delete registration')}
 <section class="panel confirm">
@@ -400,8 +430,8 @@ ${adminHeader(cfg, brand, 'Delete registration')}
 <p><strong>${esc(lead.name)}</strong>, <span class="nowrap">${esc(displayPhone(lead.phone))}</span>, ${esc(BRACKETS[lead.bracket] ?? lead.bracket)}, signed up ${esc(toISTShort(lead.createdAt))} IST.</p>
 <p>This removes them from the database, the spreadsheet and the log. It cannot be undone. Spreadsheets you
 already downloaded or copied, and backups of this laptop, are not changed.</p>
-<form method="post" action="/admin/delete">${hidden(token, lead.id, tab)}<input type="hidden" name="confirm" value="yes">
-<div class="buttons"><a class="btn secondary" href="${adminUrl(tab)}" autofocus>Cancel</a>
+<form method="post" action="/admin/delete">${hidden(token, lead.id, view)}<input type="hidden" name="confirm" value="yes">
+<div class="buttons"><a class="btn secondary" href="${esc(adminUrl(view))}" autofocus>Cancel</a>
 <button class="danger" type="submit">Delete registration</button></div></form>
 </section>`, 'admin');
 }
@@ -677,6 +707,12 @@ export function createPortalServer(cfg, store, {
   const overLimit = limiter(submitLimit, 'sign-ups');
   const pinOverLimit = limiter({ max: 5, windowMs: 60_000 }, 'LCQ PIN tries');
   const runnerInfo = () => (lcq ? { url: `${portalUrl}lcq`, pin: lcq.pin() } : null);
+  // A tab and event from the URL or a form; anything unknown means the default.
+  const viewOf = (params) => ({ tab: tabOf(params.tab), event: typeof params.event === 'string' && store.event(params.event) ? params.event : '' });
+  const adminData = () => ({
+    leads: store.list(), token: adminToken, brand, warnings: warningsOf(store), active: store.bracket(), runner: runnerInfo(),
+    events: store.events(), current: store.currentEvent(),
+  });
 
   // Signed-in tablets. Kept in memory: after a restart the tablet enters the PIN again.
   const sessions = new Set();
@@ -765,7 +801,7 @@ export function createPortalServer(cfg, store, {
         error: e.message, field: e.field, name: rawName.slice(0, NAME_MAX), phone: rawPhone.slice(0, 20), consent: fields.consent === 'yes', bracket,
       }, brand));
     }
-    const { created } = store.register({ name, phone, source: 'form', eventCode: cfg.eventCode, noticeVersion: cfg.noticeVersion, bracket });
+    const { created } = store.register({ name, phone, source: 'form', noticeVersion: cfg.noticeVersion, bracket });
     if (!created) {
       log('duplicate registration refused');
       return html(res, 409, formPage(cfg, {
@@ -779,25 +815,23 @@ export function createPortalServer(cfg, store, {
   async function adminPost(req, res, path) {
     const fields = await readForm(req);
     if (!tokenMatches(fields.token, adminToken)) return plain(res, 403, 'bad or missing admin token; reload /admin');
-    const tab = tabOf(fields.tab);
-    const adminReply = (status, extra) => html(res, status, adminPage(cfg, {
-      leads: store.list(), token: adminToken, brand, warnings: warningsOf(store), tab, active: store.bracket(), runner: runnerInfo(), ...extra,
-    }));
+    const view = viewOf(fields);
+    const adminReply = (status, extra) => html(res, status, adminPage(cfg, { ...adminData(), view, ...extra }));
     if (path === '/admin/bracket') {
       if (!Object.hasOwn(BRACKETS, fields.bracket)) return plain(res, 400, 'unknown bracket');
       store.setBracket(fields.bracket);
       log(`new sign-ups now go to ${BRACKETS[fields.bracket]}`);
-      return redirect(res, adminUrl(tab, 'bracket'), 303);
+      return redirect(res, adminUrl(view, 'bracket'), 303);
     }
     if (path === '/admin/delete') {
       const id = Number(fields.id);
       const lead = Number.isSafeInteger(id) ? store.get(id) : null;
       if (!lead) return plain(res, 404, 'registration not found; it may already be deleted');
-      if (fields.confirm !== 'yes') return html(res, 200, confirmDeletePage(cfg, lead, adminToken, brand, tab));
+      if (fields.confirm !== 'yes') return html(res, 200, confirmDeletePage(cfg, lead, adminToken, brand, view));
       store.remove(id);
       const partial = store.files?.stillHolds(lead) ?? false;
       log(partial ? 'registration deleted from the database; files pending' : 'registration deleted');
-      return redirect(res, adminUrl(tab, partial ? 'deleted-partial' : 'deleted'), 303);
+      return redirect(res, adminUrl(view, partial ? 'deleted-partial' : 'deleted'), 303);
     }
     if (path === '/admin/add') {
       const bracket = Object.hasOwn(BRACKETS, fields.bracket) ? fields.bracket : store.bracket();
@@ -814,11 +848,23 @@ export function createPortalServer(cfg, store, {
         return adminReply(400, { error: e.message, form });
       }
       // Staff read the same notice and ticked that the person agreed; source 'desk' tells these rows apart.
-      const result = store.register({ name, phone, source: 'desk', eventCode: cfg.eventCode, noticeVersion: cfg.noticeVersion, bracket });
+      const result = store.register({ name, phone, source: 'desk', noticeVersion: cfg.noticeVersion, bracket });
       if (!result.created) {
         return adminReply(409, { error: `${displayPhone(phone)} is already registered for ${BRACKETS[bracket]}, as ${result.existing.name}.`, form });
       }
-      return redirect(res, adminUrl(tab, 'added'), 303);
+      // Desk entries always join the current event, so show that one.
+      return redirect(res, adminUrl({ ...view, event: '' }, 'added'), 303);
+    }
+    if (path === '/admin/event') {
+      let event;
+      try {
+        event = store.startEvent(fields.name);
+      } catch (e) {
+        if (!(e instanceof ValidationError)) throw e;
+        return adminReply(400, { eventError: e.message, eventName: String(fields.name ?? '').slice(0, 60) });
+      }
+      log(`new sign-ups now go to event ${event.code}`);
+      return redirect(res, adminUrl({ ...view, event: '' }, 'event'), 303);
     }
     plain(res, 404, 'not found');
   }
@@ -840,18 +886,17 @@ export function createPortalServer(cfg, store, {
       // With no-referrer, browsers send "Origin: null" even on the desk's own form posts.
       res.setHeader('Referrer-Policy', 'same-origin');
       if (method === 'GET' && path === '/admin') {
-        const params = new URL(req.url, 'http://x').searchParams;
+        const params = Object.fromEntries(new URL(req.url, 'http://x').searchParams);
         return html(res, 200, adminPage(cfg, {
-          leads: store.list(), token: adminToken, brand, warnings: warningsOf(store),
-          q: (params.get('q') ?? '').slice(0, 60), msg: params.get('msg') ?? '', tab: tabOf(params.get('tab')), active: store.bracket(),
-          runner: runnerInfo(),
+          ...adminData(), q: (params.q ?? '').slice(0, 60), msg: params.msg ?? '', view: viewOf(params),
         }));
       }
       if (method === 'GET' && path === '/admin/export.csv') {
-        const tab = tabOf(new URL(req.url, 'http://x').searchParams.get('tab'));
-        const leads = store.list().filter((l) => tab === 'all' || l.bracket === tab);
+        const { tab, event } = viewOf(Object.fromEntries(new URL(req.url, 'http://x').searchParams));
+        const code = event || store.currentEvent().code;
+        const leads = store.list().filter((l) => l.eventCode === code && (tab === 'all' || l.bracket === tab));
         return send(res, 200, 'text/csv; charset=utf-8', leadsCsv(leads),
-          { 'Content-Disposition': `attachment; filename="leads${tab === 'all' ? '' : `-${tab}`}.csv"` });
+          { 'Content-Disposition': `attachment; filename="leads-${code}${tab === 'all' ? '' : `-${tab}`}.csv"` });
       }
       if (method === 'POST') {
         if (!sameOriginPost(req)) return plain(res, 403, 'cross-site request refused; use the admin page itself', { Connection: 'close' });

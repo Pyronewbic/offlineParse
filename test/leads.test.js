@@ -69,7 +69,7 @@ describe('cleanName', () => {
 describe('LeadStore', () => {
   let store;
   const add = (overrides = {}) => store.register({
-    name: 'Asha', phone: '+919876543210', source: 'form', eventCode: 'EVT26', noticeVersion: 'v1', ...overrides,
+    name: 'Asha', phone: '+919876543210', source: 'form', noticeVersion: 'v1', ...overrides,
   });
 
   beforeEach(() => { store = new LeadStore(':memory:'); });
@@ -96,7 +96,7 @@ describe('LeadStore', () => {
     try {
       const path = join(dir, 'nested', 'leads.db');
       const disk = new LeadStore(path);
-      disk.register({ name: 'Asha', phone: '+919876543210', source: 'form', eventCode: 'E', noticeVersion: 'v1' });
+      disk.register({ name: 'Asha', phone: '+919876543210', source: 'form', noticeVersion: 'v1' });
       disk.close();
       const reopened = new LeadStore(path);
       assert.equal(reopened.list().length, 1);
@@ -114,7 +114,7 @@ describe('brackets', () => {
   });
   afterEach(() => rmSync(dir, { recursive: true, force: true }));
   const reg = (store, phone, extra = {}) =>
-    store.register({ name: 'Asha', phone, source: 'form', eventCode: 'E', noticeVersion: 'v1', ...extra });
+    store.register({ name: 'Asha', phone, source: 'form', noticeVersion: 'v1', ...extra });
 
   test('a number registers once per bracket, and new sign-ups join the bracket that is switched on', () => {
     const store = new LeadStore(':memory:');
@@ -168,7 +168,7 @@ describe('brackets', () => {
       INSERT INTO leads VALUES (7, '+919123456789', 'Ravi', 'whatsapp', 'E', 't', 'none', '2026-10-20T11:00:00Z', 't', NULL);`);
     old.close();
 
-    const store = new LeadStore(path);
+    const store = new LeadStore(path, { firstEvent: { code: 'E', name: 'October' } });
     assert.deepEqual(store.list().map((l) => [l.id, l.name, l.bracket, l.source]), [[3, 'Asha', 'normal', 'form'], [7, 'Ravi', 'normal', 'desk']],
       'old WhatsApp desk entries become desk entries');
     assert.equal(reg(store, '+919876543210').created, false, 'still once per bracket');

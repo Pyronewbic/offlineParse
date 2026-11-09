@@ -47,10 +47,10 @@ describe('lead files', () => {
   let store;
   const open = () => {
     files = new LeadFiles({ csvPath, logPath, onError: (m) => errors.push(m) });
-    store = new LeadStore(join(dir, 'leads.db'), { files });
+    store = new LeadStore(join(dir, 'leads.db'), { files, firstEvent: { code: 'EVT26', name: 'Event XYZ' } });
   };
   const add = (overrides = {}) => store.register({
-    name: 'Asha', phone: '+919876543210', source: 'form', eventCode: 'EVT26', noticeVersion: 'v1', ...overrides,
+    name: 'Asha', phone: '+919876543210', source: 'form', noticeVersion: 'v1', ...overrides,
   });
 
   beforeEach(() => {
@@ -139,7 +139,7 @@ describe('lead files', () => {
   test('a blocked CSV catches up on retry, without waiting for the next sign-up, and warns once', () => {
     const infos = [];
     files = new LeadFiles({ csvPath, logPath, onError: (m) => errors.push(m), onInfo: (m) => infos.push(m) });
-    store = new LeadStore(join(dir, 'leads.db'), { files });
+    store = new LeadStore(join(dir, 'leads.db'), { files, firstEvent: { code: 'EVT26', name: 'Event XYZ' } });
     assert.equal(files.retry(), false, 'nothing pending after a good startup sync');
     // A non-empty directory at the path makes the rename fail, standing in for a file Excel holds open.
     unlinkSync(csvPath);
@@ -227,9 +227,9 @@ describe('deleting a registration', () => {
   const paths = () => ({ db: join(dir, 'leads.db'), csv: join(dir, 'leads.csv'), log: join(dir, 'leads.log') });
   const open = () => {
     files = new LeadFiles({ csvPath: paths().csv, logPath: paths().log, onError: () => {} });
-    store = new LeadStore(paths().db, { files });
+    store = new LeadStore(paths().db, { files, firstEvent: { code: 'EVT26', name: 'Event XYZ' } });
   };
-  const reg = (name, phone) => store.register({ name, phone, source: 'form', eventCode: 'EVT26', noticeVersion: 'v1' });
+  const reg = (name, phone) => store.register({ name, phone, source: 'form', noticeVersion: 'v1' });
   const rawEverywhere = () => readdirSync(dir).map((f) => readFileSync(join(dir, f)).toString('latin1')).join('\n');
 
   beforeEach(() => {
@@ -284,7 +284,7 @@ describe('deleting a registration', () => {
     reg('Zanzibar Quokka', '+919111122222');
     blockLog();
     store.remove(1);
-    assert.equal(files.stillHolds({ phone: '+919111122222' }), true);
+    assert.equal(files.stillHolds({ phone: '+919111122222', eventCode: 'EVT26' }), true);
     assert.ok(existsSync(pendingPath()), 'the pending erasure is on disk');
     unblockLog();
     reg('Asha Rao', '+919876543210');
@@ -295,7 +295,7 @@ describe('deleting a registration', () => {
     assert.equal(files.retry(), true);
     assert.ok(!rawEverywhere().includes('Zanzibar Quokka') && !rawEverywhere().includes('9111122222'), 'gone from every file');
     assert.deepEqual(files.warnings(), []);
-    assert.equal(files.stillHolds({ phone: '+919111122222' }), false);
+    assert.equal(files.stillHolds({ phone: '+919111122222', eventCode: 'EVT26' }), false);
     assert.ok(!existsSync(pendingPath()));
     assert.deepEqual(logEntries(paths().log).map((e) => [e.event, e.id, e.name ?? null]),
       [['lead.deleted', 1, null], ['lead.created', 1, 'Asha Rao']], 'the deletion is logged when it happened, before the id was reused');

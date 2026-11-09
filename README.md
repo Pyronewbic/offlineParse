@@ -21,7 +21,7 @@ npm run try   # practice on this laptop, no router: http://localhost/admin and h
 | Key | Meaning |
 |---|---|
 | `orgName` | Consent line, privacy note and the logo's alt text |
-| `eventName`, `eventCode` | `eventCode` tags each registration |
+| `eventName`, `eventCode` | The first event; start later ones on the admin page |
 | `wifiSsid`, `wifiPassword` | Must match the router; empty password = open network |
 | `laptopIp` | The booth address, `"100.64.0.2"` |
 | `logoLight`, `logoDark` | PNG logos for light and dark phones; empty shows `orgName` |
@@ -68,7 +68,7 @@ npm start
 - **Linux:** ports below 1024 need root or `sudo setcap cap_net_bind_service=+ep "$(readlink -f "$(command -v node)")"`; open 80, 443 and 853/tcp and 53/udp in the firewall.
 - `npm run booth-ip -- --dry-run` shows the command; `--ip <address>` acts on another address. If `npm start` warns the booth address is gone, run `npm run booth-ip` again.
 
-**Admin:** `http://localhost/admin`, on the laptop only. **New sign-ups go to** switches the bracket (Normal or LCQ) every new registration joins; the All / Normal / LCQ tabs split the list, and **Download CSV** exports the tab you're on. Also search, add, delete, **Refresh** for new sign-ups.
+**Admin:** `http://localhost/admin`, on the laptop only. **New sign-ups go to** switches the bracket (Normal or LCQ) every new registration joins; the All / Normal / LCQ tabs split the list, and **Download CSV** exports the tab you're on. **Event** lists every event; pick an earlier one to view or download it. **Start a new event** sends new sign-ups to a new event straight away, with a fresh LCQ runner. Also search, add, delete, **Refresh** for new sign-ups.
 
 **LCQ runner:** on a tablet on the booth Wi-Fi, open the address and PIN shown on the admin page (`http://100.64.0.2/lcq`). Every 4 LCQ registrations form a group, which pops up within 3 seconds: pick a pairing or **Randomize**, then tap each match's winner. After that it offers matches between free players with equal wins (never a rematch) for you to **Start**, or pair any two yourself. **Make a group** takes the last 2 or 3 waiting players. **Needs attention** at the top lists groups to pair, long waits and long matches; the bar under it jumps to each section. **Find a player** searches by name or number. **Standings** counts matches on, waiting and eliminated players, and shows how long each free player has waited since their last result (a long wait may mean they left). Tap any name for their number and **Drop** (tick "not here" first), which gives their match to the opponent. The tablet stays signed in until the server restarts.
 
@@ -84,7 +84,7 @@ Stop the server (Ctrl+C), then run `npm run booth-ip:undo`. This is required on 
 
 All in `data/`, owner-only on macOS and Linux; copy the folder to back up. On a Mac `npm start` keeps it out of Time Machine; on Windows keep the repo out of OneDrive and File History.
 
-- `leads.db`: the source of truth. A number registers once per bracket.
+- `leads.db`: the source of truth. A number registers once per bracket in each event.
 - `leads.csv`: rewritten after every change, times in IST. Don't open it while the booth runs; open a **Download CSV** copy.
 - `leads.log`: one JSON line per registration or deletion, UTC.
 - **Delete** on the admin page erases a person from all three and frees the number; if a file can't be updated yet, the admin page says so and it is retried. Copies made elsewhere are not touched.

@@ -41,7 +41,7 @@ describe('LCQ runner over HTTP', () => {
   };
   const signUp = (count) => {
     for (let i = 0; i < count; i++) {
-      store.register({ name: `P${i + 1}`, phone: `+9198765${String(i).padStart(5, '0')}`, source: 'form', eventCode: 'E', noticeVersion: 'v', bracket: 'lcq' });
+      store.register({ name: `P${i + 1}`, phone: `+9198765${String(i).padStart(5, '0')}`, source: 'form', noticeVersion: 'v', bracket: 'lcq' });
     }
   };
 

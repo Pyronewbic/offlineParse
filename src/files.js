@@ -3,7 +3,7 @@ import {
   closeSync, constants, mkdirSync, openSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync, writeSync,
 } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
-import { BRACKETS } from './leads.js';
+import { BRACKETS, EVENT_CODE } from './leads.js';
 
 const CSV_FORMULA_PREFIXES = ['=', '+', '-', '@', '\t', '\r'];
 const LOG_FIELDS = ['id', 'name', 'phone', 'source', 'eventCode', 'bracket'];
@@ -26,13 +26,17 @@ const openLog = (path) =>
 
 // Log lines and pending erasures from before brackets have none; they were all Normal.
 const bracketOf = (x) => x.bracket ?? 'normal';
-const erasureKey = (lead) => `${lead.phone} ${bracketOf(lead)}`;
+const erasureKey = (lead) => `${lead.phone} ${bracketOf(lead)} ${lead.eventCode ?? ''}`;
 
-/** Whether a log line belongs to a registration deleted at `until` (a later re-registration, or the other bracket, is kept). */
-function erases(line, { phone, until, bracket }) {
+/**
+ * Whether a log line belongs to a registration deleted at `until`: a later re-registration, the other
+ * bracket, or another event is kept. A pending erasure from before events has no event and matches any.
+ */
+function erases(line, { phone, until, bracket, eventCode }) {
   try {
     const entry = JSON.parse(line);
-    return entry.phone === phone && bracketOf(entry) === (bracket ?? 'normal') && !(Date.parse(entry.ts) > Date.parse(until));
+    return entry.phone === phone && bracketOf(entry) === (bracket ?? 'normal') && (eventCode === undefined || entry.eventCode === eventCode) &&
+      !(Date.parse(entry.ts) > Date.parse(until));
   } catch {
     return line.includes(phone);
   }
@@ -40,7 +44,8 @@ function erases(line, { phone, until, bracket }) {
 
 const MAX_PENDING_BYTES = 1024 * 1024;
 const validPending = (e) => e && Number.isSafeInteger(e.id) && typeof e.phone === 'string' && /^\+\d{8,15}$/.test(e.phone) &&
-  typeof e.until === 'string' && !Number.isNaN(Date.parse(e.until)) && ['normal', 'lcq', undefined].includes(e.bracket);
+  typeof e.until === 'string' && !Number.isNaN(Date.parse(e.until)) && ['normal', 'lcq', undefined].includes(e.bracket) &&
+  (e.eventCode === undefined || (typeof e.eventCode === 'string' && EVENT_CODE.test(e.eventCode)));
 const IST_OFFSET_MS = 330 * 60 * 1000; // India has no daylight saving, so a fixed +05:30 is exact
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -129,7 +134,7 @@ export class LeadFiles {
       if (e.code !== 'ENOENT') this.fail(this.pendingPath, new Error(`ignored, so these deletions may still be in the log: ${e.message}`));
       return;
     }
-    for (const e of entries) this.pendingErasures.set(erasureKey(e), { id: e.id, phone: e.phone, bracket: bracketOf(e), until: e.until });
+    for (const e of entries) this.pendingErasures.set(erasureKey(e), { id: e.id, phone: e.phone, bracket: bracketOf(e), eventCode: e.eventCode, until: e.until });
   }
 
   savePending() {
@@ -200,7 +205,7 @@ export class LeadFiles {
   forget(lead) {
     const until = new Date().toISOString();
     this.record('lead.deleted', lead, ['id']);
-    this.pendingErasures.set(erasureKey(lead), { id: lead.id, phone: lead.phone, bracket: bracketOf(lead), until });
+    this.pendingErasures.set(erasureKey(lead), { id: lead.id, phone: lead.phone, bracket: bracketOf(lead), eventCode: lead.eventCode, until });
     this.flushErasures();
     return !this.pendingErasures.has(erasureKey(lead));
   }
