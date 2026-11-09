@@ -3,6 +3,7 @@ import {
   closeSync, constants, mkdirSync, openSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync, writeSync,
 } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
+import { GAME_MAX } from './config.js';
 import { BRACKETS, EVENT_CODE } from './leads.js';
 
 const CSV_FORMULA_PREFIXES = ['=', '+', '-', '@', '\t', '\r'];
@@ -48,7 +49,7 @@ const MAX_PENDING_BYTES = 1024 * 1024;
 const validPending = (e) => e && Number.isSafeInteger(e.id) && typeof e.phone === 'string' && /^\+\d{8,15}$/.test(e.phone) &&
   typeof e.until === 'string' && !Number.isNaN(Date.parse(e.until)) && ['normal', 'lcq', undefined].includes(e.bracket) &&
   (e.eventCode === undefined || (typeof e.eventCode === 'string' && EVENT_CODE.test(e.eventCode))) &&
-  (e.game === undefined || (typeof e.game === 'string' && e.game.length <= 40 && !/\p{C}/u.test(e.game)));
+  (e.game === undefined || (typeof e.game === 'string' && [...e.game].length <= GAME_MAX && !/\p{C}/u.test(e.game)));
 const IST_OFFSET_MS = 330 * 60 * 1000; // India has no daylight saving, so a fixed +05:30 is exact
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];

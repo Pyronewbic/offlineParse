@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, afterEach, before, beforeEach, describe, test } from 'node:test';
@@ -207,6 +207,20 @@ describe('games in the store and files', () => {
       assert.ok(text.includes('Asha Two'), `the other game is kept in ${file}`);
     }
     store.close();
+    files.close();
+  });
+
+  test('a pending deletion for a game with emoji in its name survives a restart and is finished', () => {
+    const game = 'Street Fighter 6 Grand Finals \u{1F525}\u{1F525}\u{1F525}\u{1F525}\u{1F525}\u{1F525}';
+    assert.ok([...game].length <= 40 && game.length > 40, 'precondition: allowed by config, longer than 40 in UTF-16');
+    assert.deepEqual(makeConfig({ games: [game] }).games, [game]);
+    const log = join(dir, 'leads.log');
+    writeFileSync(log, `${JSON.stringify({ ts: '2026-11-09T10:00:00.000Z', event: 'lead.created', name: 'Gone Guy', phone: '+919876543210', eventCode: 'EVT26', bracket: 'lcq', game })}\n`);
+    writeFileSync(join(dir, 'pending-erasures.json'), JSON.stringify([{ id: 1, phone: '+919876543210', bracket: 'lcq', eventCode: 'EVT26', game, until: '2026-11-10T00:00:00Z' }]));
+    const errors = [];
+    const files = new LeadFiles({ csvPath: join(dir, 'leads.csv'), logPath: log, onError: (m) => errors.push(m) });
+    assert.deepEqual(errors, []);
+    assert.ok(!readFileSync(log, 'utf8').includes('Gone Guy'), 'erased on startup');
     files.close();
   });
 

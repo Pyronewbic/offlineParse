@@ -24,7 +24,7 @@ const FIELD_TYPES = {
 // No games means guests pick none and registrations carry no game.
 const DEFAULTS = { lcqWinsToQualify: 4, lcqLossesOut: 2, lcqWaitAlertMin: 10, lcqMatchAlertMin: 15, games: [] };
 export const MAX_GAMES = 12;
-const GAME_MAX = 40;
+export const GAME_MAX = 40; // characters, counted as code points
 // Keys from the WhatsApp follow-up days. Named in the error so an old config.json is easy to fix.
 const RETIRED = ['whatsappNumber', 'socials', 'socialsMessage', 'prefillMessage'];
 
