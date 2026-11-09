@@ -35,6 +35,8 @@ const query = (params) => {
 };
 // What the admin page shows: a bracket tab, an event ('' is the current one) and a game ('' is every game).
 const adminUrl = ({ tab = 'all', event = '', game = '' }, msg = '') => `/admin${query({ tab: tab === 'all' ? '' : tab, event, game, msg })}`;
+// A runner tab's address. With game tabs the game is always named, since '' (no game) is a tab of its own.
+const lcqUrl = (game, tabbed) => (tabbed ? `/lcq?${new URLSearchParams({ game })}` : '/lcq');
 const viewFields = ({ tab = 'all', event = '', game = '' }) =>
   `<input type="hidden" name="tab" value="${esc(tab)}"><input type="hidden" name="event" value="${esc(event)}">` +
   `<input type="hidden" name="game" value="${esc(game)}">`;
@@ -90,7 +92,7 @@ const RUNNER_JS = `(() => {
   // Swap in the new page body when something changed, so the scroll position and folds stay put.
   setInterval(async () => {
     try {
-      const r = await fetch('/lcq/version', { cache: 'no-store' });
+      const r = await fetch('/lcq/version' + location.search, { cache: 'no-store' });
       if (!r.ok || (await r.json()).v === version || busy()) return;
       const page = await fetch(location.pathname + location.search, { cache: 'no-store' });
       const next = new DOMParser().parseFromString(await page.text(), 'text/html').querySelector('main');
@@ -513,8 +515,14 @@ export const runnerVersion = (cfg, lcq, state, now = Date.now()) => {
   return `${lcq.version()}-${waiting.length}-${long.length}`;
 };
 
-export function runnerPage(cfg, state, { brand = NO_BRAND, error = '', notice = '', version = '', now = Date.now(), q = '' } = {}) {
+export function runnerPage(cfg, state, {
+  brand = NO_BRAND, error = '', notice = '', version = '', now = Date.now(), q = '', game = '', tabs = [],
+} = {}) {
   const { rules, players, groups, proposals, open, decided } = state;
+  // Every form says which game it came from, so the tablet comes back to that tab.
+  const btn = (action, fields, label, cls) => runnerButton(action, { ...fields, game }, label, cls);
+  const gameField = fieldsOf({ game });
+  const tabbed = tabs.some((t) => t.game);
   const record = (p) => `${p.wins}W ${p.losses}L`;
   const none = (text) => `<li class="hint">${text}</li>`;
   // Native folding; the script remembers each section's state by id across updates.
@@ -526,7 +534,7 @@ export function runnerPage(cfg, state, { brand = NO_BRAND, error = '', notice = 
   const fresh = groups.filter((g) => !g.seen);
   const banner = fresh.length
     ? `<div class="flash" role="status">New group${fresh.length > 1 ? 's' : ''}: ${fresh.map((g) =>
-      `#${g.id} (${g.seats.map((x) => esc(x.name)).join(', ')})`).join('; ')} ${runnerButton('seen', {}, 'Got it', 'secondary')}</div>`
+      `#${g.id} (${g.seats.map((x) => esc(x.name)).join(', ')})`).join('; ')} ${btn('seen', {}, 'Got it', 'secondary')}</div>`
     : '';
 
   const toPair = groups.filter((g) => !g.started).map((g) => {
@@ -535,8 +543,8 @@ export function runnerPage(cfg, state, { brand = NO_BRAND, error = '', notice = 
       `${g.seats.length === 3 ? `; ${esc(g.seats[3 - split[0][0] - split[0][1]].name)} sits out` : ''}</span></label>`).join('');
     // A paired group folds to one line; it can still be changed until a result is in. No id: not remembered.
     return `<li><details${g.paired ? '' : ' open'}><summary><h3>Group ${g.id}${g.paired ? ': paired, tap to change' : ''}</h3></summary>` +
-      `<form method="post" action="/lcq/pair">${fieldsOf({ group: g.id })}${radios}<button class="secondary" type="submit">Set pairing</button></form>` +
-      `${runnerButton('randomize', { group: g.id }, 'Randomize', 'secondary')}</details></li>`;
+      `<form method="post" action="/lcq/pair">${fieldsOf({ group: g.id, game })}${radios}<button class="secondary" type="submit">Set pairing</button></form>` +
+      `${btn('randomize', { group: g.id }, 'Randomize', 'secondary')}</details></li>`;
   });
   const unpaired = groups.filter((g) => !g.paired).length;
 
@@ -544,20 +552,20 @@ export function runnerPage(cfg, state, { brand = NO_BRAND, error = '', notice = 
   const who = (id, name) => `<strong>${esc(name)}</strong>${byId.has(id) ? ` <span class="hint">${record(byId.get(id))}</span>` : ''}`;
   const playing = open.map((m) => `<li><p class="match">${who(m.a, m.aName)} vs ${who(m.b, m.bName)}` +
     `${m.groupId ? ` <span class="chip">Group ${m.groupId}</span>` : ''}</p><div class="won">` +
-    `${runnerButton('result', { match: m.id, winner: m.a }, `${esc(m.aName)} won`)}` +
-    `${runnerButton('result', { match: m.id, winner: m.b }, `${esc(m.bName)} won`)}</div>` +
-    `${m.groupId ? '' : runnerButton('cancel', { match: m.id }, 'Call off', 'quiet')}</li>`).join('') || none('No matches in progress.');
+    `${btn('result', { match: m.id, winner: m.a }, `${esc(m.aName)} won`)}` +
+    `${btn('result', { match: m.id, winner: m.b }, `${esc(m.bName)} won`)}</div>` +
+    `${m.groupId ? '' : btn('cancel', { match: m.id }, 'Call off', 'quiet')}</li>`).join('') || none('No matches in progress.');
 
   const free = players.filter((p) => p.status === 'free');
   const ready = proposals.map((p) => `<li>${esc(p.a.name)} vs ${esc(p.b.name)} <span class="chip">${p.wins}W</span> ` +
-    `${runnerButton('start', { a: p.a.id, b: p.b.id }, 'Start', 'secondary')}</li>`).join('') || none('Nobody to pair yet.');
-  const manual = free.length < 2 ? '' : `<form method="post" action="/lcq/start" class="fields">
+    `${btn('start', { a: p.a.id, b: p.b.id }, 'Start', 'secondary')}</li>`).join('') || none('Nobody to pair yet.');
+  const manual = free.length < 2 ? '' : `<form method="post" action="/lcq/start" class="fields">${gameField}
   ${choose(free, 'pa', 'a', 'Player')}${choose(free, 'pb', 'b', 'Against')}
   <button class="secondary" type="submit">Start match</button></form>`;
 
   const resultRow = (m) => {
     const [winner, loser] = m.winner === m.a ? [m.aName, m.bName] : [m.bName, m.aName];
-    return `<li>${esc(winner)} beat ${esc(loser)} ${runnerButton('undo', { match: m.id }, 'Undo', 'quiet')}</li>`;
+    return `<li>${esc(winner)} beat ${esc(loser)} ${btn('undo', { match: m.id }, 'Undo', 'quiet')}</li>`;
   };
   const older = decided.slice(5);
   const results = `<ul class="plain">${decided.slice(0, 5).map(resultRow).join('') || none('No results yet.')}</ul>` +
@@ -566,7 +574,7 @@ export function runnerPage(cfg, state, { brand = NO_BRAND, error = '', notice = 
   const elapsed = (iso) => `<span data-wait="${now - Date.parse(iso)}">${waitText(now - Date.parse(iso))}</span>`;
   const waited = (p) => (p.status === 'free' && p.freeSince ? `, waiting ${elapsed(p.freeSince)}` : '');
   // A required tick stands in for "are you sure", so a stray tap cannot drop anyone.
-  const dropOne = (p) => (['free', 'playing'].includes(p.status) ? `<form method="post" action="/lcq/drop" class="fields">${fieldsOf({ player: p.id })}` +
+  const dropOne = (p) => (['free', 'playing'].includes(p.status) ? `<form method="post" action="/lcq/drop" class="fields">${fieldsOf({ player: p.id, game })}` +
     `<label class="check"><input type="checkbox" name="confirm" value="yes" required><span>${esc(p.name)} is not here` +
     `${p.status === 'playing' ? '; their match goes to the opponent' : ''}</span></label><button class="secondary" type="submit">Drop</button></form>` : '');
   const STATUS = { playing: 'playing', qualified: 'qualified', out: 'eliminated', dropped: 'dropped', queued: 'waiting for a group', grouped: 'group not paired yet' };
@@ -579,7 +587,7 @@ export function runnerPage(cfg, state, { brand = NO_BRAND, error = '', notice = 
     `<summary><h3>${title} (${list.length})</h3></summary>${nameRows(list)}${extra}</details></li>` : '');
   const active = players.filter((p) => ['grouped', 'playing', 'free'].includes(p.status));
   const queued = players.filter((p) => p.status === 'queued');
-  const closeGroup = queued.length >= 2 ? runnerButton('close', {}, `Make a group of these ${queued.length}`, 'secondary') : '';
+  const closeGroup = queued.length >= 2 ? btn('close', {}, `Make a group of these ${queued.length}`, 'secondary') : '';
   const count = (...statuses) => players.filter((p) => statuses.includes(p.status)).length;
   const stats = `<dl class="stats">${[['Matches on', open.length], ['Waiting for a match', count('free', 'grouped')],
     ['Waiting for a group', queued.length], ['Eliminated', count('out')], ['Dropped', count('dropped')]]
@@ -604,19 +612,23 @@ export function runnerPage(cfg, state, { brand = NO_BRAND, error = '', notice = 
     toPair.length && ['lcq-pair', `Pair (${unpaired})`], ['lcq-playing', `Playing (${open.length})`], ['lcq-ready', `Ready (${proposals.length})`],
     ['lcq-results', 'Results'], ['lcq-standings', `Players (${players.length})`],
   ].filter(Boolean).map(([id, label]) => `<a href="#${id}">${label}</a>`).join('');
-  const query = q.trim();
-  const found = query ? players.filter((p) => matchesSearch(p, query)) : [];
+  const wanted = q.trim();
+  const found = wanted ? players.filter((p) => matchesSearch(p, wanted)) : [];
   const FOUND_MAX = 20;
-  const foundRows = !query ? ''
-    : !found.length ? `<p class="hint">Nobody matches "${esc(query)}".</p>`
+  const foundRows = !wanted ? ''
+    : !found.length ? `<p class="hint">Nobody matches "${esc(wanted)}".</p>`
     : `<p class="hint">${found.length > FOUND_MAX ? `First ${FOUND_MAX} of ${found.length}; type more of the name.` : `${found.length} found.`}</p>${nameRows(found.slice(0, FOUND_MAX), true)}`;
   const search = `<section class="panel" id="lcq-find" aria-labelledby="lcq-find-title"><h2 id="lcq-find-title" class="sr-only">Find a player</h2>` +
-    `<form method="get" action="/lcq" class="fields" role="search"><div><label for="lcq-q">Find a player, by name or number</label>` +
+    `<form method="get" action="/lcq" class="fields" role="search">${tabbed ? gameField : ''}<div><label for="lcq-q">Find a player, by name or number</label>` +
     `<input id="lcq-q" name="q" type="search" maxlength="60" value="${esc(q)}"></div><button class="secondary" type="submit">Find</button>` +
-    `${query ? '<a class="btn secondary" href="/lcq">Clear</a>' : ''}</form>${foundRows}</section>`;
+    `${wanted ? `<a class="btn secondary" href="${esc(lcqUrl(game, tabbed))}">Clear</a>` : ''}</form>${foundRows}</section>`;
+  const gameTabs = tabbed ? `<nav class="tabs" aria-label="Games">${tabs.map((t) =>
+    `<a href="${esc(lcqUrl(t.game, tabbed))}"${t.game === game ? ' aria-current="page"' : ''}>${t.game ? esc(t.game) : 'No game'} (${t.players})` +
+    `${t.unpaired ? `, ${t.unpaired} to pair` : ''}</a>`).join('')}</nav>` : '';
 
   return page('LCQ runner', `<div id="version" data-version="${esc(version)}" hidden></div>
 ${adminHeader(cfg, brand, 'LCQ runner', `<span>Qualify at ${rules.winsToQualify} wins, out at ${rules.lossesOut} losses</span>`)}
+${gameTabs}
 <nav class="jump" aria-label="Sections">${jumps}</nav>
 ${errorBlock(error)}${notice ? `<p class="flash" role="status">${esc(notice)}</p>` : ''}${banner}${attention}
 ${search}
@@ -754,6 +766,12 @@ export function createPortalServer(cfg, store, {
   const overLimit = limiter(submitLimit, 'sign-ups');
   const pinOverLimit = limiter({ max: 5, windowMs: 60_000 }, 'LCQ PIN tries');
   const runnerInfo = () => (lcq ? { url: `${portalUrl}lcq`, pin: lcq.pin() } : null);
+  // The runner's game tabs: the configured games, then any other game this event's LCQ players are in.
+  const runnerGames = () => [...new Set([...cfg.games, ...lcq.games()])];
+  const gameOf = (value) => {
+    const games = runnerGames();
+    return games.includes(value) ? value : games[0] ?? '';
+  };
   // A tab and event from the URL or a form; anything unknown means the default.
   const viewOf = (params) => {
     const { game } = params;
@@ -796,6 +814,7 @@ export function createPortalServer(cfg, store, {
         });
       }
       if (!session) return redirect(res, '/lcq', 303);
+      const game = gameOf(fields.game);
       const n = (key) => Number(fields[key]);
       try {
         if (path === '/lcq/pair') lcq.pairGroup(n('group'), n('split'));
@@ -806,8 +825,8 @@ export function createPortalServer(cfg, store, {
           const cancelled = lcq.undo(n('match'));
           flashes.set(session, { notice: `Result undone.${cancelled.length ? ` Also called off ${cancelled.join(', ')}, which depended on it.` : ''}` });
         } else if (path === '/lcq/cancel') lcq.cancel(n('match'));
-        else if (path === '/lcq/seen') lcq.markSeen();
-        else if (path === '/lcq/close') lcq.closeGroup();
+        else if (path === '/lcq/seen') lcq.markSeen(game);
+        else if (path === '/lcq/close') lcq.closeGroup(game);
         else if (path === '/lcq/drop') {
           if (fields.confirm === 'yes') lcq.drop(n('player'));
           else flashes.set(session, { error: 'Tick that they are not here, then tap Drop.' });
@@ -817,19 +836,22 @@ export function createPortalServer(cfg, store, {
         if (!(e instanceof LcqError)) throw e;
         flashes.set(session, { error: e.message });
       }
-      return redirect(res, '/lcq', 303);
+      return redirect(res, lcqUrl(game, runnerGames().some(Boolean)), 303);
     }
     if (method !== 'GET' || (path !== '/lcq' && path !== '/lcq/version')) return plain(res, 404, 'not found');
     if (!session) return path === '/lcq' ? html(res, 200, pinPage(cfg, brand)) : plain(res, 401, 'enter the PIN at /lcq');
     lcq.syncGroups();
-    const state = lcq.state();
+    const params = new URL(req.url, 'http://x').searchParams;
+    const game = gameOf(params.get('game'));
+    const state = lcq.state(game);
     const now = Date.now();
     const version = runnerVersion(cfg, lcq, state, now);
     if (path === '/lcq/version') return send(res, 200, 'application/json', JSON.stringify({ v: version }));
     const { error = '', notice = '' } = flashes.get(session) ?? {};
     flashes.delete(session);
-    const q = (new URL(req.url, 'http://x').searchParams.get('q') ?? '').slice(0, 60);
-    return send(res, 200, 'text/html; charset=utf-8', runnerPage(cfg, state, { brand, error, notice, version, now, q }),
+    const q = (params.get('q') ?? '').slice(0, 60);
+    const tabs = runnerGames().map((g) => ({ game: g, players: lcq.leads(g).length, unpaired: lcq.state(g).groups.filter((x) => !x.paired).length }));
+    return send(res, 200, 'text/html; charset=utf-8', runnerPage(cfg, state, { brand, error, notice, version, now, q, game, tabs }),
       { 'Content-Security-Policy': RUNNER_CSP });
   }
 

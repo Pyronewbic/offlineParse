@@ -1,7 +1,7 @@
 // The LCQ runner: LCQ registrations form groups of 4 in sign-up order, each group plays two 1v1 matches,
 // then free players with the same number of wins are paired, until they qualify, are out, or are dropped.
 // Only registration ids are stored here, so deleting a registration still erases the person everywhere.
-// Each group belongs to an event; the runner shows the current event only.
+// Each group belongs to an event and a game; the runner shows one game of the current event at a time.
 
 import { randomInt } from 'node:crypto';
 
@@ -40,25 +40,44 @@ export class Lcq {
         UPDATE lcq_groups SET eventCode = (SELECT l.eventCode FROM lcq_members m JOIN leads l ON l.id = m.leadId
           WHERE m.groupId = lcq_groups.id LIMIT 1);`);
     }
+    // Groups from before games have none, as do their players.
+    if (!this.db.prepare('PRAGMA table_info(lcq_groups)').all().some((c) => c.name === 'game')) {
+      this.db.exec("ALTER TABLE lcq_groups ADD COLUMN game TEXT NOT NULL DEFAULT ''");
+    }
   }
 
   event() {
     return this.store.currentEvent().code;
   }
 
-  /** Put every 4 ungrouped LCQ registrations, oldest first, into a new group. Returns how many groups were made. */
+  /** This event's LCQ registrations, oldest first; in one game, or every game. */
+  leads(game = null) {
+    const event = this.event();
+    return this.store.list().filter((l) => l.bracket === 'lcq' && l.eventCode === event && (game === null || l.game === game));
+  }
+
+  /** The games this event's LCQ registrations are in. */
+  games() {
+    return [...new Set(this.leads().map((l) => l.game))];
+  }
+
+  /** In each game, put every 4 ungrouped LCQ registrations, oldest first, into a new group. Returns how many groups were made. */
   syncGroups() {
     const grouped = new Set(this.db.prepare('SELECT leadId FROM lcq_members').all().map((r) => r.leadId));
+    const waiting = this.leads().filter((l) => !grouped.has(l.id));
     const event = this.event();
-    const waiting = this.store.list().filter((l) => l.bracket === 'lcq' && l.eventCode === event && !grouped.has(l.id));
-    const made = Math.floor(waiting.length / 4);
-    if (!made) return 0;
+    let made = 0;
     this.db.exec('BEGIN');
     try {
       const add = this.db.prepare('INSERT INTO lcq_members (leadId, groupId, seat) VALUES (?, ?, ?)');
-      for (let i = 0; i < made * 4; i += 4) {
-        const groupId = Number(this.db.prepare('INSERT INTO lcq_groups (createdAt, eventCode) VALUES (?, ?)').run(now(), event).lastInsertRowid);
-        waiting.slice(i, i + 4).forEach((lead, seat) => add.run(lead.id, groupId, seat));
+      const group = this.db.prepare('INSERT INTO lcq_groups (createdAt, eventCode, game) VALUES (?, ?, ?)');
+      for (const game of new Set(waiting.map((l) => l.game))) {
+        const inGame = waiting.filter((l) => l.game === game);
+        for (let i = 0; i + 4 <= inGame.length; i += 4) {
+          const groupId = Number(group.run(now(), event, game).lastInsertRowid);
+          inGame.slice(i, i + 4).forEach((lead, seat) => add.run(lead.id, groupId, seat));
+          made++;
+        }
       }
       this.db.exec('COMMIT');
     } catch (e) {
@@ -68,19 +87,20 @@ export class Lcq {
     return made;
   }
 
-  /** Make a group of the last 2 or 3 LCQ registrations still waiting, so stragglers are not stuck. */
-  closeGroup() {
+  /** Make a group of the last 2 or 3 LCQ registrations still waiting in a game, so stragglers are not stuck. */
+  closeGroup(game = '') {
     this.syncGroups();
-    const queued = this.state().players.filter((p) => p.status === 'queued');
+    const queued = this.state(game).players.filter((p) => p.status === 'queued');
     if (queued.length < 2) throw new LcqError('A group needs at least 2 waiting players.');
-    const groupId = Number(this.db.prepare('INSERT INTO lcq_groups (createdAt, seen, eventCode) VALUES (?, 1, ?)').run(now(), this.event()).lastInsertRowid);
+    const groupId = Number(this.db.prepare('INSERT INTO lcq_groups (createdAt, seen, eventCode, game) VALUES (?, 1, ?, ?)')
+      .run(now(), this.event(), game).lastInsertRowid);
     const add = this.db.prepare('INSERT INTO lcq_members (leadId, groupId, seat) VALUES (?, ?, ?)');
     queued.forEach((p, seat) => add.run(p.id, groupId, seat));
   }
 
   /** Take a player out (a no-show): a match they are in goes to their opponent. */
   drop(leadId) {
-    const player = this.state().players.find((p) => p.id === leadId);
+    const player = this.state(this.store.get(leadId)?.game ?? '').players.find((p) => p.id === leadId);
     if (!player || !['free', 'playing'].includes(player.status)) {
       throw new LcqError('Only a player who is playing or waiting for a match can be dropped (pair their group first).');
     }
@@ -100,14 +120,13 @@ export class Lcq {
     ].join('-');
   }
 
-  /** Everything the runner page shows, derived from registrations, groups and matches. */
-  state() {
-    const event = this.event();
-    const leads = new Map(this.store.list().filter((l) => l.bracket === 'lcq' && l.eventCode === event).map((l) => [l.id, l]));
-    const groupRows = this.db.prepare('SELECT * FROM lcq_groups WHERE eventCode = ? ORDER BY id').all(event);
+  /** Everything the runner page shows for one game, derived from registrations, groups and matches. */
+  state(game = '') {
+    const leads = new Map(this.leads(game).map((l) => [l.id, l]));
+    const groupRows = this.db.prepare('SELECT * FROM lcq_groups WHERE eventCode = ? AND game = ? ORDER BY id').all(this.event(), game);
     const ours = new Set(groupRows.map((g) => g.id));
     const members = this.db.prepare('SELECT leadId, groupId, seat FROM lcq_members ORDER BY groupId, seat').all().filter((m) => ours.has(m.groupId));
-    // Ladder matches have no group; they are between players of one event.
+    // Ladder matches have no group; they are between players of one game in one event.
     const matches = this.db.prepare('SELECT * FROM lcq_matches ORDER BY id').all().map((m) => ({ ...m }))
       .filter((m) => (m.groupId !== null ? ours.has(m.groupId) : leads.has(m.a) || leads.has(m.b)));
     const groupOf = new Map(members.map((m) => [m.leadId, m.groupId]));
@@ -168,8 +187,14 @@ export class Lcq {
   }
 
   /** Pair a group (one of splitsFor its size), replacing an earlier pairing if no result is in yet. */
+  /** A group of the current event, as the runner shows it, or undefined. */
+  group(groupId) {
+    const row = this.db.prepare('SELECT game FROM lcq_groups WHERE id = ?').get(groupId);
+    return row ? this.state(row.game).groups.find((g) => g.id === groupId) : undefined;
+  }
+
   pairGroup(groupId, split) {
-    const group = this.state().groups.find((g) => g.id === groupId);
+    const group = this.group(groupId);
     if (!group) throw new LcqError('That group is gone; reload the page.');
     if (group.started) throw new LcqError('A result is already in for this group, so its pairing is fixed.');
     const choice = splitsFor(group.seats.length)[split];
@@ -188,13 +213,15 @@ export class Lcq {
   }
 
   randomize(groupId) {
-    const group = this.state().groups.find((g) => g.id === groupId);
+    const group = this.group(groupId);
     this.pairGroup(groupId, Math.floor(this.random() * splitsFor(group?.seats.length).length));
   }
 
   /** Start a match between two free players (a proposal, or the operator's own pick). */
   start(a, b) {
-    const players = new Map(this.state().players.map((p) => [p.id, p]));
+    const [la, lb] = [this.store.get(a), this.store.get(b)];
+    if (la && lb && la.game !== lb.game) throw new LcqError('Those two are in different games.');
+    const players = new Map(this.state(la?.game ?? '').players.map((p) => [p.id, p]));
     if (a === b || players.get(a)?.status !== 'free' || players.get(b)?.status !== 'free') {
       throw new LcqError('Both players must be free (finished their last match, not qualified or out).');
     }
@@ -257,7 +284,7 @@ export class Lcq {
     return pin;
   }
 
-  markSeen() {
-    this.db.prepare('UPDATE lcq_groups SET seen = 1 WHERE seen = 0').run();
+  markSeen(game = '') {
+    this.db.prepare('UPDATE lcq_groups SET seen = 1 WHERE seen = 0 AND eventCode = ? AND game = ?').run(this.event(), game);
   }
 }

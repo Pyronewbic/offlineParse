@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { after, afterEach, before, beforeEach, describe, test } from 'node:test';
 import { DatabaseSync } from 'node:sqlite';
 import { LeadFiles } from '../src/files.js';
+import { Lcq } from '../src/lcq.js';
 import { LeadStore } from '../src/leads.js';
 import { createPortalServer } from '../src/web.js';
 import { makeConfig, request } from './helpers.js';
@@ -226,5 +227,144 @@ describe('games in the store and files', () => {
     assert.equal(reg(store, { bracket: 'lcq', game: 'SSBU' }).created, true, 'a game is a new entry');
     assert.equal(reg(store, { bracket: 'lcq', game: 'SSBU' }).created, false, 'once per game');
     store.close();
+  });
+});
+
+describe('LCQ per game', () => {
+  let store;
+  let lcq;
+  let n;
+  beforeEach(() => {
+    store = new LeadStore(':memory:', { firstEvent: FIRST });
+    lcq = new Lcq(store, { winsToQualify: 2, lossesOut: 2, random: () => 0 });
+    n = 0;
+  });
+  afterEach(() => store.close());
+  const signUp = (game, count, name = null) => {
+    for (let i = 0; i < count; i++) {
+      n++;
+      store.register({ name: name ?? `${game}${n}`, phone: `+9198765${String(n).padStart(5, '0')}`, source: 'form', noticeVersion: 'v', bracket: 'lcq', game });
+    }
+  };
+
+  test('each game groups its own players; one person in two games is a player in each', () => {
+    signUp('SSBU', 3);
+    signUp('SF6', 3);
+    assert.equal(lcq.syncGroups(), 0, 'six players, but no game has four');
+    store.register({ name: 'Both', phone: '+919000000001', source: 'form', noticeVersion: 'v', bracket: 'lcq', game: 'SSBU' });
+    store.register({ name: 'Both', phone: '+919000000001', source: 'form', noticeVersion: 'v', bracket: 'lcq', game: 'SF6' });
+    assert.equal(lcq.syncGroups(), 2);
+    assert.deepEqual(lcq.state('SSBU').groups.map((g) => g.seats.map((x) => x.name)), [['SSBU1', 'SSBU2', 'SSBU3', 'Both']]);
+    assert.deepEqual(lcq.state('SF6').groups.map((g) => g.seats.map((x) => x.name)), [['SF64', 'SF65', 'SF66', 'Both']]);
+    assert.deepEqual(lcq.state('Avatar Legends').players, []);
+    assert.deepEqual(lcq.games().sort(), ['SF6', 'SSBU']);
+  });
+
+  test('pairing, results and proposals stay inside a game; a match across games is refused', () => {
+    signUp('SSBU', 4);
+    signUp('SF6', 4);
+    lcq.syncGroups();
+    const [ssbu] = lcq.state('SSBU').groups;
+    const [sf6] = lcq.state('SF6').groups;
+    lcq.pairGroup(ssbu.id, 0);
+    lcq.pairGroup(sf6.id, 0);
+    for (const g of ['SSBU', 'SF6']) for (const m of lcq.state(g).open) lcq.result(m.id, m.a);
+    assert.deepEqual(lcq.state('SSBU').proposals.map((p) => [p.a.name, p.b.name]), [['SSBU2', 'SSBU4'], ['SSBU1', 'SSBU3']]);
+    const ssbuWinner = lcq.state('SSBU').players.find((p) => p.name === 'SSBU1');
+    const sf6Winner = lcq.state('SF6').players.find((p) => p.name === 'SF65');
+    assert.equal(sf6Winner.status, 'free', 'precondition: both are free');
+    assert.throws(() => lcq.start(ssbuWinner.id, sf6Winner.id), /different games/);
+    lcq.start(ssbuWinner.id, lcq.state('SSBU').players.find((p) => p.name === 'SSBU3').id);
+    assert.equal(lcq.state('SSBU').open.length, 1);
+    assert.equal(lcq.state('SF6').open.length, 0, 'the other game is untouched');
+  });
+
+  test('Make a group, Got it and Drop act on one game only', () => {
+    signUp('SSBU', 4);
+    signUp('SF6', 6);
+    lcq.syncGroups();
+    assert.ok(lcq.state('SSBU').groups.every((g) => !g.seen) && lcq.state('SF6').groups.every((g) => !g.seen), 'precondition: new groups');
+    lcq.markSeen('SSBU');
+    assert.ok(lcq.state('SSBU').groups.every((g) => g.seen));
+    assert.ok(lcq.state('SF6').groups.every((g) => !g.seen), 'the other game still pops up');
+    lcq.closeGroup('SF6');
+    assert.deepEqual(lcq.state('SF6').groups.map((g) => g.seats.length), [4, 2]);
+    assert.throws(() => lcq.closeGroup('SSBU'), /at least 2 waiting/);
+    lcq.pairGroup(lcq.state('SF6').groups[0].id, 0);
+    const dropped = lcq.state('SF6').players.find((p) => p.status === 'playing');
+    lcq.drop(dropped.id);
+    assert.equal(lcq.state('SF6').players.find((p) => p.id === dropped.id).status, 'dropped');
+  });
+});
+
+describe('LCQ runner tabs', () => {
+  let s;
+  let cookie;
+  before(async () => {
+    const store = new LeadStore(':memory:', { firstEvent: FIRST });
+    const lcq = new Lcq(store, { winsToQualify: 2, lossesOut: 2, random: () => 0 });
+    const server = createPortalServer(makeConfig({ games: GAMES }), store, { laptopIp: '127.0.0.1', quiet: true, lcq });
+    await new Promise((r) => server.listen(0, '127.0.0.1', r));
+    s = { store, lcq, server, port: server.address().port };
+    const login = await post(s.port, '/lcq/login', { pin: lcq.pin() });
+    cookie = { Cookie: login.headers['set-cookie'][0].split(';')[0] };
+  });
+  after(() => {
+    s.server.close();
+    s.server.closeAllConnections();
+    s.store.close();
+  });
+  beforeEach(() => s.store.db.exec('DELETE FROM leads; DELETE FROM lcq_members; DELETE FROM lcq_groups; DELETE FROM lcq_matches; DELETE FROM lcq_drops;'));
+  const signUp = (game, count, from = 0) => {
+    for (let i = from; i < from + count; i++) {
+      s.store.register({ name: `${game}-${i}`, phone: `+9198765${String(i).padStart(5, '0')}`, source: 'form', noticeVersion: 'v', bracket: 'lcq', game });
+    }
+  };
+  const page = async (q = '') => (await request({ port: s.port, path: `/lcq${q}`, headers: cookie })).body;
+
+  test('a tab per game with its players and groups to pair; each tab shows only its game', async () => {
+    signUp('SSBU', 4);
+    signUp('SF6', 2, 10);
+    const first = await page();
+    assert.match(first, /<nav class="tabs" aria-label="Games"><a href="\/lcq\?game=SSBU" aria-current="page">SSBU \(4\), 1 to pair<\/a><a href="\/lcq\?game=SF6">SF6 \(2\)<\/a><a href="\/lcq\?game=Avatar\+Legends">Avatar Legends \(0\)<\/a><\/nav>/);
+    assert.match(first, /New group: #\d+ \(SSBU-0, SSBU-1, SSBU-2, SSBU-3\)/);
+    const sf6 = await page('?game=SF6');
+    assert.match(sf6, /aria-current="page">SF6 \(2\)</);
+    assert.ok(!sf6.includes('SSBU-0'), 'no other game on this tab');
+    assert.match(sf6, /<h3>Waiting for a group, 2\/4 \(2\)<\/h3>/);
+    assert.match(await page('?game=Tekken'), /aria-current="page">SSBU/, 'an unknown game opens the first tab');
+  });
+
+  test('every action comes back to its tab, and Got it / Make a group act on that game', async () => {
+    signUp('SSBU', 4);
+    signUp('SF6', 6, 10);
+    await page();
+    const sf6 = await page('?game=SF6');
+    assert.match(sf6, /<input type="hidden" name="game" value="SF6"><button type="submit" class="secondary">Got it<\/button>/);
+    const seen = await post(s.port, '/lcq/seen', { game: 'SF6' }, cookie);
+    assert.equal(seen.headers.location, '/lcq?game=SF6');
+    assert.ok(s.lcq.state('SF6').groups.every((g) => g.seen));
+    assert.ok(s.lcq.state('SSBU').groups.every((g) => !g.seen), 'SSBU still pops up');
+    await post(s.port, '/lcq/close', { game: 'SF6' }, cookie);
+    assert.deepEqual(s.lcq.state('SF6').groups.map((g) => g.seats.length), [4, 2]);
+    const pair = await post(s.port, '/lcq/randomize', { group: String(s.lcq.state('SSBU').groups[0].id), game: 'SSBU' }, cookie);
+    assert.equal(pair.headers.location, '/lcq?game=SSBU');
+    assert.equal(s.lcq.state('SSBU').open.length, 2);
+    const v = JSON.parse((await request({ port: s.port, path: '/lcq/version?game=SF6', headers: cookie })).body).v;
+    assert.match(await page('?game=SF6'), new RegExp(`data-version="${v}"`), 'the poll and the page agree on a tab');
+  });
+
+  test('registrations from before games get a No game tab next to the games', async () => {
+    signUp('', 2);
+    signUp('SSBU', 1, 5);
+    assert.match(await page(), /<a href="\/lcq\?game=SSBU" aria-current="page">SSBU \(1\)<\/a>.*<a href="\/lcq\?game=">No game \(2\)<\/a>/s,
+      'the configured games come first');
+    const none = await page('?game=');
+    assert.match(none, /<a href="\/lcq\?game=" aria-current="page">No game \(2\)<\/a>/);
+    assert.match(none, /<h3>Waiting for a group, 2\/4 \(2\)<\/h3>/);
+    assert.ok(!none.includes('SSBU-5'));
+    const back = await post(s.port, '/lcq/close', { game: '' }, cookie);
+    assert.equal(back.headers.location, '/lcq?game=', 'actions on the No game tab come back to it');
+    assert.equal(s.lcq.state('').groups.length, 1);
   });
 });
