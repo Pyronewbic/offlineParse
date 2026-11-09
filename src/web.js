@@ -33,13 +33,16 @@ const query = (params) => {
   const s = new URLSearchParams(Object.entries(params).filter(([, v]) => v)).toString();
   return s ? `?${s}` : '';
 };
-// What the admin page shows: a bracket tab, an event ('' is the current one) and a game ('' is every game).
-const adminUrl = ({ tab = 'all', event = '', game = '' }, msg = '') => `/admin${query({ tab: tab === 'all' ? '' : tab, event, game, msg })}`;
+// What the admin page shows: a bracket tab, an event ('' is the current one), a game ('' is every game),
+// and whether to list every row ('1') or only the newest LIST_MAX.
+const LIST_MAX = 100;
+const adminUrl = ({ tab = 'all', event = '', game = '', all = '' }, msg = '') =>
+  `/admin${query({ tab: tab === 'all' ? '' : tab, event, game, all, msg })}`;
 // A runner tab's address. With game tabs the game is always named, since '' (no game) is a tab of its own.
 const lcqUrl = (game, tabbed) => (tabbed ? `/lcq?${new URLSearchParams({ game })}` : '/lcq');
-const viewFields = ({ tab = 'all', event = '', game = '' }) =>
+const viewFields = ({ tab = 'all', event = '', game = '', all = '' }) =>
   `<input type="hidden" name="tab" value="${esc(tab)}"><input type="hidden" name="event" value="${esc(event)}">` +
-  `<input type="hidden" name="game" value="${esc(game)}">`;
+  `<input type="hidden" name="game" value="${esc(game)}"><input type="hidden" name="all" value="${esc(all)}">`;
 export const BRAND_PATHS = { '/brand/logo-light.png': 'light', '/brand/logo-dark.png': 'dark' };
 const LOOPBACK = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
 // Names the admin desk answers to. A loopback socket alone is not enough: a page the operator opens
@@ -367,7 +370,9 @@ export function adminPage(cfg, {
   const shown = newestFirst.filter((lead) => matchesSearch(lead, q));
   const bySource = (source) => leads.filter((l) => l.source === source).length;
   const last = newestFirst[0];
-  const rows = shown.map((lead) => {
+  // A long list shows its newest rows; search, tabs and filters reach the rest, or Show all lists everything.
+  const capped = !q.trim() && !view.all && shown.length > LIST_MAX;
+  const rows = (capped ? shown.slice(0, LIST_MAX) : shown).map((lead) => {
     const n = leads.length - newestFirst.indexOf(lead);
     return `<tr><td class="num idx">${n}</td><th scope="row">${esc(lead.name)}</th>` +
       `<td><span class="chip">${esc(BRACKETS[lead.bracket] ?? lead.bracket)}</span></td>` +
@@ -383,7 +388,10 @@ export function adminPage(cfg, {
     : `No matches for "${esc(q.trim())}".`;
   const showing = q.trim()
     ? `${shown.length} ${shown.length === 1 ? 'match' : 'matches'} for "${esc(q.trim())}" out of ${leads.length}. <a href="${esc(adminUrl(view))}">Clear search</a>`
-    : `Showing all ${leads.length}, newest first.`;
+    : capped ? `Showing the newest ${LIST_MAX} of ${leads.length}. <a href="${esc(adminUrl({ ...view, all: '1' }))}">Show all ${leads.length}</a>`
+    : view.all && leads.length > LIST_MAX
+      ? `Showing all ${leads.length}, newest first. <a href="${esc(adminUrl({ ...view, all: '' }))}">Show the newest ${LIST_MAX}</a>`
+      : `Showing all ${leads.length}, newest first.`;
   const label = (b) => esc(BRACKETS[b]);
   const flash = msg === 'bracket' ? `New sign-ups now go to ${label(active)}.`
     : msg === 'event' ? `New sign-ups now go to ${esc(current.name)}.` : Object.hasOwn(FLASH, msg) ? FLASH[msg] : '';
@@ -780,6 +788,7 @@ export function createPortalServer(cfg, store, {
       event: typeof params.event === 'string' && store.event(params.event) ? params.event : '',
       // Any game a row carries is a valid filter, so a game dropped from the config stays reachable.
       game: typeof game === 'string' && game && (cfg.games.includes(game) || store.list().some((l) => l.game === game)) ? game : '',
+      all: params.all === '1' ? '1' : '',
     };
   };
   const adminData = () => ({
