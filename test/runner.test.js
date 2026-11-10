@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { after, before, beforeEach, describe, test } from 'node:test';
 import { Lcq } from '../src/lcq.js';
 import { LeadStore } from '../src/leads.js';
-import { createPortalServer, overdue, runnerPage, runnerVersion } from '../src/web.js';
+import { againstFor, createPortalServer, overdue, runnerPage, runnerVersion } from '../src/web.js';
 import { makeConfig, request } from './helpers.js';
 
 describe('LCQ runner over HTTP', () => {
@@ -270,6 +270,29 @@ describe('LCQ runner over HTTP', () => {
     assert.equal((await post('/lcq/start', { a: String(p.a.id), b: String(p.b.id) }, { ...cookie, 'Sec-Fetch-Site': 'cross-site' })).status, 403);
     assert.equal((await request({ port, path: '/lcq', headers: { ...cookie, Host: 'evil.example' } })).status, 404);
     assert.deepEqual(lcq.state().open, []);
+  });
+
+  test('Against lists only the Player\'s wins; Any wins lists everyone but the Player', async () => {
+    signUp(7);
+    startAll();
+    const [m1, m2] = lcq.state().open;
+    lcq.result(m1.id, m1.a);
+    lcq.result(m2.id, m2.a);
+    const body = runnerPage(makeConfig(), lcq.state());
+    assert.match(body, /<option value="\d+" data-w="1">P1 \(1W 0L\)<\/option>/, 'each choice carries its wins');
+    assert.match(body, /<option value="\d+" data-w="0">P7 \(0W 0L\)<\/option>/);
+    assert.match(body, /<label class="check"><input type="checkbox" id="lcq-any"><span>Any wins/);
+    assert.match((await request({ port, path: '/lcq/app.js' })).body, /const againstFor = \(options, player, any\) =>/, 'the tablet runs the same filter');
+    const opt = (value, w) => ({ value, dataset: { w } });
+    const options = [opt('1', '1'), opt('3', '1'), opt('5', '0'), opt('6', '0')];
+    const ids = (list) => list.map((o) => o.value);
+    assert.deepEqual(ids(againstFor(options, opt('1', '1'), false)), ['3'], 'same wins, not the Player');
+    assert.deepEqual(ids(againstFor(options, opt('5', '0'), false)), ['6']);
+    assert.deepEqual(ids(againstFor(options, opt('1', '1'), true)), ['3', '5', '6'], 'Any wins');
+    assert.deepEqual(ids(againstFor(options, opt('', undefined), false)), ['1', '3', '5', '6'], 'no Player yet: everyone');
+    const [a, b] = [lcq.state().players.find((p) => p.name === 'P1'), lcq.state().players.find((p) => p.name === 'P7')];
+    lcq.start(a.id, b.id);
+    assert.equal(lcq.state().open.at(-1).aName, 'P1', 'the server still allows any two free players, so the override works');
   });
 
   test('the admin page shows the runner address and PIN', async () => {

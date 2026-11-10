@@ -55,6 +55,9 @@ const waitText = (ms) => {
   const m = Math.max(0, Math.floor(ms / 60000));
   return m < 1 ? 'under 1 min' : m < 60 ? `${m} min` : `${Math.floor(m / 60)} h ${m % 60} min`;
 };
+/** The Against choices for a Player: free players on the same wins, or anyone but them with Any wins. */
+export const againstFor = (options, player, any) =>
+  options.filter((o) => o.value !== player.value && (any || !player.value || o.dataset.w === player.dataset.w));
 const RUNNER_JS = `(() => {
   // Waiting times count up from the server's figure, so the tablet's own clock does not matter.
   const waitText = ${waitText};
@@ -89,7 +92,27 @@ const RUNNER_JS = `(() => {
   let touching = false;
   addEventListener('touchstart', () => { touching = true; }, { passive: true });
   addEventListener('touchend', () => setTimeout(() => { touching = false; }, 400), { passive: true });
-  const busy = () => touching || ['INPUT', 'SELECT', 'TEXTAREA'].includes(document.activeElement && document.activeElement.tagName);
+  // Against lists only the Player's wins unless Any wins is ticked; rebuilt, since iOS ignores hidden options.
+  const againstFor = ${againstFor};
+  const everyone = new WeakMap();
+  let pickedAt = 0;
+  addEventListener('change', (e) => {
+    const a = document.getElementById('pa');
+    const b = document.getElementById('pb');
+    const any = document.getElementById('lcq-any');
+    if (!a || !b || !any || ![a, any].includes(e.target)) return;
+    pickedAt = Date.now();
+    if (!everyone.has(b)) everyone.set(b, [...b.options].slice(1));
+    const keep = againstFor(everyone.get(b), a.selectedOptions[0], any.checked);
+    const was = b.value;
+    const blank = b.options[0];
+    blank.textContent = keep.length || !a.value ? 'Choose player' : 'Nobody else free on ' + a.selectedOptions[0].dataset.w + 'W; tick Any wins';
+    b.replaceChildren(blank, ...keep);
+    b.value = keep.some((o) => o.value === was) ? was : '';
+  });
+  // A half-done pick holds off updates for a minute, so the refresh does not wipe it.
+  const picking = () => Date.now() - pickedAt < 60000 && !!(document.getElementById('pa') || {}).value;
+  const busy = () => touching || picking() || ['INPUT', 'SELECT', 'TEXTAREA'].includes(document.activeElement && document.activeElement.tagName);
   let version = document.getElementById('version').dataset.version;
   apply();
   // Swap in the new page body when something changed, so the scroll position and folds stay put.
@@ -537,7 +560,7 @@ export function runnerPage(cfg, state, {
   const section = (id, title, count, body, isOpen) =>
     `<details class="panel" id="${id}"${isOpen ? ' open' : ''}><summary><h2>${title}${count === null ? '' : ` (${count})`}</h2></summary>${body}</details>`;
   const choose = (list, id, name, label) => `<div><label for="${id}">${label}</label><select id="${id}" name="${name}" required>` +
-    `<option value="">Choose player</option>${list.map((p) => `<option value="${p.id}">${esc(p.name)} (${record(p)})</option>`).join('')}</select></div>`;
+    `<option value="">Choose player</option>${list.map((p) => `<option value="${p.id}" data-w="${p.wins}">${esc(p.name)} (${record(p)})</option>`).join('')}</select></div>`;
 
   const byId = new Map(players.map((p) => [p.id, p]));
   const who = (id, name) => `<strong>${esc(name)}</strong>${byId.has(id) ? ` <span class="hint">${record(byId.get(id))}</span>` : ''}`;
@@ -551,6 +574,7 @@ export function runnerPage(cfg, state, {
     `${btn('start', { a: p.a.id, b: p.b.id }, 'Start', 'secondary')}</li>`).join('') || none('Nobody to pair yet.');
   const manual = free.length < 2 ? '' : `<form method="post" action="/lcq/start" class="fields">${gameField}
   ${choose(free, 'pa', 'a', 'Player')}${choose(free, 'pb', 'b', 'Against')}
+  <label class="check"><input type="checkbox" id="lcq-any"><span>Any wins (Against lists only the Player's wins)</span></label>
   <button class="secondary" type="submit">Start match</button></form>`;
 
   const resultRow = (m) => {
