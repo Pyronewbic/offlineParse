@@ -675,7 +675,7 @@ export function runnerPage(cfg, state, {
     '</section>';
 
   return page('LCQ runner', `<div id="version" data-version="${esc(version)}" hidden></div>
-${adminHeader(cfg, brand, 'LCQ runner', '<span>One loss and you are out</span>')}
+${adminHeader(cfg, brand, 'LCQ runner')}
 ${gameTabs}
 <nav class="jump" aria-label="Sections">${jumps}</nav>
 ${bracket}

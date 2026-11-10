@@ -73,7 +73,7 @@ npm start
 
 **Admin:** `http://localhost/admin`, on the laptop only. **New sign-ups go to** switches the bracket (Normal or LCQ) every new registration joins; the All / Normal / LCQ tabs and the game filter split the list, and **Download CSV** exports what you're looking at. **Event** lists every event; pick an earlier one to view or download it. **Start a new event** sends new sign-ups to a new event straight away, with a fresh LCQ runner. Also search, add, delete, **Refresh** for new sign-ups.
 
-**LCQ runner:** on a tablet on the booth Wi-Fi, open the address and PIN shown on the admin page (`http://100.64.0.2/lcq`). Each game has its own tab. The LCQ is single elimination: one loss and you are out.
+**LCQ runner:** on a tablet on the booth Wi-Fi, open the address and PIN shown on the admin page (`http://100.64.0.2/lcq`). Each game has its own tab. The LCQ is single elimination.
 
 1. **Play.** A sign-up can play at once. Players on the same wins are offered a match, longest waiting first: tap **Start**, then the winner. Or pick **Player** and **Against** yourself (Against lists the same wins; tick **Any wins** for everyone).
 2. **Fill the bracket.** It runs out evenly at a power of 2, so the tab says how many more make it full (24 in: need 8 more for 32).

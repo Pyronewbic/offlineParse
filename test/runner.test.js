@@ -115,7 +115,8 @@ describe('LCQ runner over HTTP', () => {
     const done = await page();
     assert.match(done, /<details id="lcq-b-w2" open><summary><h3>2W \(1\)/, 'a win bucket still in play starts open');
     assert.match(done, /<details id="lcq-b-out"><summary><h3>Eliminated \(3\)/, 'Eliminated starts folded');
-    assert.match(done, /<span>One loss and you are out<\/span>/);
+    assert.ok(!done.includes('One loss and you are out'), 'no rule line in the header');
+    assert.match(done, /<h1>LCQ runner<\/h1><\/header>/);
     assert.equal(done.match(/data-version="([^"]+)"/)[1], await version(), 'the page and the poll agree, or the tablet would reload forever');
   });
 
