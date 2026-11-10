@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import { after, before, beforeEach, describe, test } from 'node:test';
-import { Lcq } from '../src/lcq.js';
+import { Lcq, bracketGap } from '../src/lcq.js';
 import { LeadStore } from '../src/leads.js';
-import { againstFor, bracketGap, createPortalServer, overdue, runnerPage, runnerVersion } from '../src/web.js';
-import { makeConfig, request } from './helpers.js';
+import { againstFor, createPortalServer, overdue, runnerPage, runnerVersion } from '../src/web.js';
+import { makeConfig, postForm, request } from './helpers.js';
 
 describe('LCQ runner over HTTP', () => {
   let store;
@@ -26,7 +26,8 @@ describe('LCQ runner over HTTP', () => {
   });
   beforeEach(() => {
     now += 120_000;
-    store.db.exec('DELETE FROM leads; DELETE FROM lcq_matches; DELETE FROM lcq_drops;');
+    store.db.exec('DELETE FROM leads; DELETE FROM lcq_matches; DELETE FROM lcq_drops; DELETE FROM lcq_games;');
+    store.setBracket('normal');
   });
 
   const post = (path, fields, headers = {}) => {
@@ -305,7 +306,39 @@ describe('LCQ runner over HTTP', () => {
     lcq.drop(lcq.state().players[0].id);
     assert.equal(line(), '<p class="hint">24 in the bracket: need 8 more for a full bracket of 32.</p>', 'a dropped player still counts');
     store.db.exec('DELETE FROM leads WHERE id IN (SELECT id FROM leads ORDER BY id DESC LIMIT 8)');
-    assert.equal(line(), '<p class="hint">16 in the bracket: full.</p>');
+    assert.equal(line(), '<p class="hint">16 in the bracket: a full bracket.</p>');
+  });
+
+  test('Finalize from the tablet: a short bracket needs the tick; later sign-ups are counted and told the bracket is full', async () => {
+    const cookie = await signIn();
+    const page = async () => (await request({ port, path: '/lcq', headers: cookie })).body;
+    signUp(3);
+    const open = await page();
+    assert.match(open, /<p class="hint">3 in the bracket: need 1 more for a full bracket of 4\.<\/p><form method="post" action="\/lcq\/finalize"/);
+    assert.match(open, /<input type="checkbox" name="confirm" value="yes" required><span>3 in: 1 short of 4; some players will need a Bye<\/span>/);
+    await post('/lcq/finalize', {}, cookie);
+    assert.match(await page(), /Tick that some players will need a Bye, then tap Finalize\./, 'without the tick it is refused, and says why');
+    assert.equal(lcq.phase().finalizedAt, null);
+    await post('/lcq/finalize', { confirm: 'yes' }, cookie);
+    assert.ok(lcq.phase().finalizedAt, 'positive control: finalized with the tick');
+    store.db.exec(`UPDATE leads SET createdAt = '2026-01-01T00:00:00Z'; UPDATE lcq_games SET finalizedAt = '2026-01-01T00:00:00.500Z'`);
+
+    store.setBracket('lcq');
+    const thanks = await postForm(port, '/submit', { name: 'Late Comer', phone: '9876599999', consent: 'yes' });
+    assert.equal(thanks.status, 200);
+    assert.match(thanks.body, /<p>The LCQ bracket is full; staff may still add you\.<\/p>/);
+    const body = await page();
+    assert.match(body, /Finalized 1 Jan, 5:30 am, 3 in the bracket\. 1 signed up since; Unfinalize to add them \(4 in, a full bracket\)\.<\/p>/);
+    assert.ok(!body.includes('Late Comer'), 'not on the runner while finalized');
+    assert.ok(!body.includes('action="/lcq/finalize"'), 'no Finalize once finalized');
+    await post('/lcq/unfinalize', {}, cookie);
+    const back = await page();
+    assert.match(back, /<p class="hint">4 in the bracket: a full bracket\.<\/p><form method="post" action="\/lcq\/finalize" class="fields"><input type="hidden" name="game" value=""><button/,
+      'a full bracket needs no tick');
+    assert.ok(back.includes('Late Comer'), 'Unfinalize lets them in');
+    store.setBracket('normal');
+    const normal = await postForm(port, '/submit', { name: 'Normal One', phone: '9876599998', consent: 'yes' });
+    assert.ok(!normal.body.includes('bracket is full'), 'not finalized now, and Normal sign-ups never hear it');
   });
 
   test('the admin page shows the runner address and PIN', async () => {

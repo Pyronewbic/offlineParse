@@ -10,9 +10,19 @@ CREATE TABLE IF NOT EXISTS lcq_matches (
   id INTEGER PRIMARY KEY AUTOINCREMENT, groupId INTEGER, a INTEGER NOT NULL, b INTEGER NOT NULL,
   winner INTEGER, createdAt TEXT NOT NULL, decidedAt TEXT
 );
-CREATE TABLE IF NOT EXISTS lcq_drops (leadId INTEGER PRIMARY KEY, at TEXT NOT NULL);`;
+CREATE TABLE IF NOT EXISTS lcq_drops (leadId INTEGER PRIMARY KEY, at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS lcq_games (
+  eventCode TEXT NOT NULL, game TEXT NOT NULL, finalizedAt TEXT, endedAt TEXT, PRIMARY KEY (eventCode, game)
+);`;
 
 export class LcqError extends Error {}
+
+/** How many more sign-ups make a full single-elimination bracket (the next power of 2), and its size. */
+export function bracketGap(count) {
+  let size = 1;
+  while (size < count) size *= 2;
+  return { size, more: size - count };
+}
 
 const now = () => new Date().toISOString();
 
@@ -31,6 +41,28 @@ export class Lcq {
   leads(game = null) {
     const event = this.event();
     return this.store.list().filter((l) => l.bracket === 'lcq' && l.eventCode === event && (game === null || l.game === game));
+  }
+
+  /** Where one game's LCQ is in this event: finalizedAt and endedAt, each null until set. */
+  phase(game = '') {
+    const row = this.db.prepare('SELECT finalizedAt, endedAt FROM lcq_games WHERE eventCode = ? AND game = ?').get(this.event(), game);
+    return { finalizedAt: row?.finalizedAt ?? null, endedAt: row?.endedAt ?? null };
+  }
+
+  /** Fix who is in a game's bracket; later sign-ups wait. A bracket short of a power of 2 needs `short` (staff ticked it). */
+  finalize(game = '', short = false) {
+    if (this.phase(game).finalizedAt) throw new LcqError('This LCQ is already finalized.');
+    const count = this.leads(game).length;
+    if (!count) throw new LcqError('Nobody has signed up for this LCQ yet.');
+    if (bracketGap(count).more && !short) throw new LcqError('Tick that some players will need a Bye, then tap Finalize.');
+    this.db.prepare(`INSERT INTO lcq_games (eventCode, game, finalizedAt) VALUES (?, ?, ?)
+      ON CONFLICT(eventCode, game) DO UPDATE SET finalizedAt = excluded.finalizedAt`).run(this.event(), game, now());
+  }
+
+  /** Let the sign-ups since Finalize into the bracket. */
+  unfinalize(game = '') {
+    if (!this.phase(game).finalizedAt) throw new LcqError('This LCQ is not finalized.');
+    this.db.prepare('UPDATE lcq_games SET finalizedAt = NULL WHERE eventCode = ? AND game = ?').run(this.event(), game);
   }
 
   /** The games this event's LCQ registrations are in. */
@@ -56,12 +88,19 @@ export class Lcq {
       this.event(), n("SELECT COUNT(*) FROM leads WHERE bracket = 'lcq'"),
       n('SELECT MAX(id) FROM lcq_matches'), n('SELECT COUNT(*) FROM lcq_matches'),
       n('SELECT COUNT(*) FROM lcq_matches WHERE winner IS NOT NULL'), n('SELECT COUNT(*) FROM lcq_drops'),
+      n("SELECT group_concat(coalesce(finalizedAt, '') || '/' || coalesce(endedAt, '')) FROM lcq_games"),
     ].join('-');
   }
 
   /** Everything the runner page shows for one game, derived from registrations and matches. */
   state(game = '') {
-    const leads = new Map(this.leads(game).map((l) => [l.id, l]));
+    const phase = this.phase(game);
+    const all = this.leads(game);
+    // Once finalized, the bracket is who signed up before; the rest are counted, not played. Sign-up times are
+    // to the second, so one in the same second as Finalize is in.
+    const cutoff = phase.finalizedAt && Date.parse(phase.finalizedAt);
+    const inBracket = (l) => !cutoff || Date.parse(l.createdAt) <= cutoff;
+    const leads = new Map(all.filter(inBracket).map((l) => [l.id, l]));
     // Leads are per event and game, so a match of theirs is one of this game in this event.
     const matches = this.db.prepare('SELECT * FROM lcq_matches ORDER BY id').all().map((m) => ({ ...m }))
       .filter((m) => leads.has(m.a) || leads.has(m.b));
@@ -89,7 +128,7 @@ export class Lcq {
     }
     const label = (m) => ({ ...m, aName: name(m.a), bName: name(m.b) });
     return {
-      players, proposals,
+      ...phase, late: all.length - leads.size, players, proposals,
       open: matches.filter((m) => m.winner === null).map(label),
       decided: matches.filter((m) => m.winner !== null).reverse().map(label),
     };

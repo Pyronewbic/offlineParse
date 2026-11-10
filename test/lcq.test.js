@@ -17,6 +17,9 @@ describe('LCQ runner', () => {
   const win = (name) => lcq.result(openMatch(name).id, id(name));
   const play = (a, b) => lcq.start(id(a), id(b));
   const pairs = () => lcq.state().proposals.map((p) => [p.a.name, p.b.name, p.wins]);
+  // Sign-up times are to the second: move everyone so far, and Finalize, into the past.
+  const backdate = () => store.db.exec(`UPDATE leads SET createdAt = '2026-01-01T00:00:00Z';
+    UPDATE lcq_games SET finalizedAt = '2026-01-01T00:00:00.500Z' WHERE finalizedAt IS NOT NULL`);
 
   beforeEach(() => {
     store = new LeadStore(':memory:');
@@ -139,5 +142,42 @@ describe('LCQ runner', () => {
     assert.deepEqual(['P1', 'P2', 'P3'].map((x) => [player(x).wins, player(x).status]), [[1, 'free'], [0, 'out'], [0, 'playing']]);
     lcq.cancel(openMatch('P3').id);
     assert.equal(player('P3').status, 'free', 'an old open group match can be called off now');
+  });
+
+  test('Finalize fixes the bracket: later sign-ups are counted but not played until Unfinalize', () => {
+    assert.throws(() => lcq.finalize(), /Nobody has signed up/);
+    for (let i = 0; i < 4; i++) signUp();
+    const v = lcq.version();
+    lcq.finalize();
+    assert.notEqual(lcq.version(), v, 'the tablet sees it');
+    assert.throws(() => lcq.finalize(), /already finalized/);
+    assert.equal(lcq.state().players.length, 4, 'a sign-up in the same second as Finalize is in');
+    backdate();
+    signUp();
+    signUp();
+    const st = lcq.state();
+    assert.equal(st.players.length, 4);
+    assert.equal(st.late, 2);
+    assert.ok(st.finalizedAt);
+    assert.deepEqual(pairs(), [['P1', 'P2', 0], ['P3', 'P4', 0]], 'the late two are not offered');
+    const late = store.list().find((l) => l.name === 'P6');
+    assert.throws(() => lcq.start(id('P1'), late.id), LcqError, 'nor can they be started by hand');
+    const v2 = lcq.version();
+    lcq.unfinalize();
+    assert.notEqual(lcq.version(), v2);
+    assert.deepEqual([lcq.state().players.length, lcq.state().late, lcq.state().finalizedAt], [6, 0, null]);
+    assert.deepEqual(pairs().at(-1), ['P5', 'P6', 0], 'they join at 0W');
+    assert.throws(() => lcq.unfinalize(), /not finalized/);
+  });
+
+  test('a bracket short of a power of 2 is finalized only with the tick; each game and event has its own', () => {
+    for (let i = 0; i < 3; i++) signUp();
+    assert.throws(() => lcq.finalize(''), /Tick that some players will need a Bye/);
+    assert.equal(lcq.phase('').finalizedAt, null, 'refused means not finalized');
+    lcq.finalize('', true);
+    assert.ok(lcq.phase('').finalizedAt);
+    assert.equal(lcq.phase('SSBU').finalizedAt, null, 'another game is open');
+    store.startEvent('November');
+    assert.equal(lcq.phase('').finalizedAt, null, 'a new event starts open');
   });
 });

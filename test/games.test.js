@@ -310,7 +310,7 @@ describe('LCQ runner tabs', () => {
     s.server.closeAllConnections();
     s.store.close();
   });
-  beforeEach(() => s.store.db.exec('DELETE FROM leads; DELETE FROM lcq_matches; DELETE FROM lcq_drops;'));
+  beforeEach(() => s.store.db.exec('DELETE FROM leads; DELETE FROM lcq_matches; DELETE FROM lcq_drops; DELETE FROM lcq_games;'));
   const signUp = (game, count, from = 0) => {
     for (let i = from; i < from + count; i++) {
       s.store.register({ name: `${game}-${i}`, phone: `+9198765${String(i).padStart(5, '0')}`, source: 'form', noticeVersion: 'v', bracket: 'lcq', game });
@@ -357,5 +357,19 @@ describe('LCQ runner tabs', () => {
     const back = await post(s.port, '/lcq/start', { a: String(p.a.id), b: String(p.b.id), game: '' }, cookie);
     assert.equal(back.headers.location, '/lcq?game=', 'actions on the No game tab come back to it');
     assert.equal(s.lcq.state('').open.length, 1);
+  });
+
+  test('a guest signing up for a finalized game hears that its bracket is full; the other game is not mentioned', async () => {
+    signUp('SF6', 2, 10);
+    s.lcq.finalize('SF6');
+    s.store.setBracket('lcq');
+    try {
+      const res = await post(s.port, '/submit', { name: 'Late', phone: '9876599999', consent: 'yes', games: ['SSBU', 'SF6'] });
+      assert.equal(res.status, 200);
+      assert.match(res.body, /<p>The <strong>SF6<\/strong> LCQ bracket is full; staff may still add you\.<\/p>/);
+      assert.ok(!/SSBU<\/strong> LCQ bracket/.test(res.body));
+    } finally {
+      s.store.setBracket('normal');
+    }
   });
 });

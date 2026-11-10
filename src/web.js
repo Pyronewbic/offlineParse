@@ -1,7 +1,7 @@
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import http from 'node:http';
 import { CSV_RETRY_MS, SOURCE_LABELS, leadsCsv, toISTShort } from './files.js';
-import { LcqError } from './lcq.js';
+import { LcqError, bracketGap } from './lcq.js';
 import { BRACKETS, NAME_MAX, ValidationError, cleanName, normalizePhone } from './leads.js';
 import { themeCss } from './theme.js';
 
@@ -339,12 +339,14 @@ ${inline ? '' : errorBlock(error)}
 Reach out to us at the desk any time to have your details deleted.</p>`);
 }
 
-export function thanksPage(cfg, name, phone, brand = NO_BRAND, bracket = 'normal', games = [], already = []) {
+export function thanksPage(cfg, name, phone, brand = NO_BRAND, bracket = 'normal', games = [], already = [], full = []) {
   const strong = (list) => listText(list.map((g) => `<strong>${esc(g)}</strong>`));
+  const named = full.filter(Boolean);
   return portalPage(cfg, brand, "You're registered", `
 <h1>You're registered, ${esc(firstName(name))}!</h1>
 <p class="lede">We've got you down for <strong>${esc(BRACKETS[bracket])}</strong>${games.filter(Boolean).length ? ` in ${strong(games)}` : ''} as <strong>${esc(name)}</strong> on <strong class="nowrap">${esc(displayPhone(phone))}</strong>.</p>
 ${already.length ? `<p>You were already registered for ${strong(already)}.</p>` : ''}
+${full.length ? `<p>The ${named.length ? `${strong(named)} ` : ''}LCQ bracket${full.length > 1 ? 's are' : ' is'} full; staff may still add you.</p>` : ''}
 <p>You can leave this Wi-Fi now.</p>
 <p><strong>iPhone:</strong> tap <strong>Cancel</strong> at the top of this screen. To stop it joining again, go to Settings, Wi-Fi, tap (i) next to this network, then <strong>Forget This Network</strong>.</p>
 <p><strong>Android:</strong> in Wi-Fi settings, tap this network, then <strong>Forget</strong>.</p>`, `
@@ -531,16 +533,9 @@ const fieldsOf = (fields) => Object.entries(fields).map(([k, v]) => `<input type
 const runnerButton = (action, fields, label, cls = '') =>
   `<form class="inline" method="post" action="/lcq/${action}">${fieldsOf(fields)}<button type="submit"${cls ? ` class="${cls}"` : ''}>${label}</button></form>`;
 
-/** How many more sign-ups make a full single-elimination bracket (the next power of 2), and its size. */
-export function bracketGap(count) {
-  let size = 1;
-  while (size < count) size *= 2;
-  return { size, more: size - count };
-}
-const bracketLine = (count) => {
-  if (!count) return '';
+const gapText = (count) => {
   const { size, more } = bracketGap(count);
-  return `<p class="hint">${count} in the bracket: ${more ? `need ${more} more for a full bracket of ${size}.` : 'full.'}</p>`;
+  return more ? `need ${more} more for a full bracket of ${size}` : 'a full bracket';
 };
 
 /** Players waiting and matches running past the config limits, longest first. */
@@ -561,7 +556,7 @@ export const runnerVersion = (cfg, lcq, state, now = Date.now()) => {
 export function runnerPage(cfg, state, {
   brand = NO_BRAND, error = '', notice = '', version = '', now = Date.now(), q = '', game = '', tabs = [],
 } = {}) {
-  const { players, proposals, open, decided } = state;
+  const { players, proposals, open, decided, finalizedAt, late } = state;
   // Every form says which game it came from, so the tablet comes back to that tab.
   const btn = (action, fields, label, cls) => runnerButton(action, { ...fields, game }, label, cls);
   const gameField = fieldsOf({ game });
@@ -621,6 +616,18 @@ export function runnerPage(cfg, state, {
     bucket('out', 'Eliminated', players.filter((p) => p.status === 'out'), false) +
     bucket('dropped', 'Dropped', players.filter((p) => p.status === 'dropped'), false) || none('No LCQ registrations yet.');
 
+  // Finalize fixes who plays; a bracket short of a power of 2 needs a tick, as some players will need a Bye.
+  const short = bracketGap(players.length).more;
+  const bracket = finalizedAt
+    ? `<div class="bracket"><p class="hint">Finalized ${esc(toISTShort(finalizedAt))}, ${players.length} in the bracket. ${late
+      ? `${late} signed up since; Unfinalize to add them (${players.length + late} in, ${gapText(players.length + late)}).`
+      : 'Nobody has signed up since.'}</p>${btn('unfinalize', {}, 'LCQ Unfinalize', 'secondary')}</div>`
+    : players.length ? `<div class="bracket"><p class="hint">${players.length} in the bracket: ${gapText(players.length)}.</p>` +
+      `<form method="post" action="/lcq/finalize" class="fields">${gameField}${short ? `<label class="check"><input type="checkbox" name="confirm" value="yes" required>` +
+      `<span>${players.length} in: ${short} short of ${players.length + short}; some players will need a Bye</span></label>` : ''}` +
+      `<button class="secondary" type="submit">LCQ Finalize</button></form></div>`
+    : '';
+
   const { waiting, long } = overdue(cfg, state, now);
   const MAX = 5;
   const more = (list) => (list.length > MAX ? `<li>and ${list.length - MAX} more</li>` : '');
@@ -651,7 +658,7 @@ export function runnerPage(cfg, state, {
 ${adminHeader(cfg, brand, 'LCQ runner', '<span>One loss and you are out</span>')}
 ${gameTabs}
 <nav class="jump" aria-label="Sections">${jumps}</nav>
-${bracketLine(players.length)}
+${bracket}
 ${errorBlock(error)}${notice ? `<p class="flash" role="status">${esc(notice)}</p>` : ''}${attention}
 ${search}
 <div class="duo">
@@ -845,6 +852,8 @@ export function createPortalServer(cfg, store, {
           const cancelled = lcq.undo(n('match'));
           flashes.set(session, { notice: `Result undone.${cancelled.length ? ` Also called off ${cancelled.join(', ')}, which depended on it.` : ''}` });
         } else if (path === '/lcq/cancel') lcq.cancel(n('match'));
+        else if (path === '/lcq/finalize') lcq.finalize(game, fields.confirm === 'yes');
+        else if (path === '/lcq/unfinalize') lcq.unfinalize(game);
         else if (path === '/lcq/drop') {
           if (fields.confirm === 'yes') lcq.drop(n('player'));
           else flashes.set(session, { error: 'Tick that they are not here, then tap Drop.' });
@@ -903,7 +912,8 @@ export function createPortalServer(cfg, store, {
       return html(res, 409, formPage(cfg, { ...again, error: alreadyRegistered(bracket, already), field: 'phone' }, brand));
     }
     log(`registration added via form (${BRACKETS[bracket]}${inGames(created)})`);
-    html(res, 200, thanksPage(cfg, name, phone, brand, bracket, created, already));
+    const full = bracket === 'lcq' && lcq ? created.filter((g) => lcq.phase(g).finalizedAt) : [];
+    html(res, 200, thanksPage(cfg, name, phone, brand, bracket, created, already, full));
   }
 
   async function adminPost(req, res, path) {
