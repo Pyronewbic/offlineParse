@@ -556,7 +556,7 @@ export const runnerVersion = (cfg, lcq, state, now = Date.now()) => {
 export function runnerPage(cfg, state, {
   brand = NO_BRAND, error = '', notice = '', version = '', now = Date.now(), q = '', game = '', tabs = [],
 } = {}) {
-  const { players, proposals, open, decided, finalizedAt, late } = state;
+  const { players, proposals, open, decided, finalizedAt, late, bye } = state;
   // Every form says which game it came from, so the tablet comes back to that tab.
   const btn = (action, fields, label, cls) => runnerButton(action, { ...fields, game }, label, cls);
   const gameField = fieldsOf({ game });
@@ -586,7 +586,7 @@ export function runnerPage(cfg, state, {
 
   const resultRow = (m) => {
     const [winner, loser] = m.winner === m.a ? [m.aName, m.bName] : [m.bName, m.aName];
-    return `<li>${esc(winner)} beat ${esc(loser)} ${btn('undo', { match: m.id }, 'Undo', 'quiet')}</li>`;
+    return `<li>${esc(winner)} ${m.a === m.b ? 'had a bye' : `beat ${esc(loser)}`} ${btn('undo', { match: m.id }, 'Undo', 'quiet')}</li>`;
   };
   const older = decided.slice(5);
   const results = `<ul class="plain">${decided.slice(0, 5).map(resultRow).join('') || none('No results yet.')}</ul>` +
@@ -632,6 +632,7 @@ export function runnerPage(cfg, state, {
   const MAX = 5;
   const more = (list) => (list.length > MAX ? `<li>and ${list.length - MAX} more</li>` : '');
   const flags = [
+    bye ? `<li>${esc(bye.name)} is the only one on ${bye.wins}W, and nobody can catch up. ${btn('bye', { player: bye.id }, 'Bye', 'secondary')}</li>` : '',
     ...waiting.slice(0, MAX).map((p) => `<li><a href="#lcq-ready">${esc(p.name)} waiting ${elapsed(p.freeSince)}</a></li>`), more(waiting),
     ...long.slice(0, MAX).map((m) => `<li><a href="#lcq-playing">${esc(m.aName)} vs ${esc(m.bName)} running ${elapsed(m.createdAt)}</a></li>`), more(long),
   ].join('');
@@ -854,6 +855,7 @@ export function createPortalServer(cfg, store, {
         } else if (path === '/lcq/cancel') lcq.cancel(n('match'));
         else if (path === '/lcq/finalize') lcq.finalize(game, fields.confirm === 'yes');
         else if (path === '/lcq/unfinalize') lcq.unfinalize(game);
+        else if (path === '/lcq/bye') lcq.bye(n('player'));
         else if (path === '/lcq/drop') {
           if (fields.confirm === 'yes') lcq.drop(n('player'));
           else flashes.set(session, { error: 'Tick that they are not here, then tap Drop.' });

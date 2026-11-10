@@ -180,4 +180,55 @@ describe('LCQ runner', () => {
     store.startEvent('November');
     assert.equal(lcq.phase('').finalizedAt, null, 'a new event starts open');
   });
+
+  test('a Bye goes to the one player left on their wins once nobody can catch up, and Undo takes it back', () => {
+    for (let i = 0; i < 3; i++) signUp();
+    play('P1', 'P2');
+    assert.equal(lcq.state().bye, null, 'not before Finalize: someone may still sign up');
+    assert.throws(() => lcq.bye(id('P3')), /only for the one player left/);
+    lcq.finalize('', true);
+    assert.equal(lcq.state().bye.name, 'P3', 'P1 and P2 play on 0W, so only one of them reaches 1W; P3 can never meet them on 0W');
+    win('P1');
+    assert.equal(lcq.state().bye.name, 'P3', 'still alone on 0W, with nobody below');
+    assert.throws(() => lcq.bye(id('P1')), LcqError, 'P3 is below P1 and could still catch up');
+    lcq.bye(id('P3'));
+    assert.deepEqual([player('P3').wins, player('P3').losses, player('P3').status], [1, 0, 'free']);
+    assert.equal(lcq.state().decided[0].aName, 'P3');
+    assert.deepEqual(pairs(), [['P1', 'P3', 1]], 'the bye brings P3 level with P1');
+    assert.equal(lcq.state().bye, null, 'two on 1W play each other');
+    play('P1', 'P3');
+    win('P1');
+    assert.equal(lcq.state().bye, null, 'the last one in gets no Bye');
+    assert.throws(() => lcq.bye(id('P1')), LcqError);
+
+    const byeMatch = lcq.state().decided.find((m) => m.a === m.b);
+    assert.throws(() => lcq.undo(byeMatch.id), /Undo "P1 beat P3" first/);
+    lcq.undo(lcq.state().decided[0].id);
+    assert.deepEqual(lcq.undo(byeMatch.id), ['P1 vs P3'], 'the match the bye led to is called off');
+    assert.deepEqual([player('P3').wins, player('P3').status], [0, 'free']);
+    assert.ok(!lcq.state().decided.some((m) => m.a === m.b) && !lcq.state().open.some((m) => m.a === m.b), 'an undone bye is gone, not left open');
+  });
+
+  test('a later bye must be undone first, and says so', () => {
+    for (let i = 0; i < 5; i++) signUp();
+    lcq.finalize('', true);
+    play('P1', 'P2');
+    play('P3', 'P4');
+    win('P1');
+    win('P3');
+    lcq.bye(id('P5'));
+    const first = lcq.state().decided[0];
+    play('P1', 'P3');
+    win('P1');
+    lcq.bye(id('P5'));
+    assert.deepEqual([player('P5').wins, pairs()], [2, [['P1', 'P5', 2]]], 'two byes take P5 to the final');
+    assert.throws(() => lcq.undo(first.id), /Undo "P5 had a bye" first/);
+  });
+
+  test('no Bye while someone else is free on the same wins', () => {
+    for (let i = 0; i < 2; i++) signUp();
+    lcq.finalize();
+    assert.equal(lcq.state().bye, null, 'two free on 0W should play');
+    assert.throws(() => lcq.bye(id('P1')), LcqError);
+  });
 });

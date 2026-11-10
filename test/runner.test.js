@@ -341,6 +341,23 @@ describe('LCQ runner over HTTP', () => {
     assert.ok(!normal.body.includes('bracket is full'), 'not finalized now, and Normal sign-ups never hear it');
   });
 
+  test('the tablet offers the Bye in Needs attention, and Results shows it', async () => {
+    const cookie = await signIn();
+    const page = async () => (await request({ port, path: '/lcq', headers: cookie })).body;
+    signUp(3);
+    startAll();
+    assert.ok(!(await page()).includes('action="/lcq/bye"'), 'no Bye before Finalize');
+    lcq.finalize('', true);
+    const p3 = lcq.state().players.find((p) => p.name === 'P3');
+    const body = await page();
+    assert.match(body, new RegExp(`<li>P3 is the only one on 0W, and nobody can catch up\\. <form class="inline" method="post" action="/lcq/bye"><input type="hidden" name="player" value="${p3.id}">`));
+    await post('/lcq/bye', { player: String(p3.id) }, cookie);
+    assert.match(await page(), /<li>P3 had a bye <form class="inline" method="post" action="\/lcq\/undo">/);
+    await post('/lcq/bye', { player: String(p3.id) }, cookie);
+    assert.match(await page(), /A Bye is only for the one player left on their wins/, 'a second tap is refused, and says why');
+    assert.equal(lcq.state().players.find((p) => p.id === p3.id).wins, 1);
+  });
+
   test('the admin page shows the runner address and PIN', async () => {
     const admin = await request({ port, path: '/admin' });
     assert.match(admin.body, new RegExp(`LCQ runner for a tablet on the booth Wi-Fi: <strong>http://127\\.0\\.0\\.1:${port}/lcq</strong>, PIN <strong>${lcq.pin()}</strong>`));

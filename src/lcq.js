@@ -126,9 +126,14 @@ export class Lcq {
       const pool = free.filter((p) => p.wins === wins);
       for (let i = 0; i + 1 < pool.length; i += 2) proposals.push({ a: pool[i], b: pool[i + 1], wins });
     }
+    // A Bye is for the one player left on their wins once nobody can still reach them: the bracket is
+    // finalized, nobody else in play is on fewer wins or free on the same, and they are not the last one in.
+    const inPlay = players.filter((p) => p.status === 'free' || p.status === 'playing');
+    const bye = (phase.finalizedAt && inPlay.length > 1 && free.find((p) =>
+      !inPlay.some((q) => q !== p && (q.wins < p.wins || (q.status === 'free' && q.wins === p.wins))))) || null;
     const label = (m) => ({ ...m, aName: name(m.a), bName: name(m.b) });
     return {
-      ...phase, late: all.length - leads.size, players, proposals,
+      ...phase, late: all.length - leads.size, players, proposals, bye,
       open: matches.filter((m) => m.winner === null).map(label),
       decided: matches.filter((m) => m.winner !== null).reverse().map(label),
     };
@@ -151,6 +156,15 @@ export class Lcq {
     this.db.prepare('INSERT INTO lcq_matches (a, b, createdAt) VALUES (?, ?, ?)').run(a, b, now());
   }
 
+  /** One win without a match, for the player state() offers a Bye to. Stored as a match against themselves. */
+  bye(leadId) {
+    if (this.state(this.store.get(leadId)?.game ?? '').bye?.id !== leadId) {
+      throw new LcqError('A Bye is only for the one player left on their wins, once the LCQ is finalized and nobody can catch up.');
+    }
+    const at = now();
+    this.db.prepare('INSERT INTO lcq_matches (a, b, winner, createdAt, decidedAt) VALUES (?, ?, ?, ?, ?)').run(leadId, leadId, leadId, at, at);
+  }
+
   result(matchId, winner) {
     const m = this.match(matchId);
     if (m.winner !== null) throw new LcqError('That match already has a result; use Undo to change it.');
@@ -171,12 +185,15 @@ export class Lcq {
     const decided = later.find((x) => x.winner !== null);
     if (decided) {
       const [w, l] = decided.winner === decided.a ? [decided.a, decided.b] : [decided.b, decided.a];
-      throw new LcqError(`Undo "${this.nameOf(w)} beat ${this.nameOf(l)}" first; it came after this result.`);
+      const what = w === l ? `${this.nameOf(w)} had a bye` : `${this.nameOf(w)} beat ${this.nameOf(l)}`;
+      throw new LcqError(`Undo "${what}" first; it came after this result.`);
     }
     this.db.exec('BEGIN');
     try {
       for (const x of later) this.db.prepare('DELETE FROM lcq_matches WHERE id = ?').run(x.id);
-      this.db.prepare('UPDATE lcq_matches SET winner = NULL, decidedAt = NULL WHERE id = ?').run(matchId);
+      // A bye has no match to go back to.
+      if (m.a === m.b) this.db.prepare('DELETE FROM lcq_matches WHERE id = ?').run(matchId);
+      else this.db.prepare('UPDATE lcq_matches SET winner = NULL, decidedAt = NULL WHERE id = ?').run(matchId);
       this.db.exec('COMMIT');
     } catch (e) {
       this.db.exec('ROLLBACK');
