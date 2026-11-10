@@ -358,6 +358,51 @@ describe('LCQ runner over HTTP', () => {
     assert.equal(lcq.state().players.find((p) => p.id === p3.id).wins, 1);
   });
 
+  test('LCQ End from the tablet shows the Winner and leaves a read-only tab; Reopen brings the controls back', async () => {
+    const cookie = await signIn();
+    const page = async () => (await request({ port, path: '/lcq', headers: cookie })).body;
+    signUp(4);
+    assert.ok(!(await page()).includes('action="/lcq/end"'), 'no End before Finalize');
+    lcq.finalize();
+    startAll();
+    assert.match(await page(), /<h2 id="lcq-end-title">End this LCQ<\/h2><p class="hint">A match is still on: record its winner or call it off first\.<\/p><\/section>/);
+    for (const m of lcq.state().open) lcq.result(m.id, m.a);
+    const ready = await page();
+    assert.match(ready, /Winners: <strong>P1 and P3<\/strong> \(1W\)\. Ending shows/, 'two still in on 1W share it so far');
+    assert.match(ready, /<span>2 players still in; they will not play again<\/span><\/label><button class="secondary" type="submit">LCQ End<\/button>/);
+    assert.ok(ready.indexOf('action="/lcq/unfinalize"') < ready.indexOf('id="lcq-results"') && ready.indexOf('action="/lcq/end"') > ready.indexOf('id="lcq-standings"'),
+      'End sits at the bottom, away from Unfinalize');
+    await post('/lcq/end', {}, cookie);
+    assert.match(await page(), /Tick that the players still in will not play again, then tap End\./);
+    lcq.start(lcq.state().proposals[0].a.id, lcq.state().proposals[0].b.id);
+    lcq.result(lcq.state().open[0].id, lcq.state().open[0].a);
+    await post('/lcq/end', {}, cookie);
+    const done = await page();
+    assert.match(done, /<p class="flash" role="status">Ended [^<]+\. Winner: <strong>P1<\/strong> \(2W\)\.<\/p>/, 'one left: no tick needed');
+    for (const gone of ['id="lcq-playing"', 'id="lcq-ready"', 'action="/lcq/undo"', 'action="/lcq/drop"', 'action="/lcq/start"', 'action="/lcq/end"', 'action="/lcq/unfinalize"', 'Needs attention']) {
+      assert.ok(!done.includes(gone), `ended: no ${gone}`);
+    }
+    assert.match(done, /<details class="panel" id="lcq-standings" open>/, 'final standings start open');
+    assert.match(done, /<li>P1 beat P3<\/li>/, 'results stay, without Undo');
+    await post('/lcq/reopen', {}, cookie);
+    assert.ok(lcq.phase().endedAt, 'Reopen needs the tick');
+    await post('/lcq/reopen', { confirm: 'yes' }, cookie);
+    assert.ok((await page()).includes('action="/lcq/undo"'), 'Undo is back');
+  });
+
+  test('with no games set up, an ended LCQ closes the form to LCQ sign-ups and says so', async () => {
+    signUp(2);
+    lcq.finalize();
+    lcq.end('', true);
+    assert.ok(!(await request({ port, path: '/' })).body.includes('LCQ has ended'), 'not while sign-ups go to Normal');
+    store.setBracket('lcq');
+    assert.match((await request({ port, path: '/' })).body, /<p>The LCQ has ended, so it is closed to new sign-ups\. Ask at the desk\.<\/p>/);
+    const res = await postForm(port, '/submit', { name: 'Late Comer', phone: '9876599999', consent: 'yes' });
+    assert.equal(res.status, 409);
+    assert.match(res.body, /<p class="error" role="alert">The LCQ has ended, so it is closed to new sign-ups\.<\/p>/);
+    assert.equal(store.list().length, 2, 'nothing saved');
+  });
+
   test('the admin page shows the runner address and PIN', async () => {
     const admin = await request({ port, path: '/admin' });
     assert.match(admin.body, new RegExp(`LCQ runner for a tablet on the booth Wi-Fi: <strong>http://127\\.0\\.0\\.1:${port}/lcq</strong>, PIN <strong>${lcq.pin()}</strong>`));

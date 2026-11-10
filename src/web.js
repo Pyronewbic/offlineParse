@@ -301,12 +301,13 @@ function portalPage(cfg, brand, title, card, after = '') {
 
 const FIELDS = ['name', 'phone', 'game', 'consent'];
 
-/** A checkbox per game; with one game it is ticked already. */
-const gameBoxes = (cfg, ticked, extra = '') => cfg.games.map((g) => `<label class="check"><input type="checkbox" name="games" value="${esc(g)}"` +
-  `${cfg.games.length === 1 || ticked.includes(g) ? ' checked' : ''}${extra}><span>${esc(g)}</span></label>`).join('');
+/** A checkbox per game; with one game it is ticked already. A game whose LCQ has ended cannot be ticked. */
+const gameBoxes = (cfg, ticked, extra = '', ended = []) => cfg.games.map((g) => `<label class="check"><input type="checkbox" name="games" value="${esc(g)}"` +
+  `${ended.includes(g) ? ' disabled' : cfg.games.length === 1 || ticked.includes(g) ? ' checked' : ''}${extra}>` +
+  `<span>${esc(g)}${ended.includes(g) ? ' (LCQ ended)' : ''}</span></label>`).join('');
 
 export function formPage(cfg, {
-  error = '', field = null, name = '', phone = '', consent = false, bracket = 'normal', games = [],
+  error = '', field = null, name = '', phone = '', consent = false, bracket = 'normal', games = [], ended = [],
 } = {}, brand = NO_BRAND) {
   const inline = error && FIELDS.includes(field);
   const fieldError = (id) => (inline && field === id
@@ -319,6 +320,7 @@ export function formPage(cfg, {
   return portalPage(cfg, brand, `${cfg.orgName} registration`, `
 <h1 class="sr-only">Register for ${esc(cfg.orgName)}</h1>
 <p class="lede">Registering for <strong>${esc(BRACKETS[bracket])}</strong></p>
+${ended.includes('') ? '<p>The LCQ has ended, so it is closed to new sign-ups. Ask at the desk.</p>' : ''}
 ${inline ? '' : errorBlock(error)}
 <form method="post" action="/submit">
   <label for="name">Your name</label>
@@ -329,7 +331,7 @@ ${inline ? '' : errorBlock(error)}
   <p class="hint" id="phone-hint">10-digit mobile number, or start with + and your country code.</p>
   ${fieldError('phone')}
   ${cfg.games.length ? `<fieldset class="games"${attrs('game')}><legend>Games</legend><p class="hint">Tick every game you want to play.</p>` +
-    `${gameBoxes(cfg, games)}</fieldset>${fieldError('game')}` : ''}
+    `${gameBoxes(cfg, games, '', ended)}</fieldset>${fieldError('game')}` : ''}
   <label class="check"><input type="checkbox" name="consent" value="yes" required${consent ? ' checked' : ''}${attrs('consent')}>
     <span>I agree to ${esc(cfg.orgName)} keeping my name and number for this event's registration.</span></label>
   ${fieldError('consent')}
@@ -556,7 +558,9 @@ export const runnerVersion = (cfg, lcq, state, now = Date.now()) => {
 export function runnerPage(cfg, state, {
   brand = NO_BRAND, error = '', notice = '', version = '', now = Date.now(), q = '', game = '', tabs = [],
 } = {}) {
-  const { players, proposals, open, decided, finalizedAt, late, bye } = state;
+  const { players, proposals, open, decided, finalizedAt, endedAt, late, bye, winners } = state;
+  // An ended LCQ is read-only: no Start, results, Undo, Drop or Bye until it is reopened.
+  const live = !endedAt;
   // Every form says which game it came from, so the tablet comes back to that tab.
   const btn = (action, fields, label, cls) => runnerButton(action, { ...fields, game }, label, cls);
   const gameField = fieldsOf({ game });
@@ -586,7 +590,7 @@ export function runnerPage(cfg, state, {
 
   const resultRow = (m) => {
     const [winner, loser] = m.winner === m.a ? [m.aName, m.bName] : [m.bName, m.aName];
-    return `<li>${esc(winner)} ${m.a === m.b ? 'had a bye' : `beat ${esc(loser)}`} ${btn('undo', { match: m.id }, 'Undo', 'quiet')}</li>`;
+    return `<li>${esc(winner)} ${m.a === m.b ? 'had a bye' : `beat ${esc(loser)}`}${live ? ` ${btn('undo', { match: m.id }, 'Undo', 'quiet')}` : ''}</li>`;
   };
   const older = decided.slice(5);
   const results = `<ul class="plain">${decided.slice(0, 5).map(resultRow).join('') || none('No results yet.')}</ul>` +
@@ -595,7 +599,7 @@ export function runnerPage(cfg, state, {
   const elapsed = (iso) => `<span data-wait="${now - Date.parse(iso)}">${waitText(now - Date.parse(iso))}</span>`;
   const waited = (p) => (p.status === 'free' && p.freeSince ? `, waiting ${elapsed(p.freeSince)}` : '');
   // A required tick stands in for "are you sure", so a stray tap cannot drop anyone.
-  const dropOne = (p) => (['free', 'playing'].includes(p.status) ? `<form method="post" action="/lcq/drop" class="fields">${fieldsOf({ player: p.id, game })}` +
+  const dropOne = (p) => (live && ['free', 'playing'].includes(p.status) ? `<form method="post" action="/lcq/drop" class="fields">${fieldsOf({ player: p.id, game })}` +
     `<label class="check"><input type="checkbox" name="confirm" value="yes" required><span>${esc(p.name)} is not here` +
     `${p.status === 'playing' ? '; their match goes to the opponent' : ''}</span></label><button class="secondary" type="submit">Drop</button></form>` : '');
   const STATUS = { playing: 'playing', out: 'eliminated', dropped: 'dropped' };
@@ -618,7 +622,13 @@ export function runnerPage(cfg, state, {
 
   // Finalize fixes who plays; a bracket short of a power of 2 needs a tick, as some players will need a Bye.
   const short = bracketGap(players.length).more;
-  const bracket = finalizedAt
+  const stillIn = free.length;
+  const winnerText = winners.length ? `${winners.length > 1 ? 'Winners' : 'Winner'}: <strong>${listText(winners.map((p) => esc(p.name)))}</strong> (${winners[0].wins}W)` : 'No winner';
+  const bracket = endedAt
+    ? `<div class="bracket"><p class="flash" role="status">Ended ${esc(toISTShort(endedAt))}. ${winnerText}.</p>` +
+      `<form method="post" action="/lcq/reopen" class="fields">${gameField}<label class="check"><input type="checkbox" name="confirm" value="yes" required>` +
+      `<span>This LCQ ended by mistake</span></label><button class="secondary" type="submit">Reopen</button></form></div>`
+    : finalizedAt
     ? `<div class="bracket"><p class="hint">Finalized ${esc(toISTShort(finalizedAt))}, ${players.length} in the bracket. ${late
       ? `${late} signed up since; Unfinalize to add them (${players.length + late} in, ${gapText(players.length + late)}).`
       : 'Nobody has signed up since.'}</p>${btn('unfinalize', {}, 'LCQ Unfinalize', 'secondary')}</div>`
@@ -631,14 +641,14 @@ export function runnerPage(cfg, state, {
   const { waiting, long } = overdue(cfg, state, now);
   const MAX = 5;
   const more = (list) => (list.length > MAX ? `<li>and ${list.length - MAX} more</li>` : '');
-  const flags = [
+  const flags = !live ? '' : [
     bye ? `<li>${esc(bye.name)} is the only one on ${bye.wins}W, and nobody can catch up. ${btn('bye', { player: bye.id }, 'Bye', 'secondary')}</li>` : '',
     ...waiting.slice(0, MAX).map((p) => `<li><a href="#lcq-ready">${esc(p.name)} waiting ${elapsed(p.freeSince)}</a></li>`), more(waiting),
     ...long.slice(0, MAX).map((m) => `<li><a href="#lcq-playing">${esc(m.aName)} vs ${esc(m.bName)} running ${elapsed(m.createdAt)}</a></li>`), more(long),
   ].join('');
   const attention = flags ? `<section class="attention" aria-labelledby="lcq-attention"><h2 id="lcq-attention">Needs attention</h2><ul>${flags}</ul></section>` : '';
   const jumps = [
-    ['lcq-playing', `Playing (${open.length})`], ['lcq-ready', `Ready (${proposals.length})`],
+    ...(live ? [['lcq-playing', `Playing (${open.length})`], ['lcq-ready', `Ready (${proposals.length})`]] : []),
     ['lcq-results', 'Results'], ['lcq-standings', `Players (${players.length})`],
   ].map(([id, label]) => `<a href="#${id}">${label}</a>`).join('');
   const wanted = q.trim();
@@ -655,6 +665,14 @@ export function runnerPage(cfg, state, {
     `<a href="${esc(lcqUrl(t.game, tabbed))}"${t.game === game ? ' aria-current="page"' : ''}>${t.game ? esc(t.game) : 'No game'} (${t.players})` +
     `${t.ready ? `, ${t.ready} ready` : ''}</a>`).join('')}</nav>` : '';
 
+  // End sits apart from Unfinalize, at the bottom, so a stray tap near the top cannot end the LCQ.
+  const end = !live || !finalizedAt ? '' : `<section class="panel" id="lcq-end" aria-labelledby="lcq-end-title"><h2 id="lcq-end-title">End this LCQ</h2>` +
+    (open.length ? '<p class="hint">A match is still on: record its winner or call it off first.</p>'
+      : `<p class="hint">${winnerText}. Ending shows the final standings and closes LCQ sign-ups for this game.</p>` +
+        `<form method="post" action="/lcq/end" class="fields">${gameField}${stillIn > 1 ? `<label class="check"><input type="checkbox" name="confirm" value="yes" required>` +
+        `<span>${stillIn} players still in; they will not play again</span></label>` : ''}<button class="secondary" type="submit">LCQ End</button></form>`) +
+    '</section>';
+
   return page('LCQ runner', `<div id="version" data-version="${esc(version)}" hidden></div>
 ${adminHeader(cfg, brand, 'LCQ runner', '<span>One loss and you are out</span>')}
 ${gameTabs}
@@ -662,12 +680,13 @@ ${gameTabs}
 ${bracket}
 ${errorBlock(error)}${notice ? `<p class="flash" role="status">${esc(notice)}</p>` : ''}${attention}
 ${search}
-<div class="duo">
+${live ? `<div class="duo">
 ${section('lcq-playing', 'Playing', open.length, `<ul class="plain">${playing}</ul>`, true)}
 ${section('lcq-ready', 'Ready to play', proposals.length, `<ul class="plain">${ready}</ul>${manual}`, true)}
-</div>
+</div>` : ''}
 ${section('lcq-results', 'Results', decided.length, results, true)}
-${section('lcq-standings', 'Standings', players.length, `${stats}<p class="hint">Tap a name for their number, or to drop a no-show.</p><ul class="plain">${standings}</ul>`, false)}
+${section('lcq-standings', 'Standings', players.length, `${stats}<p class="hint">Tap a name for their number${live ? ', or to drop a no-show' : ''}.</p><ul class="plain">${standings}</ul>`, !live)}
+${end}
 <script src="/lcq/app.js"></script>`, 'admin');
 }
 
@@ -856,6 +875,8 @@ export function createPortalServer(cfg, store, {
         else if (path === '/lcq/finalize') lcq.finalize(game, fields.confirm === 'yes');
         else if (path === '/lcq/unfinalize') lcq.unfinalize(game);
         else if (path === '/lcq/bye') lcq.bye(n('player'));
+        else if (path === '/lcq/end') lcq.end(game, fields.confirm === 'yes');
+        else if (path === '/lcq/reopen') lcq.reopen(game, fields.confirm === 'yes');
         else if (path === '/lcq/drop') {
           if (fields.confirm === 'yes') lcq.drop(n('player'));
           else flashes.set(session, { error: 'Tick that they are not here, then tap Drop.' });
@@ -883,13 +904,17 @@ export function createPortalServer(cfg, store, {
       { 'Content-Security-Policy': RUNNER_CSP });
   }
 
+  // Games whose LCQ has ended take no new LCQ sign-ups; '' is the no-game LCQ.
+  const endedFor = (bracket) => (bracket === 'lcq' && lcq ? (cfg.games.length ? cfg.games : ['']).filter((g) => lcq.phase(g).endedAt) : []);
+
   async function submit(req, res) {
     const fields = await readForm(req);
     const rawName = typeof fields.name === 'string' ? fields.name : '';
     const rawPhone = typeof fields.phone === 'string' ? fields.phone : '';
     // The bracket staff have on now, read once so the stored row and the reply agree.
     const bracket = store.bracket();
-    const again = { name: rawName.slice(0, NAME_MAX), phone: rawPhone.slice(0, 20), consent: fields.consent === 'yes', bracket, games: tickedOf(fields.games) };
+    const ended = endedFor(bracket);
+    const again = { name: rawName.slice(0, NAME_MAX), phone: rawPhone.slice(0, 20), consent: fields.consent === 'yes', bracket, games: tickedOf(fields.games), ended };
     if (overLimit(req.socket.remoteAddress)) return html(res, 429, formPage(cfg, { ...again, error: TOO_MANY }, brand));
     let name;
     let phone;
@@ -904,6 +929,13 @@ export function createPortalServer(cfg, store, {
       return html(res, 400, formPage(cfg, { ...again, error: e.message, field: e.field }, brand));
     }
     if (!games) return plain(res, 400, 'unknown game');
+    // A form loaded before End can still post an ended game.
+    const shut = games.filter((g) => ended.includes(g));
+    if (shut.length) {
+      const named = shut.filter(Boolean);
+      return html(res, 409, formPage(cfg, { ...again, games: again.games.filter((g) => !shut.includes(g)), field: named.length ? 'game' : null,
+        error: named.length ? `The ${listText(named)} LCQ has ended; untick it to register for the rest.` : 'The LCQ has ended, so it is closed to new sign-ups.' }, brand));
+    }
     const created = [];
     const already = [];
     for (const game of games) {
@@ -1025,7 +1057,7 @@ export function createPortalServer(cfg, store, {
     if (logo && brand[logo]) {
       return send(res, 200, 'image/png', brand[logo].bytes, { 'Cache-Control': 'public, max-age=86400' });
     }
-    if (method === 'GET' && path === '/' && portalHosts.has(hostOf(req))) return html(res, 200, formPage(cfg, { bracket: store.bracket() }, brand));
+    if (method === 'GET' && path === '/' && portalHosts.has(hostOf(req))) return html(res, 200, formPage(cfg, { bracket: store.bracket(), ended: endedFor(store.bracket()) }, brand));
     // Every other URL, including the OS captive-portal probes, goes to the form.
     redirect(res, portalUrl, method === 'GET' ? 302 : 303);
   }

@@ -231,4 +231,50 @@ describe('LCQ runner', () => {
     assert.equal(lcq.state().bye, null, 'two free on 0W should play');
     assert.throws(() => lcq.bye(id('P1')), LcqError);
   });
+
+  test('End: only once finalized and no match is on, with a tick if players are still in; then nothing changes until Reopen', () => {
+    for (let i = 0; i < 4; i++) signUp();
+    assert.throws(() => lcq.end(), /Finalize this LCQ before ending it/);
+    lcq.finalize();
+    play('P1', 'P2');
+    assert.throws(() => lcq.end('', true), /A match is still on/);
+    win('P1');
+    assert.throws(() => lcq.end(), /Tick that the players still in will not play again/, 'P1, P3 and P4 are still in');
+    assert.equal(lcq.phase().endedAt, null);
+    const v = lcq.version();
+    lcq.end('', true);
+    assert.ok(lcq.phase().endedAt, 'positive control: ended with the tick');
+    assert.notEqual(lcq.version(), v);
+    assert.throws(() => lcq.end('', true), /already ended/);
+    const ended = /This LCQ has ended; Reopen it/;
+    assert.throws(() => play('P3', 'P4'), ended);
+    assert.throws(() => lcq.undo(lcq.state().decided[0].id), ended);
+    assert.throws(() => lcq.result(lcq.state().decided[0].id, id('P1')), ended);
+    assert.throws(() => lcq.drop(id('P3')), ended);
+    assert.throws(() => lcq.unfinalize(), ended);
+    assert.deepEqual(lcq.state().winners.map((p) => p.name), ['P1'], 'the most wins');
+
+    assert.throws(() => lcq.reopen(), /Tick that this LCQ ended by mistake/);
+    lcq.reopen('', true);
+    assert.equal(lcq.phase().endedAt, null);
+    assert.ok(lcq.phase().finalizedAt, 'back to finalized');
+    play('P3', 'P4');
+    assert.equal(lcq.state().open.length, 1, 'changes work again');
+    assert.throws(() => lcq.reopen('', true), /has not ended/);
+  });
+
+  test('End needs no tick with one player left; a tie on the most wins is shared; other games play on', () => {
+    for (let i = 0; i < 2; i++) signUp();
+    store.register({ name: 'S1', phone: '+919000000001', source: 'form', noticeVersion: 'v', bracket: 'lcq', game: 'SSBU' });
+    store.register({ name: 'S2', phone: '+919000000002', source: 'form', noticeVersion: 'v', bracket: 'lcq', game: 'SSBU' });
+    lcq.finalize();
+    assert.deepEqual(lcq.state().winners.map((p) => p.name), ['P1', 'P2'], 'nobody has played: a tie on 0W');
+    play('P1', 'P2');
+    win('P2');
+    lcq.end();
+    assert.deepEqual(lcq.state().winners.map((p) => p.name), ['P2']);
+    const [a, b] = lcq.state('SSBU').players;
+    lcq.start(a.id, b.id);
+    assert.equal(lcq.state('SSBU').open.length, 1, 'SSBU is not ended');
+  });
 });

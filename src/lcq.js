@@ -61,8 +61,33 @@ export class Lcq {
 
   /** Let the sign-ups since Finalize into the bracket. */
   unfinalize(game = '') {
+    this.live(game);
     if (!this.phase(game).finalizedAt) throw new LcqError('This LCQ is not finalized.');
     this.db.prepare('UPDATE lcq_games SET finalizedAt = NULL WHERE eventCode = ? AND game = ?').run(this.event(), game);
+  }
+
+  /** Conclude a finalized game's LCQ. With players still in (they will not play again) it needs `confirmed`. */
+  end(game = '', confirmed = false) {
+    const state = this.state(game);
+    if (state.endedAt) throw new LcqError('This LCQ has already ended.');
+    if (!state.finalizedAt) throw new LcqError('Finalize this LCQ before ending it.');
+    if (state.open.length) throw new LcqError('A match is still on: record its winner or call it off, then End.');
+    if (state.players.filter((p) => p.status === 'free').length > 1 && !confirmed) {
+      throw new LcqError('Tick that the players still in will not play again, then tap End.');
+    }
+    this.db.prepare('UPDATE lcq_games SET endedAt = ? WHERE eventCode = ? AND game = ?').run(now(), this.event(), game);
+  }
+
+  /** Undo End (a mis-tap): back to finalized. */
+  reopen(game = '', confirmed = false) {
+    if (!this.phase(game).endedAt) throw new LcqError('This LCQ has not ended.');
+    if (!confirmed) throw new LcqError('Tick that this LCQ ended by mistake, then tap Reopen.');
+    this.db.prepare('UPDATE lcq_games SET endedAt = NULL WHERE eventCode = ? AND game = ?').run(this.event(), game);
+  }
+
+  /** Refuse any change to a game whose LCQ has ended. */
+  live(game) {
+    if (this.phase(game).endedAt) throw new LcqError('This LCQ has ended; Reopen it to make changes.');
   }
 
   /** The games this event's LCQ registrations are in. */
@@ -72,6 +97,7 @@ export class Lcq {
 
   /** Take a player out (a no-show): a match they are in goes to their opponent. */
   drop(leadId) {
+    this.live(this.store.get(leadId)?.game ?? '');
     const player = this.state(this.store.get(leadId)?.game ?? '').players.find((p) => p.id === leadId);
     if (!player || !['free', 'playing'].includes(player.status)) {
       throw new LcqError('Only a player who is playing or waiting for a match can be dropped.');
@@ -131,9 +157,12 @@ export class Lcq {
     const inPlay = players.filter((p) => p.status === 'free' || p.status === 'playing');
     const bye = (phase.finalizedAt && inPlay.length > 1 && free.find((p) =>
       !inPlay.some((q) => q !== p && (q.wins < p.wins || (q.status === 'free' && q.wins === p.wins))))) || null;
+    // The winner is whoever is still in on the most wins; a tie is shared.
+    const top = Math.max(-1, ...players.filter((p) => p.status === 'free' || p.status === 'playing').map((p) => p.wins));
+    const winners = players.filter((p) => (p.status === 'free' || p.status === 'playing') && p.wins === top);
     const label = (m) => ({ ...m, aName: name(m.a), bName: name(m.b) });
     return {
-      ...phase, late: all.length - leads.size, players, proposals, bye,
+      ...phase, late: all.length - leads.size, players, proposals, bye, winners,
       open: matches.filter((m) => m.winner === null).map(label),
       decided: matches.filter((m) => m.winner !== null).reverse().map(label),
     };
@@ -142,6 +171,7 @@ export class Lcq {
   match(id) {
     const m = this.db.prepare('SELECT * FROM lcq_matches WHERE id = ?').get(id);
     if (!m) throw new LcqError('That match is gone; reload the page.');
+    this.live((this.store.get(m.a) ?? this.store.get(m.b))?.game ?? '');
     return m;
   }
 
@@ -149,6 +179,7 @@ export class Lcq {
   start(a, b) {
     const [la, lb] = [this.store.get(a), this.store.get(b)];
     if (la && lb && la.game !== lb.game) throw new LcqError('Those two are in different games.');
+    this.live(la?.game ?? '');
     const players = new Map(this.state(la?.game ?? '').players.map((p) => [p.id, p]));
     if (a === b || players.get(a)?.status !== 'free' || players.get(b)?.status !== 'free') {
       throw new LcqError('Both players must be free (finished their last match and not out).');
@@ -158,6 +189,7 @@ export class Lcq {
 
   /** One win without a match, for the player state() offers a Bye to. Stored as a match against themselves. */
   bye(leadId) {
+    this.live(this.store.get(leadId)?.game ?? '');
     if (this.state(this.store.get(leadId)?.game ?? '').bye?.id !== leadId) {
       throw new LcqError('A Bye is only for the one player left on their wins, once the LCQ is finalized and nobody can catch up.');
     }

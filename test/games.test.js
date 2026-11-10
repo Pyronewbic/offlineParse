@@ -372,4 +372,27 @@ describe('LCQ runner tabs', () => {
       s.store.setBracket('normal');
     }
   });
+
+  test('a game whose LCQ has ended cannot be ticked, and a form loaded before End is refused for that game only', async () => {
+    signUp('SF6', 2, 10);
+    s.lcq.finalize('SF6');
+    s.lcq.end('SF6', true);
+    const form = async () => (await request({ port: s.port, path: '/' })).body;
+    assert.match(await form(), /value="SF6"><span>SF6<\/span>/, 'Normal sign-ups are not affected');
+    s.store.setBracket('lcq');
+    try {
+      const lcqForm = await form();
+      assert.match(lcqForm, /<input type="checkbox" name="games" value="SF6" disabled><span>SF6 \(LCQ ended\)<\/span>/);
+      assert.match(lcqForm, /<input type="checkbox" name="games" value="SSBU"><span>SSBU<\/span>/);
+      const stale = await post(s.port, '/submit', { name: 'Late', phone: '9876599999', consent: 'yes', games: ['SSBU', 'SF6'] });
+      assert.equal(stale.status, 409);
+      assert.match(stale.body, /The SF6 LCQ has ended; untick it to register for the rest\./);
+      assert.match(stale.body, /value="SSBU" checked>/, 'the other game stays ticked');
+      assert.equal(s.store.list().filter((l) => l.name === 'Late').length, 0, 'nothing saved');
+      const ok = await post(s.port, '/submit', { name: 'Late', phone: '9876599999', consent: 'yes', games: ['SSBU'] });
+      assert.equal(ok.status, 200, 'positive control: the open game still takes sign-ups');
+    } finally {
+      s.store.setBracket('normal');
+    }
+  });
 });
