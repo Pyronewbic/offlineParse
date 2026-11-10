@@ -89,7 +89,7 @@ async function main(argv) {
   const trace = values.verbose ? (line) => console.log(`${new Date().toISOString().slice(11, 19)} ${line}`) : null;
   const onQuery = trace && ((name, from, answered) => trace(`dns  ${printable(from)} asked ${printable(name ?? '(malformed)')}${answered ? '' : ' (no answer)'}`));
   const onRequest = trace && ((from, method, host, url) => trace(`http ${printable(from)} ${printable(method)} ${printable(host)}${printable(url)}`));
-  const lcq = new Lcq(store, { winsToQualify: cfg.lcqWinsToQualify, lossesOut: cfg.lcqLossesOut });
+  const lcq = new Lcq(store);
   const server = createPortalServer(cfg, store, { laptopIp: address.ip, quiet: values.quiet, brand, onRequest, lcq });
   let dns = null;
   try {

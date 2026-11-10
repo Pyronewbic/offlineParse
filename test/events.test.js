@@ -141,42 +141,28 @@ describe('deleting with events', () => {
 });
 
 describe('LCQ runner with events', () => {
-  test('a new event starts a fresh runner; the earlier event keeps its groups and matches but they are not shown', () => {
+  test('a new event starts a fresh runner; the earlier event keeps its matches but they are not shown', () => {
     const store = new LeadStore(':memory:', { firstEvent: FIRST });
-    const lcq = new Lcq(store, { winsToQualify: 2, lossesOut: 2, random: () => 0 });
+    const lcq = new Lcq(store);
     const signUp = (n, from = 0) => {
       for (let i = from; i < from + n; i++) reg(store, `+9198765${String(i).padStart(5, '0')}`, { name: `P${i}`, bracket: 'lcq' });
     };
     signUp(4);
-    lcq.syncGroups();
-    lcq.pairGroup(1, 0);
-    lcq.result(lcq.state().open[0].id, lcq.state().open[0].a);
-    assert.equal(lcq.state().groups.length, 1, 'positive control: the October runner has a group');
+    const [p0, p1] = lcq.state().players;
+    lcq.start(p0.id, p1.id);
+    lcq.result(lcq.state().open[0].id, p0.id);
+    assert.equal(lcq.state().decided.length, 1, 'positive control: the October runner has a result');
     const before = lcq.version();
 
     store.startEvent('November');
     assert.notEqual(lcq.version(), before, 'the tablet reloads');
     const fresh = lcq.state();
-    assert.deepEqual([fresh.players.length, fresh.groups.length, fresh.open.length, fresh.decided.length], [0, 0, 0, 0]);
+    assert.deepEqual([fresh.players.length, fresh.open.length, fresh.decided.length], [0, 0, 0]);
     signUp(4, 0);
-    assert.equal(lcq.syncGroups(), 1, 'the same numbers, registered again, form a new group');
     const now = lcq.state();
-    assert.deepEqual(now.groups.map((g) => g.seats.map((s) => s.name)), [['P0', 'P1', 'P2', 'P3']]);
-    assert.ok(now.players.every((p) => p.status === 'grouped'), 'nobody carries an October record');
-    assert.equal(store.db.prepare('SELECT COUNT(*) AS n FROM lcq_matches').get().n, 2, 'October matches are kept');
-    store.close();
-  });
-
-  test('groups from before events are given the event their players registered in', () => {
-    const store = new LeadStore(':memory:', { firstEvent: FIRST });
-    for (let i = 0; i < 4; i++) reg(store, `+9198765${String(i).padStart(5, '0')}`, { name: `P${i}`, bracket: 'lcq' });
-    store.db.exec(`CREATE TABLE lcq_groups (id INTEGER PRIMARY KEY, createdAt TEXT NOT NULL, seen INTEGER NOT NULL DEFAULT 0);
-      CREATE TABLE lcq_members (leadId INTEGER PRIMARY KEY, groupId INTEGER NOT NULL, seat INTEGER NOT NULL);
-      INSERT INTO lcq_groups VALUES (1, '2026-10-20T10:00:00Z', 1);
-      INSERT INTO lcq_members VALUES (1, 1, 0), (2, 1, 1), (3, 1, 2), (4, 1, 3);`);
-    const lcq = new Lcq(store);
-    assert.equal(lcq.state().groups.length, 1, 'the October group is still on the runner');
-    assert.equal(store.db.prepare('SELECT eventCode FROM lcq_groups').get().eventCode, 'EVT26');
+    assert.ok(now.players.every((p) => p.status === 'free' && p.wins === 0 && p.losses === 0), 'nobody carries an October record');
+    assert.deepEqual(now.proposals.map((x) => [x.a.name, x.b.name]), [['P0', 'P1'], ['P2', 'P3']]);
+    assert.equal(store.db.prepare('SELECT COUNT(*) AS n FROM lcq_matches').get().n, 1, 'October matches are kept');
     store.close();
   });
 });

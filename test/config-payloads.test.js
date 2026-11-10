@@ -9,13 +9,6 @@ import { wifiPayload } from '../src/payloads.js';
 import { BASE_CONFIG, makeConfig, rawConfig } from './helpers.js';
 
 describe('config', () => {
-  test('the LCQ rules default to 4 wins and 2 losses, and can be set', () => {
-    const cfg = makeConfig();
-    assert.deepEqual([cfg.lcqWinsToQualify, cfg.lcqLossesOut], [4, 2]);
-    const set = makeConfig({ lcqWinsToQualify: 3, lcqLossesOut: 1 });
-    assert.deepEqual([set.lcqWinsToQualify, set.lcqLossesOut], [3, 1]);
-  });
-
   test('the LCQ attention limits default to 10 and 15 minutes, and can be set', () => {
     assert.deepEqual([makeConfig().lcqWaitAlertMin, makeConfig().lcqMatchAlertMin], [10, 15]);
     const set = makeConfig({ lcqWaitAlertMin: 5, lcqMatchAlertMin: 240 });
@@ -48,9 +41,6 @@ describe('config', () => {
       'port as string': { httpPort: '80' },
       'port as bool': { httpPort: true },
       'port zero': { httpPort: 0 },
-      'LCQ wins zero': { lcqWinsToQualify: 0 },
-      'LCQ losses too many': { lcqLossesOut: 21 },
-      'LCQ wins as text': { lcqWinsToQualify: '4' },
       'LCQ wait limit zero': { lcqWaitAlertMin: 0 },
       'LCQ match limit too long': { lcqMatchAlertMin: 241 },
       'LCQ wait limit fractional': { lcqWaitAlertMin: 7.5 },
@@ -75,8 +65,8 @@ describe('config', () => {
     }
   });
 
-  test('an old config with the WhatsApp keys is refused by name, so it is easy to fix', () => {
-    for (const key of ['whatsappNumber', 'socials', 'socialsMessage', 'prefillMessage']) {
+  test('an old config with WhatsApp or old LCQ rule keys is refused by name, so it is easy to fix', () => {
+    for (const key of ['whatsappNumber', 'socials', 'socialsMessage', 'prefillMessage', 'lcqWinsToQualify', 'lcqLossesOut']) {
       assert.throws(() => configFromObject(rawConfig({ [key]: 'x' })), new RegExp(`no longer used, delete from config\\.json: ${key}`), key);
     }
   });

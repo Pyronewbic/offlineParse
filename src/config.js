@@ -14,19 +14,18 @@ const FIELD_TYPES = {
   logoLight: 'string',
   logoDark: 'string',
   noticeVersion: 'string',
-  lcqWinsToQualify: 'count',
-  lcqLossesOut: 'count',
   lcqWaitAlertMin: 'minutes',
   lcqMatchAlertMin: 'minutes',
   games: 'games',
 };
-// Keys older config files lack: qualify at 4 wins, out at 2 losses; flag a 10-minute wait or a 15-minute match.
+// Keys older config files lack: flag a 10-minute wait or a 15-minute match.
 // No games means guests pick none and registrations carry no game.
-const DEFAULTS = { lcqWinsToQualify: 4, lcqLossesOut: 2, lcqWaitAlertMin: 10, lcqMatchAlertMin: 15, games: [] };
+const DEFAULTS = { lcqWaitAlertMin: 10, lcqMatchAlertMin: 15, games: [] };
 export const MAX_GAMES = 12;
 export const GAME_MAX = 40; // characters, counted as code points
-// Keys from the WhatsApp follow-up days. Named in the error so an old config.json is easy to fix.
-const RETIRED = ['whatsappNumber', 'socials', 'socialsMessage', 'prefillMessage'];
+// Keys from the WhatsApp follow-up days and the LCQ rules before single elimination.
+// Named in the error so an old config.json is easy to fix.
+const RETIRED = ['whatsappNumber', 'socials', 'socialsMessage', 'prefillMessage', 'lcqWinsToQualify', 'lcqLossesOut'];
 
 export class ConfigError extends Error {}
 
@@ -57,12 +56,11 @@ export function configFromObject(raw) {
     const value = raw[key];
     const ok =
       type === 'port' ? Number.isInteger(value) && value >= 1 && value <= 65535
-      : type === 'count' ? Number.isInteger(value) && value >= 1 && value <= 20
       : type === 'minutes' ? Number.isInteger(value) && value >= 1 && value <= 240
       : type === 'games' ? Array.isArray(value)
       : typeof value === type;
     if (!ok) {
-      const want = { port: 'an integer 1-65535', count: 'a whole number 1-20', minutes: 'a whole number of minutes, 1-240',
+      const want = { port: 'an integer 1-65535', minutes: 'a whole number of minutes, 1-240',
         games: 'a list of game names' }[type] ?? `a ${type}`;
       throw new ConfigError(`${key} must be ${want}`);
     }
