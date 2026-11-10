@@ -531,6 +531,18 @@ const fieldsOf = (fields) => Object.entries(fields).map(([k, v]) => `<input type
 const runnerButton = (action, fields, label, cls = '') =>
   `<form class="inline" method="post" action="/lcq/${action}">${fieldsOf(fields)}<button type="submit"${cls ? ` class="${cls}"` : ''}>${label}</button></form>`;
 
+/** How many more sign-ups make a full single-elimination bracket (the next power of 2), and its size. */
+export function bracketGap(count) {
+  let size = 1;
+  while (size < count) size *= 2;
+  return { size, more: size - count };
+}
+const bracketLine = (count) => {
+  if (!count) return '';
+  const { size, more } = bracketGap(count);
+  return `<p class="hint">${count} in the bracket: ${more ? `need ${more} more for a full bracket of ${size}.` : 'full.'}</p>`;
+};
+
 /** Players waiting and matches running past the config limits, longest first. */
 export function overdue(cfg, { players, open }, now = Date.now()) {
   const since = (iso) => now - Date.parse(iso);
@@ -639,6 +651,7 @@ export function runnerPage(cfg, state, {
 ${adminHeader(cfg, brand, 'LCQ runner', '<span>One loss and you are out</span>')}
 ${gameTabs}
 <nav class="jump" aria-label="Sections">${jumps}</nav>
+${bracketLine(players.length)}
 ${errorBlock(error)}${notice ? `<p class="flash" role="status">${esc(notice)}</p>` : ''}${attention}
 ${search}
 <div class="duo">

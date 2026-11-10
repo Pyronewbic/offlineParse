@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { after, before, beforeEach, describe, test } from 'node:test';
 import { Lcq } from '../src/lcq.js';
 import { LeadStore } from '../src/leads.js';
-import { againstFor, createPortalServer, overdue, runnerPage, runnerVersion } from '../src/web.js';
+import { againstFor, bracketGap, createPortalServer, overdue, runnerPage, runnerVersion } from '../src/web.js';
 import { makeConfig, request } from './helpers.js';
 
 describe('LCQ runner over HTTP', () => {
@@ -293,6 +293,19 @@ describe('LCQ runner over HTTP', () => {
     const [a, b] = [lcq.state().players.find((p) => p.name === 'P1'), lcq.state().players.find((p) => p.name === 'P7')];
     lcq.start(a.id, b.id);
     assert.equal(lcq.state().open.at(-1).aName, 'P1', 'the server still allows any two free players, so the override works');
+  });
+
+  test('the tab says how many more sign-ups make a full bracket; dropped players keep their place', () => {
+    assert.deepEqual([1, 2, 3, 16, 17, 24, 32].map((n) => bracketGap(n)),
+      [{ size: 1, more: 0 }, { size: 2, more: 0 }, { size: 4, more: 1 }, { size: 16, more: 0 }, { size: 32, more: 15 }, { size: 32, more: 8 }, { size: 32, more: 0 }]);
+    const line = () => runnerPage(makeConfig(), lcq.state()).match(/<p class="hint">\d+ in the bracket: [^<]*<\/p>/)?.[0];
+    assert.equal(line(), undefined, 'nobody signed up, no line');
+    signUp(24);
+    assert.equal(line(), '<p class="hint">24 in the bracket: need 8 more for a full bracket of 32.</p>');
+    lcq.drop(lcq.state().players[0].id);
+    assert.equal(line(), '<p class="hint">24 in the bracket: need 8 more for a full bracket of 32.</p>', 'a dropped player still counts');
+    store.db.exec('DELETE FROM leads WHERE id IN (SELECT id FROM leads ORDER BY id DESC LIMIT 8)');
+    assert.equal(line(), '<p class="hint">16 in the bracket: full.</p>');
   });
 
   test('the admin page shows the runner address and PIN', async () => {
