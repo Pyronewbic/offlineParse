@@ -159,6 +159,7 @@ input[aria-invalid=true]{border-color:var(--error)}
 .field-error::before{content:"!";display:inline-block;width:1.25em;height:1.25em;margin-right:.4em;border-radius:50%;background:var(--error);color:var(--surface);text-align:center;line-height:1.25em;font-weight:900}
 .check{display:flex;gap:.75rem;align-items:flex-start;font-weight:500;margin-top:1.2rem;cursor:pointer}
 .check input{flex:none;width:28px;height:28px;margin:0;accent-color:var(--pink)}
+.check input:disabled+span{color:var(--muted)}
 fieldset.games{border:0;margin:1rem 0 0;padding:0;min-width:0}
 fieldset.games legend{font-weight:700;padding:0}
 fieldset.games .hint{margin:.1rem 0 0}
@@ -625,14 +626,14 @@ export function runnerPage(cfg, state, {
   const stillIn = free.length;
   const winnerText = winners.length ? `${winners.length > 1 ? 'Winners' : 'Winner'}: <strong>${listText(winners.map((p) => esc(p.name)))}</strong> (${winners[0].wins}W)` : 'No winner';
   const bracket = endedAt
-    ? `<div class="bracket"><p class="flash" role="status">Ended ${esc(toISTShort(endedAt))}. ${winnerText}.</p>` +
+    ? `<div class="panel" id="lcq-bracket"><p class="flash" role="status">Ended ${esc(toISTShort(endedAt))}. ${winnerText}.</p>` +
       `<form method="post" action="/lcq/reopen" class="fields">${gameField}<label class="check"><input type="checkbox" name="confirm" value="yes" required>` +
       `<span>This LCQ ended by mistake</span></label><button class="secondary" type="submit">Reopen</button></form></div>`
     : finalizedAt
-    ? `<div class="bracket"><p class="hint">Finalized ${esc(toISTShort(finalizedAt))}, ${players.length} in the bracket. ${late
+    ? `<div class="panel" id="lcq-bracket"><p class="hint">Finalized ${esc(toISTShort(finalizedAt))}, ${players.length} in the bracket. ${late
       ? `${late} signed up since; Unfinalize to add them (${players.length + late} in, ${gapText(players.length + late)}).`
       : 'Nobody has signed up since.'}</p>${btn('unfinalize', {}, 'LCQ Unfinalize', 'secondary')}</div>`
-    : players.length ? `<div class="bracket"><p class="hint">${players.length} in the bracket: ${gapText(players.length)}.</p>` +
+    : players.length ? `<div class="panel" id="lcq-bracket"><p class="hint">${players.length} in the bracket: ${gapText(players.length)}.</p>` +
       `<form method="post" action="/lcq/finalize" class="fields">${gameField}${short ? `<label class="check"><input type="checkbox" name="confirm" value="yes" required>` +
       `<span>${players.length} in: ${short} short of ${players.length + short}; some players will need a Bye</span></label>` : ''}` +
       `<button class="secondary" type="submit">LCQ Finalize</button></form></div>`
@@ -663,7 +664,7 @@ export function runnerPage(cfg, state, {
     `${wanted ? `<a class="btn secondary" href="${esc(lcqUrl(game, tabbed))}">Clear</a>` : ''}</form>${foundRows}</section>`;
   const gameTabs = tabbed ? `<nav class="tabs" aria-label="Games">${tabs.map((t) =>
     `<a href="${esc(lcqUrl(t.game, tabbed))}"${t.game === game ? ' aria-current="page"' : ''}>${t.game ? esc(t.game) : 'No game'} (${t.players})` +
-    `${t.ready ? `, ${t.ready} ready` : ''}</a>`).join('')}</nav>` : '';
+    `${t.ended ? ', ended' : t.ready ? `, ${t.ready} ready` : ''}</a>`).join('')}</nav>` : '';
 
   // End sits apart from Unfinalize, at the bottom, so a stray tap near the top cannot end the LCQ.
   const end = !live || !finalizedAt ? '' : `<section class="panel" id="lcq-end" aria-labelledby="lcq-end-title"><h2 id="lcq-end-title">End this LCQ</h2>` +
@@ -899,7 +900,7 @@ export function createPortalServer(cfg, store, {
     const { error = '', notice = '' } = flashes.get(session) ?? {};
     flashes.delete(session);
     const q = (params.get('q') ?? '').slice(0, 60);
-    const tabs = runnerGames().map((g) => ({ game: g, players: lcq.leads(g).length, ready: lcq.state(g).proposals.length }));
+    const tabs = runnerGames().map((g) => ({ game: g, players: lcq.leads(g).length, ready: lcq.state(g).proposals.length, ended: !!lcq.phase(g).endedAt }));
     return send(res, 200, 'text/html; charset=utf-8', runnerPage(cfg, state, { brand, error, notice, version, now, q, game, tabs }),
       { 'Content-Security-Policy': RUNNER_CSP });
   }

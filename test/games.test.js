@@ -384,6 +384,8 @@ describe('LCQ runner tabs', () => {
       const lcqForm = await form();
       assert.match(lcqForm, /<input type="checkbox" name="games" value="SF6" disabled><span>SF6 \(LCQ ended\)<\/span>/);
       assert.match(lcqForm, /<input type="checkbox" name="games" value="SSBU"><span>SSBU<\/span>/);
+      const runner = await page('?game=SF6');
+      assert.match(runner, /aria-current="page">SF6 \(2\), ended<\/a>/, 'the tab says ended, not how many are ready');
       const stale = await post(s.port, '/submit', { name: 'Late', phone: '9876599999', consent: 'yes', games: ['SSBU', 'SF6'] });
       assert.equal(stale.status, 409);
       assert.match(stale.body, /The SF6 LCQ has ended; untick it to register for the rest\./);
