@@ -250,7 +250,7 @@ describe('events on the admin page', () => {
     assert.match(old, /Old Asha/);
     assert.ok(!old.includes('New Asha') && !old.includes('Ravi'), 'only that event');
     assert.match(old, /href="\/admin\/export\.csv\?event=EVT26"/);
-    assert.match(old, /<a href="\/admin\?tab=lcq&amp;event=EVT26">LCQ \(0\)<\/a>/, 'tabs keep the event');
+    assert.match(old, /<a href="\/admin\?tab=lcq&amp;event=EVT26" class="zero" aria-label="LCQ, All games: 0 sign-ups">0<\/a>/, 'the counts keep the event');
 
     const csv = (q) => request({ port, path: `/admin/export.csv${q}` });
     const oldCsv = await csv('?event=EVT26');

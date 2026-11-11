@@ -147,17 +147,25 @@ describe('games on the admin page', () => {
     await add({ name: 'Ravi', phone: '9123456789', games: ['Avatar Legends'], bracket: 'normal' });
     const all = await page();
     assert.match(all, /<th scope="col">Game<\/th>/);
-    assert.match(all, /<a href="\/admin" aria-current="page">All games \(3\)<\/a><a href="\/admin\?game=SSBU">SSBU \(1\)<\/a><a href="\/admin\?game=SF6">SF6 \(0\)<\/a><a href="\/admin\?game=Avatar\+Legends">Avatar Legends \(2\)<\/a>/);
+    assert.match(all, /<thead><tr><td><\/td><th scope="col">All games<\/th><th scope="col">SSBU<\/th><th scope="col">SF6<\/th><th scope="col">Avatar Legends<\/th><\/tr><\/thead>/);
+    assert.match(all, /<a href="\/admin" aria-current="page" aria-label="All brackets, All games: 3 sign-ups">3<\/a>/);
+    assert.match(all, /<a href="\/admin\?game=SSBU" aria-label="All brackets, SSBU: 1 sign-up">1<\/a>/);
+    assert.match(all, /<a href="\/admin\?game=SF6" class="zero" aria-label="All brackets, SF6: 0 sign-ups">0<\/a>/, 'a zero stays, dimmed');
+    assert.match(all, /<a href="\/admin\?tab=normal&amp;game=Avatar\+Legends" aria-label="Normal, Avatar Legends: 1 sign-up">1<\/a>/);
+    assert.match(all, /<a href="\/admin\?tab=lcq&amp;game=Avatar\+Legends" aria-label="LCQ, Avatar Legends: 1 sign-up">1<\/a>/,
+      'each game shows its Normal and LCQ counts at once');
     const avatar = await page('/admin?tab=lcq&game=Avatar+Legends');
     assert.equal((avatar.match(/<tr><td class="num idx">/g) ?? []).length, 1, 'LCQ and Avatar Legends only');
-    assert.match(avatar, /<a href="\/admin\?game=Avatar\+Legends">All \(2\)<\/a>/, 'bracket tabs keep the game');
+    assert.match(avatar, /<a href="\/admin\?tab=lcq&amp;game=Avatar\+Legends" aria-current="page" aria-label="LCQ, Avatar Legends: 1 sign-up">1<\/a>/,
+      'the cell for this bracket and game is the one marked');
+    assert.equal((avatar.match(/aria-current="page" aria-label="/g) ?? []).length, 1, 'only one cell is marked');
     assert.match(avatar, /href="\/admin\/export\.csv\?tab=lcq&amp;game=Avatar\+Legends"/);
     assert.match(avatar, /name="games" value="Avatar Legends" checked>/, 'the add form starts on the game in view');
     const csv = await request({ port: s.port, path: '/admin/export.csv?game=Avatar+Legends' });
     assert.match(csv.headers['content-disposition'], /filename="leads-EVT26-Avatar-Legends\.csv"/);
     assert.deepEqual(csv.body.trim().split('\r\n').slice(1).map((r) => r.split(',').slice(1, 4)), [['Desk Dev', 'LCQ', 'Avatar Legends'], ['Ravi', 'Normal', 'Avatar Legends']]);
     const bogus = await page('/admin?game=%22%3E%3Cb%3E');
-    assert.match(bogus, /aria-current="page">All games \(3\)/, 'an unknown game filter shows every game');
+    assert.match(bogus, /aria-current="page" aria-label="All brackets, All games: 3 sign-ups"/, 'an unknown game filter shows every game');
     assert.ok(!bogus.includes('"><b>'));
   });
 

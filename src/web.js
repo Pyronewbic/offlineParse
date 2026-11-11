@@ -319,9 +319,18 @@ table.reg{width:100%;border-collapse:separate;border-spacing:0;font-size:15px;ba
 .head-row > .toggle{margin:0 0 0 auto}
 .event-tools{display:flex;gap:0 24px;flex-wrap:wrap;margin:0 0 12px}
 .event-tools > details[open]{flex-basis:100%}
-.filters{display:flex;gap:8px 24px;align-items:center;flex-wrap:wrap;margin:0 0 16px}
-.filters > .tabs{margin:0}
+.filters{display:flex;gap:12px 24px;align-items:flex-end;flex-wrap:wrap;margin:0 0 16px}
 .filters > .hint{margin:0 0 0 auto}
+.counts-wrap{overflow-x:auto;max-width:100%}
+table.counts{border-collapse:separate;border-spacing:4px;margin:-4px;font-variant-numeric:tabular-nums}
+.counts th{padding:0 .4rem;font-size:.85rem;text-align:left;white-space:nowrap}
+.counts thead th{text-align:center}
+.counts td{padding:0}
+.counts td a{display:block;min-width:3.2rem;padding:.3rem .6rem;border:2px solid var(--line);border-radius:8px;text-align:center;font-weight:800;text-decoration:none;background:var(--surface)}
+.counts td a.zero{color:var(--muted);border-color:var(--rule);font-weight:600}
+.counts td a[aria-current]{background:var(--pink);color:var(--onPink);border-color:var(--line)}
+.counts td a:hover{background:var(--hover)}
+.counts td a[aria-current]:hover{background:var(--pink)}
 .new-event form{max-width:36rem}
 button.quiet{min-height:40px;padding:.4rem .8rem;font-size:.85rem;color:var(--error);background:transparent;border:2px solid var(--error);box-shadow:none}
 .empty{padding:28px 14px;text-align:center;color:var(--muted)}
@@ -500,14 +509,20 @@ export function adminPage(cfg, {
   const flash = msg === 'bracket' ? `New sign-ups now go to ${label(active)}.`
     : msg === 'event' ? `New sign-ups now go to ${esc(current.name)}.` : Object.hasOwn(FLASH, msg) ? FLASH[msg] : '';
   const exportUrl = `/admin/export.csv${query({ tab: tab === 'all' ? '' : tab, event: view.event, game: view.game })}`;
-  const tabs = TABS.map((t) => {
-    const count = t === 'all' ? all.length : all.filter((l) => l.bracket === t).length;
-    return `<a href="${esc(adminUrl({ ...view, tab: t }))}"${t === tab ? ' aria-current="page"' : ''}>${t === 'all' ? 'All' : label(t)} (${count})</a>`;
-  }).join('');
-  // Game names in this event that are no longer configured still get a filter, so their rows stay reachable.
+  // One table filters by bracket and game at once: a cell is the sign-ups in that bracket and game, and picking
+  // it shows exactly those rows. Game names no longer configured still get a column, so their rows stay reachable.
   const gameNames = [...new Set([...cfg.games, ...atEvent.map((l) => l.game).filter(Boolean)])];
-  const gameLinks = gameNames.length ? [['', 'All games', atEvent.length], ...gameNames.map((g) => [g, g, atEvent.filter((l) => l.game === g).length])]
-    .map(([g, text, n]) => `<a href="${esc(adminUrl({ ...view, game: g }))}"${g === view.game ? ' aria-current="page"' : ''}>${esc(text)} (${n})</a>`).join('') : '';
+  const cols = [['', 'All games'], ...gameNames.map((g) => [g, g])];
+  const cell = (t, [g, gText]) => {
+    const n = atEvent.filter((l) => (t === 'all' || l.bracket === t) && (!g || l.game === g)).length;
+    const on = t === tab && g === view.game;
+    return `<td><a href="${esc(adminUrl({ ...view, tab: t, game: g }))}"${n ? '' : ' class="zero"'}${on ? ' aria-current="page"' : ''}` +
+      ` aria-label="${t === 'all' ? 'All brackets' : label(t)}, ${esc(gText)}: ${n} sign-up${n === 1 ? '' : 's'}">${n}</a></td>`;
+  };
+  const counts = `<div class="counts-wrap"><table class="counts"><caption class="sr-only">Sign-ups by bracket and game; pick a number to show those</caption>` +
+    `<thead><tr><td></td>${cols.map(([, gText]) => `<th scope="col">${esc(gText)}</th>`).join('')}</tr></thead><tbody>` +
+    TABS.map((t) => `<tr><th scope="row">${t === 'all' ? 'All' : label(t)}</th>${cols.map((c) => cell(t, c)).join('')}</tr>`).join('') +
+    '</tbody></table></div>';
   const eventLinks = events.map((e) => `<a href="${esc(adminUrl({ tab, event: e.code === current.code ? '' : e.code }))}"` +
     `${e.code === shownEvent.code ? ' aria-current="page"' : ''}>${esc(e.name)}${e.code === current.code ? ' (now)' : ''}</a>`).join('');
   // Making current, renaming and deleting each need a tick, like Drop and End; only an empty event can be deleted.
@@ -558,8 +573,7 @@ ${manage}
 ${newEvent}
 </div>
 <div class="filters">
-<nav class="tabs" aria-label="Brackets">${tabs}</nav>
-${gameLinks ? `<nav class="tabs" aria-label="Games">${gameLinks}</nav>` : ''}
+${counts}
 ${runner ? `<p class="hint">LCQ runner for a tablet on the booth Wi-Fi: <strong>${esc(runner.url)}</strong>, PIN <strong>${esc(runner.pin)}</strong></p>` : ''}
 </div>
 <dl class="stats">
