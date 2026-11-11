@@ -81,7 +81,7 @@ npm start
 4. **Bye.** Once finalized, a player alone on their wins with nobody below to catch up gets a **Bye** in Needs attention: one win, no match, undoable.
 5. **LCQ End** (bottom of the tab) shows the Winner (most wins still in), makes the tab read-only and marks the game "(LCQ ended)" on the guest form. **Reopen** undoes it.
 
-**Rounds** (folded during play, open once ended) lays the bracket out start.gg style: a column per round with each match, who is waiting, and once finalized about how many matches are still to come. Pairings are made as players come free, so it draws no lines between rounds.
+**Rounds** (folded during play, open once ended) draws the bracket start.gg style: a column per round, each match with its winner, and a line from each winner to the match they played next (or to where they are waiting). Once finalized each round says how many matches are still to come, and the last one in shows as the Winner.
 
 **Event** at the top picks an earlier event to look back at its results and winners; only the current event can be run.
 

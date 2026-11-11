@@ -6,7 +6,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { after, before, beforeEach, describe, test } from 'node:test';
 import { Lcq, bracketGap } from '../src/lcq.js';
 import { LeadStore } from '../src/leads.js';
-import { againstFor, createPortalServer, holdsUpdates, overdue, runnerPage, runnerVersion } from '../src/web.js';
+import { againstFor, bracketLayout, createPortalServer, holdsUpdates, overdue, runnerPage, runnerVersion } from '../src/web.js';
 import { makeConfig, postForm, request } from './helpers.js';
 
 describe('LCQ runner over HTTP', () => {
@@ -537,37 +537,65 @@ describe('LCQ runner over HTTP', () => {
     assert.ok(!ended.includes('<nav class="jump"'), 'nothing to jump to on a finished tab');
   });
 
-  test('Rounds: one column per round with results, the open match, waiting players and how many are still to play; the Winner once ended', () => {
-    const rounds = (st) => runnerPage(makeConfig(), st).match(/<details class="panel" id="lcq-rounds"( open)?>.*?<\/details>/s);
-    assert.match(rounds(lcq.state())[0], /No matches yet\./);
+  test('the bracket centres each match on the two that fed it, puts the furthest along on top, and stacks the rest', () => {
+    const { slot, rows } = bracketLayout([
+      { key: 'r1a', col: 0, next: 'r2a' }, { key: 'r1b', col: 0, next: 'r2a' },
+      { key: 'r1c', col: 0, next: 'r2b' }, { key: 'r1d', col: 0, next: 'r2b' },
+      { key: 'r2a', col: 1, next: 'fin' }, { key: 'r2b', col: 1, next: 'fin' },
+      { key: 'fin', col: 2, next: null },
+      { key: 'late', col: 0, next: 'wait' }, { key: 'wait', col: 1, next: null },
+    ]);
+    assert.deepEqual(['r1a', 'r1b', 'r1c', 'r1d', 'r2a', 'r2b', 'fin', 'late', 'wait'].map((k) => slot.get(k)), [0, 1, 2, 3, 0.5, 2.5, 1.5, 4, 4]);
+    assert.equal(rows, 5);
+  });
+
+  test('Rounds draws a bracket: a line from each winner to their next match, the open match, who waits, and how many are still to play', () => {
+    const bracket = (st) => runnerPage(makeConfig(), st).match(/<details class="panel" id="lcq-rounds"( open)?>.*?<\/details>/s);
+    assert.match(bracket(lcq.state())[0], /No matches yet\./);
     signUp(6);
-    assert.match(rounds(lcq.state())[0], /<h3>Round 1 <span class="hint">on 0W<\/span><\/h3><ol class="cards"><li class="mcard waiting">P1 waiting/, 'before any match, who is waiting');
     lcq.finalize('', true);
     startAll();
     const [m1, m2] = lcq.state().open;
     lcq.result(m1.id, m1.a);
     lcq.result(m2.id, m2.b);
-    const live = rounds(lcq.state());
+    const live = bracket(lcq.state());
     assert.equal(live[1], undefined, 'folded while the LCQ runs');
-    const cols = live[0].match(/<li class="round">.*?<\/ol><\/li>/gs);
-    assert.equal(cols.length, 3, '6 players: a bracket of 8 has 3 rounds');
-    assert.match(cols[0], /<h3>Round 1 <span class="hint">on 0W<\/span><\/h3>/);
-    assert.match(cols[0], /<div class="pl won"><span>P1<\/span><span>won<\/span><\/div><div class="pl lost"><span>P2<\/span><\/div>/);
-    assert.match(cols[0], /<div class="pl lost"><span>P3<\/span><\/div><div class="pl won"><span>P4<\/span><span>won<\/span><\/div>/);
-    assert.match(cols[0], /<span>P5<\/span><\/div><div class="pl"><span>P6<\/span><\/div><div class="hint">playing, <span data-wait=/);
-    assert.ok(!cols[0].includes('more to play'), 'all 6 are in round 1 already: 3 matches, none to come');
-    assert.match(cols[1], /<h3>Round 2 .*?P1 waiting .*?P4 waiting .*?<li class="mcard ghost">about 2 more to play<\/li>/s, '3 winners: a match and a bye');
-    assert.match(cols[2], /<h3>Final <span class="hint">on 2W<\/span><\/h3>.*?about 1 more to play/s);
+    const html = live[0];
+    assert.match(html, /<h3 style="left:0px">Round 1<\/h3>/, 'all 6 in round 1 already: nothing more to come');
+    assert.match(html, /<h3 style="left:196px">Round 2 <span class="hint">2 more to play<\/span><\/h3>/, '3 winners: a match and a bye');
+    assert.match(html, /<h3 style="left:392px">Final <span class="hint">1 more to play<\/span><\/h3>/);
+    assert.match(html, /<div class="bkc" style="left:0px;top:42px"><div class="r win"><span>P1<\/span><span class="tag">W<\/span><\/div><div class="r lose"><span>P2<\/span><\/div><\/div>/);
+    assert.match(html, /<div class="r lose"><span>P3<\/span><\/div><div class="r win"><span>P4<\/span><span class="tag">W<\/span><\/div>/);
+    assert.match(html, /<div class="bkc live" style="left:0px;top:162px"><div class="r"><span>P5<\/span><\/div><div class="r"><span>P6<\/span><\/div><\/div>/);
+    assert.match(html, /<div class="bkc waiting" style="left:196px;top:42px"><div class="r"><span>P1<\/span><\/div><div class="r hint"><span>waiting <span data-wait=/,
+      'P1 waits beside the match they won');
+    assert.equal((html.match(/<path /g) ?? []).length, 2, 'one line per winner to where they are now');
+    assert.match(html, /<path d="M160 67H178V67H196"\/>/, 'P1: straight across to their waiting card');
+    assert.match(html, /role="region" aria-label="Bracket, scroll sideways for later rounds" tabindex="0"/);
+    assert.match(html, /<svg class="bk-lines"[^>]* aria-hidden="true">/);
+  });
 
-    const [m3] = lcq.state().open;
-    lcq.result(m3.id, m3.a);
-    lcq.start(lcq.state().proposals[0].a.id, lcq.state().proposals[0].b.id);
-    lcq.result(lcq.state().open[0].id, lcq.state().open[0].a);
-    lcq.end('', true);
-    const ended = rounds(lcq.state());
+  test('the last one in is shown as the winner after the final, not as waiting in an extra round; once ended it says Winner', () => {
+    signUp(4);
+    lcq.finalize();
+    const play = () => {
+      const [p] = lcq.state().proposals;
+      lcq.start(p.a.id, p.b.id);
+      lcq.result(lcq.state().open[0].id, p.a.id);
+    };
+    play();
+    play();
+    play();
+    const st = lcq.state();
+    assert.deepEqual(st.players.filter((p) => p.status === 'free').map((p) => [p.name, p.wins]), [['P1', 2]], 'precondition: P1 won the final');
+    const html = runnerPage(makeConfig(), st);
+    assert.match(html, /<h3 style="left:196px">Final<\/h3>/);
+    assert.match(html, /<h3 style="left:392px">Winner<\/h3><div class="bkc champ" style="left:392px;top:[\d.]+px"><div class="r win"><span>P1<\/span><\/div><div class="r hint"><span>Last one in, 2W<\/span>/);
+    assert.ok(!/Round 3|bkc waiting/.test(html), 'no extra round, nobody waiting');
+    lcq.end();
+    const ended = runnerPage(makeConfig(), lcq.state()).match(/<details class="panel" id="lcq-rounds"( open)?>.*?<\/details>/s);
     assert.equal(ended[1], ' open', 'open once ended, to look back');
-    assert.match(ended[0], /<h3>Winner<\/h3><ol class="cards"><li class="mcard champ">P1 <span class="hint">2W<\/span><\/li><\/ol>/, 'most wins still in');
-    assert.match(ended[0], /role="region" aria-label="Rounds, scroll sideways for later rounds" tabindex="0"/);
+    assert.match(ended[0], /<span>Winner, 2W<\/span>/);
   });
 
   test('the tablet sees a desk delete then add, even when the new registration reuses the old id', async () => {

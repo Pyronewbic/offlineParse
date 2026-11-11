@@ -66,6 +66,27 @@ const waitText = (ms) => {
  */
 export const holdsUpdates = (idleMs, active) => idleMs < 400 || (active && idleMs < 60_000);
 
+/**
+ * Where each bracket card sits: a card with feeders is centred on them, the rest take the next free row, and the
+ * card furthest along goes first so the final is on top. nodes: { key, col, next } where next is the card its
+ * winner went on to. Returns { slot: Map(key -> row), rows }.
+ */
+export function bracketLayout(nodes) {
+  const keys = new Set(nodes.map((n) => n.key));
+  const feeders = new Map(nodes.map((n) => [n.key, []]));
+  for (const n of nodes) if (n.next !== null && keys.has(n.next)) feeders.get(n.next).push(n.key);
+  const slot = new Map();
+  let rows = 0;
+  const place = (key) => {
+    const fs = feeders.get(key);
+    for (const f of fs) place(f);
+    slot.set(key, fs.length ? fs.reduce((sum, f) => sum + slot.get(f), 0) / fs.length : rows++);
+  };
+  const roots = nodes.filter((n) => n.next === null || !keys.has(n.next));
+  for (const r of [...roots].sort((x, y) => y.col - x.col)) place(r.key);
+  return { slot, rows };
+}
+
 /** The Against choices for a Player: free players on the same wins, or anyone but them with Any wins. */
 export const againstFor = (options, player, any) =>
   options.filter((o) => o.value !== player.value && (any || !player.value || o.dataset.w === player.dataset.w));
@@ -221,17 +242,23 @@ details.panel > summary h2{display:inline}
 .attention form.inline{display:block}
 .attention form.inline button{display:block;width:100%;min-height:56px;margin:8px 0 12px}
 .side{display:inline-block;min-width:1.6em;margin-right:.35em;padding:0 .3em;border:2px solid currentColor;border-radius:6px;font-weight:900;text-align:center}
-.rounds{overflow-x:auto;scroll-snap-type:x proximity;margin:.4rem 0 0;padding-bottom:6px}
-.rounds > ol{display:grid;grid-auto-flow:column;grid-auto-columns:minmax(210px,1fr);gap:12px;list-style:none;margin:0;padding:0}
-.rounds .round{scroll-snap-align:start}
-.rounds h3{margin:0 0 .5rem;font-size:1rem}
-.rounds .cards{list-style:none;margin:0;padding:0;display:grid;gap:8px}
-.mcard{border:2px solid var(--line);border-radius:10px;padding:.45rem .7rem;background:var(--surface);overflow-wrap:anywhere}
-.mcard .pl{display:flex;justify-content:space-between;gap:8px}
-.mcard .pl.won{font-weight:800}
-.mcard .pl.lost{color:var(--muted)}
-.mcard.waiting,.mcard.ghost{border-style:dashed;color:var(--muted)}
-.mcard.champ{border-width:3px;border-color:var(--pink);font-weight:800}
+.bk-scroll{overflow-x:auto;margin:.4rem 0 0;padding-bottom:6px}
+.bk{position:relative}
+.bk h3{position:absolute;top:0;width:160px;margin:0;font-size:.95rem;line-height:1.15}
+.bk h3 .hint{display:block;margin:0;font-size:.75rem}
+.bk-lines{position:absolute;top:0;left:0;overflow:visible}
+.bk-lines path{fill:none;stroke:var(--muted);stroke-width:2}
+.bkc{position:absolute;box-sizing:border-box;width:160px;height:50px;border:2px solid var(--line);border-radius:8px;background:var(--surface);font-size:.85rem;line-height:21px;padding:2px 0;overflow:hidden}
+.bkc .r{display:flex;align-items:center;justify-content:space-between;gap:6px;height:21px;padding:0 8px;white-space:nowrap;overflow:hidden}
+.bkc .hint{margin:0;font-size:.78rem}
+.bkc .r span:first-child{overflow:hidden;text-overflow:ellipsis}
+.bkc .r + .r{border-top:1px solid var(--rule)}
+.bkc .win{font-weight:800}
+.bkc .lose{color:var(--muted)}
+.bkc .tag{flex:none;padding:0 5px;border-radius:4px;font-size:.72rem;line-height:16px;font-weight:800;background:var(--line);color:var(--surface)}
+.bkc.live{border-color:var(--pink)}
+.bkc.waiting{border-style:dashed;color:var(--muted)}
+.bkc.champ{border:3px solid var(--pink);font-weight:800}
 #lcq-ready-more > summary,#lcq-pick > summary{min-height:48px;padding:.7rem 0;font-weight:700;cursor:pointer}
 .calloff{margin-top:20px;padding-top:12px;border-top:1px dashed var(--rule)}
 .ready > li{display:flex;align-items:center;gap:8px 12px;flex-wrap:wrap}
@@ -649,36 +676,69 @@ export function runnerPage(cfg, state, {
     const [winner, loser] = m.winner === m.a ? [m.aName, m.bName] : [m.bName, m.aName];
     return `<li>${esc(winner)} ${m.a === m.b ? 'had a bye' : `beat ${esc(loser)}`}${live ? ` ${btn('undo', { match: m.id }, 'Undo', 'quiet')}` : ''}</li>`;
   };
-  // Rounds, start.gg style but honest: pairings are made as players come free, so there are no lines between
-  // rounds. Each column is the matches entered on the same wins; waiting players and, once finalized, how many
-  // are still to come sit at the bottom. A round of n players has ceil(n / 2) matches, an odd one out a bye.
+  // Rounds as a bracket. Pairings are made as players come free, so a line follows each winner to the match
+  // they played next, not to a slot drawn in advance. A column is the matches entered on the same wins; once
+  // finalized, a round of n players has ceil(n / 2) matches (an odd one out a bye), and the header says how many
+  // are still to come.
   const roundsView = () => {
     const expected = [];
     for (let n = players.length; finalizedAt && n > 1; n = Math.ceil(n / 2)) expected.push(Math.ceil(n / 2));
-    const planned = expected.length;
-    const waitingOn = (w) => free.filter((p) => p.wins === w);
-    const count = Math.max(rounds.length, planned, ...free.map((p) => p.wins + 1));
-    if (!count) return '<p class="hint">No matches yet.</p>';
-    const card = (m) => {
-      if (m.a === m.b) return `<li class="mcard"><div class="pl won"><span>${esc(m.aName)}</span><span>bye</span></div></li>`;
-      if (m.winner === null) return `<li class="mcard"><div class="pl"><span>${esc(m.aName)}</span></div><div class="pl"><span>${esc(m.bName)}</span></div>` +
-        `<div class="hint">playing, ${elapsed(m.createdAt)}</div></li>`;
-      const row = (id, nm) => `<div class="pl ${m.winner === id ? 'won' : 'lost'}"><span>${esc(nm)}</span>${m.winner === id ? '<span>won</span>' : ''}</div>`;
-      return `<li class="mcard">${row(m.a, m.aName)}${row(m.b, m.bName)}</li>`;
+    const all = rounds.flatMap((r, col) => r.map((m) => ({ ...m, col })));
+    const inPlay = players.filter((p) => p.status === 'free' || p.status === 'playing');
+    // The last one standing is the winner once nobody else can play: ended, or finalized with no match left.
+    const champs = endedAt ? winners : finalizedAt && inPlay.length === 1 && !open.length ? inPlay : [];
+    const champIds = new Set(champs.map((p) => p.id));
+    const ends = [...champs.map((p) => ({ kind: 'champ', p })), ...free.filter((p) => !champIds.has(p.id)).map((p) => ({ kind: 'waiting', p }))]
+      .map((e) => ({ ...e, key: `${e.kind}-${e.p.id}`, col: e.p.wins, next: null }));
+    const endOf = new Map(ends.map((e) => [e.p.id, e.key]));
+    const nextOf = (m) => {
+      if (m.winner === null) return null;
+      const later = all.filter((x) => x.id > m.id && (x.a === m.winner || x.b === m.winner)).sort((x, y) => x.id - y.id)[0];
+      return later ? `m-${later.id}` : endOf.get(m.winner) ?? null;
     };
-    const cols = Array.from({ length: count }, (_, i) => {
-      const matches = rounds[i] ?? [];
-      const left = i < planned ? expected[i] - matches.length : 0;
-      const title = planned && i === planned - 1 ? 'Final' : `Round ${i + 1}`;
-      return `<li class="round"><h3>${title} <span class="hint">on ${i}W</span></h3><ol class="cards">${matches.map(card).join('')}` +
-        `${waitingOn(i).map((p) => `<li class="mcard waiting">${esc(p.name)} waiting ${elapsed(p.freeSince)}</li>`).join('')}` +
-        `${left > 0 ? `<li class="mcard ghost">about ${left} more to play</li>` : ''}</ol></li>`;
-    });
-    if (endedAt && winners.length) {
-      cols.push(`<li class="round"><h3>${winners.length > 1 ? 'Winners' : 'Winner'}</h3><ol class="cards">` +
-        `${winners.map((p) => `<li class="mcard champ">${esc(p.name)} <span class="hint">${p.wins}W</span></li>`).join('')}</ol></li>`);
-    }
-    return `<div class="rounds" role="region" aria-label="Rounds, scroll sideways for later rounds" tabindex="0"><ol>${cols.join('')}</ol></div>`;
+    const nodes = [...all.map((m) => ({ key: `m-${m.id}`, col: m.col, next: nextOf(m), m })), ...ends];
+    if (!nodes.length) return '<p class="hint">No matches yet.</p>';
+    const { slot } = bracketLayout(nodes);
+    const COL = 196;
+    const CARD_W = 160;
+    const CARD_H = 50;
+    const ROW = 60;
+    const HEAD = 42;
+    // Once finalized, rounds still to come get a header too, so the operator sees how far there is to go.
+    const cols = Math.max(expected.length, ...nodes.map((n) => n.col + 1));
+    const x = (n) => n.col * COL;
+    const y = (n) => HEAD + slot.get(n.key) * ROW;
+    const byKey = new Map(nodes.map((n) => [n.key, n]));
+    const row = (name, cls, tag = '') => `<div class="r${cls ? ` ${cls}` : ''}"><span>${esc(name)}</span>${tag ? `<span class="tag">${tag}</span>` : ''}</div>`;
+    const body = (n) => {
+      if (n.kind === 'champ') return row(n.p.name, 'win') + `<div class="r hint"><span>${endedAt ? 'Winner' : 'Last one in'}, ${n.p.wins}W</span></div>`;
+      if (n.kind === 'waiting') return row(n.p.name, '') + `<div class="r hint"><span>waiting ${elapsed(n.p.freeSince)}</span></div>`;
+      const { m } = n;
+      if (m.a === m.b) return row(m.aName, 'win', 'bye');
+      if (m.winner === null) return row(m.aName, '') + row(m.bName, '');
+      return row(m.aName, m.winner === m.a ? 'win' : 'lose', m.winner === m.a ? 'W' : '') + row(m.bName, m.winner === m.b ? 'win' : 'lose', m.winner === m.b ? 'W' : '');
+    };
+    const cls = (n) => (n.kind ? n.kind : n.m.winner === null ? 'live' : '');
+    const title = (col) => {
+      const here = nodes.filter((n) => n.col === col);
+      if (here.length && here.every((n) => n.kind === 'champ')) return champs.length > 1 ? 'Winners' : 'Winner';
+      const left = col < expected.length ? expected[col] - (rounds[col]?.length ?? 0) : 0;
+      return `${expected.length && col === expected.length - 1 ? 'Final' : `Round ${col + 1}`}${left > 0 ? ` <span class="hint">${left} more to play</span>` : ''}`;
+    };
+    const lines = nodes.filter((n) => n.next !== null && byKey.has(n.next)).map((n) => {
+      const to = byKey.get(n.next);
+      const [x1, y1, x2, y2] = [x(n) + CARD_W, y(n) + CARD_H / 2, x(to), y(to) + CARD_H / 2];
+      return `<path d="M${x1} ${y1}H${x2 - (COL - CARD_W) / 2}V${y2}H${x2}"/>`;
+    }).join('');
+    const width = (cols - 1) * COL + CARD_W;
+    const height = HEAD + (Math.max(...nodes.map((n) => slot.get(n.key))) + 1) * ROW;
+    // Each column's header, then its cards top to bottom, so the reading order follows the bracket.
+    const columns = Array.from({ length: cols }, (_, col) => `<h3 style="left:${col * COL}px">${title(col)}</h3>` +
+      nodes.filter((n) => n.col === col).sort((p, q) => slot.get(p.key) - slot.get(q.key))
+        .map((n) => `<div class="bkc${cls(n) ? ` ${cls(n)}` : ''}" style="left:${x(n)}px;top:${y(n)}px">${body(n)}</div>`).join('')).join('');
+    return `<div class="bk-scroll" role="region" aria-label="Bracket, scroll sideways for later rounds" tabindex="0">` +
+      `<div class="bk" style="width:${width}px;height:${height}px"><svg class="bk-lines" width="${width}" height="${height}" aria-hidden="true">${lines}</svg>` +
+      `${columns}</div></div>`;
   };
 
   const older = decided.slice(5);
