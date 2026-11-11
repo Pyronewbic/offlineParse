@@ -1,8 +1,12 @@
 import assert from 'node:assert/strict';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { after, before, beforeEach, describe, test } from 'node:test';
 import { Lcq, bracketGap } from '../src/lcq.js';
 import { LeadStore } from '../src/leads.js';
-import { againstFor, createPortalServer, overdue, runnerPage, runnerVersion } from '../src/web.js';
+import { againstFor, createPortalServer, holdsUpdates, overdue, runnerPage, runnerVersion } from '../src/web.js';
 import { makeConfig, postForm, request } from './helpers.js';
 
 describe('LCQ runner over HTTP', () => {
@@ -564,6 +568,56 @@ describe('LCQ runner over HTTP', () => {
     assert.equal(ended[1], ' open', 'open once ended, to look back');
     assert.match(ended[0], /<h3>Winner<\/h3><ol class="cards"><li class="mcard champ">P1 <span class="hint">2W<\/span><\/li><\/ol>/, 'most wins still in');
     assert.match(ended[0], /role="region" aria-label="Rounds, scroll sideways for later rounds" tabindex="0"/);
+  });
+
+  test('the tablet sees a desk delete then add, even when the new registration reuses the old id', async () => {
+    const cookie = await signIn();
+    const v = async () => JSON.parse((await request({ port, path: '/lcq/version', headers: cookie })).body).v;
+    signUp(2);
+    const before = await v();
+    const last = store.list().at(-1);
+    store.remove(last.id);
+    store.register({ name: 'Chen', phone: '+919876599901', source: 'desk', noticeVersion: 'v', bracket: 'lcq' });
+    assert.equal(store.list().at(-1).id, last.id, 'precondition: the id was reused and the count is the same');
+    assert.notEqual(await v(), before);
+  });
+
+  test('the tablet also sees a write made through another connection to the database', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'lcq-version-'));
+    const path = join(dir, 'leads.db');
+    const mine = new LeadStore(path);
+    try {
+      const runner = new Lcq(mine);
+      const before = runner.version();
+      const other = new DatabaseSync(path);
+      other.exec("INSERT INTO settings (key, value) VALUES ('from-elsewhere', '1')");
+      other.close();
+      assert.notEqual(runner.version(), before);
+    } finally {
+      mine.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('just looking changes nothing: opening the pages again and again keeps the version, so the tablet does not reload', async () => {
+    const cookie = await signIn();
+    signUp(4);
+    startAll();
+    const v = async () => JSON.parse((await request({ port, path: '/lcq/version', headers: cookie })).body).v;
+    const first = await v();
+    for (let i = 0; i < 2; i++) {
+      for (const path of ['/lcq', '/lcq?q=P1', '/lcq/version', '/admin', '/admin/export.csv', '/']) await request({ port, path, headers: cookie });
+    }
+    assert.equal(await v(), first);
+    lcq.result(lcq.state().open[0].id, lcq.state().open[0].a);
+    assert.notEqual(await v(), first, 'positive control: a result moves it');
+  });
+
+  test('a focused field or half-made pick holds off updates, but never for more than a minute idle', () => {
+    assert.equal(holdsUpdates(100, false), true, 'right after a tap');
+    assert.equal(holdsUpdates(1000, false), false, 'idle and nothing in hand: update');
+    assert.equal(holdsUpdates(30_000, true), true, 'a focused field or a pick in progress');
+    assert.equal(holdsUpdates(60_001, true), false, 'a forgotten tap on a box no longer freezes the page');
   });
 
   test('the admin page shows the runner address and PIN', async () => {

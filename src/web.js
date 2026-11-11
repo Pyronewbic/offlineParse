@@ -60,6 +60,12 @@ const waitText = (ms) => {
   const m = Math.max(0, Math.floor(ms / 60000));
   return m < 1 ? 'under 1 min' : m < 60 ? `${m} min` : `${Math.floor(m / 60)} h ${m % 60} min`;
 };
+/**
+ * Whether the tablet holds off swapping in an update: just after any touch, or while a finger is down, a field has
+ * focus or a pick is half made, but never past a minute idle, so a forgotten tap cannot freeze the page.
+ */
+export const holdsUpdates = (idleMs, active) => idleMs < 400 || (active && idleMs < 60_000);
+
 /** The Against choices for a Player: free players on the same wins, or anyone but them with Any wins. */
 export const againstFor = (options, player, any) =>
   options.filter((o) => o.value !== player.value && (any || !player.value || o.dataset.w === player.dataset.w));
@@ -94,19 +100,22 @@ const RUNNER_JS = `(() => {
     const d = a && document.querySelector(a.hash);
     if (d && d.tagName === 'DETAILS') d.open = true;
   });
+  const holdsUpdates = ${holdsUpdates};
   let touching = false;
-  addEventListener('touchstart', () => { touching = true; }, { passive: true });
-  addEventListener('touchend', () => setTimeout(() => { touching = false; }, 400), { passive: true });
+  let interactedAt = 0;
+  const touched = () => { interactedAt = Date.now(); };
+  addEventListener('touchstart', () => { touching = true; touched(); }, { passive: true });
+  // A scroll can cancel a touch instead of ending it; either way the finger is up.
+  for (const t of ['touchend', 'touchcancel']) addEventListener(t, () => { touching = false; touched(); }, { passive: true });
+  for (const t of ['focusin', 'input', 'change', 'keydown']) addEventListener(t, touched, true);
   // Against lists only the Player's wins unless Any wins is ticked; rebuilt, since iOS ignores hidden options.
   const againstFor = ${againstFor};
   const everyone = new WeakMap();
-  let pickedAt = 0;
   addEventListener('change', (e) => {
     const a = document.getElementById('pa');
     const b = document.getElementById('pb');
     const any = document.getElementById('lcq-any');
     if (!a || !b || !any || ![a, any].includes(e.target)) return;
-    pickedAt = Date.now();
     if (!everyone.has(b)) everyone.set(b, [...b.options].slice(1));
     const keep = againstFor(everyone.get(b), a.selectedOptions[0], any.checked);
     const was = b.value;
@@ -115,9 +124,8 @@ const RUNNER_JS = `(() => {
     b.replaceChildren(blank, ...keep);
     b.value = keep.some((o) => o.value === was) ? was : '';
   });
-  // A half-done pick holds off updates for a minute, so the refresh does not wipe it.
-  const picking = () => Date.now() - pickedAt < 60000 && !!(document.getElementById('pa') || {}).value;
-  const busy = () => touching || picking() || ['INPUT', 'SELECT', 'TEXTAREA'].includes(document.activeElement && document.activeElement.tagName);
+  const busy = () => holdsUpdates(Date.now() - interactedAt, touching || !!(document.getElementById('pa') || {}).value ||
+    ['INPUT', 'SELECT', 'TEXTAREA'].includes(document.activeElement && document.activeElement.tagName));
   let version = document.getElementById('version').dataset.version;
   apply();
   // Swap in the new page body when something changed, so the scroll position and folds stay put.

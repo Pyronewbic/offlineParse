@@ -112,15 +112,14 @@ export class Lcq {
     this.db.prepare('INSERT INTO lcq_drops (leadId, at) VALUES (?, ?)').run(leadId, now());
   }
 
-  /** Changes whenever anything the runner shows changes, so the tablet knows when to reload. */
+  /**
+   * Changes whenever anything the runner shows changes, so the tablet knows when to reload. SQLite's count of rows
+   * written on this connection only goes up, so a delete then an add (which can reuse the id) still moves it, and
+   * data_version moves when another connection writes; a write the runner does not show costs one extra update.
+   */
   version() {
-    const n = (sql) => Object.values(this.db.prepare(sql).get())[0] ?? 0;
-    return [
-      this.event(), n("SELECT COUNT(*) FROM leads WHERE bracket = 'lcq'"),
-      n('SELECT MAX(id) FROM lcq_matches'), n('SELECT COUNT(*) FROM lcq_matches'),
-      n('SELECT COUNT(*) FROM lcq_matches WHERE winner IS NOT NULL'), n('SELECT COUNT(*) FROM lcq_drops'),
-      n("SELECT group_concat(coalesce(finalizedAt, '') || '/' || coalesce(endedAt, '')) FROM lcq_games"),
-    ].join('-');
+    const n = (sql) => Object.values(this.db.prepare(sql).get())[0];
+    return `${this.event()}-${n('SELECT total_changes()')}-${n('PRAGMA data_version')}`;
   }
 
   /** Everything the runner page shows for one game, derived from registrations and matches. */
