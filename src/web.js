@@ -311,10 +311,17 @@ table.reg{width:100%;border-collapse:separate;border-spacing:0;font-size:15px;ba
 .tabs{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 16px}
 .tabs a{padding:.4rem .9rem;border:3px solid var(--line);border-radius:999px;font-weight:800;text-decoration:none;background:var(--surface)}
 .tabs a[aria-current=page]{background:var(--pink);color:var(--onPink)}
-.tabs.events{align-items:center}
+.tabs.events{align-items:center;margin:0}
 .tabs.events > span{font-weight:800;margin-right:4px}
-.new-event{margin:0 0 16px}
-.new-event > summary{min-height:44px;padding:.5rem 0;cursor:pointer;font-weight:800}
+.new-event{margin:0}
+.new-event > summary{min-height:36px;padding:.35rem 0;cursor:pointer;font-weight:800}
+.head-row{display:flex;gap:8px 24px;align-items:center;flex-wrap:wrap;margin:0 0 8px}
+.head-row > .toggle{margin:0 0 0 auto}
+.event-tools{display:flex;gap:0 24px;flex-wrap:wrap;margin:0 0 12px}
+.event-tools > details[open]{flex-basis:100%}
+.filters{display:flex;gap:8px 24px;align-items:center;flex-wrap:wrap;margin:0 0 16px}
+.filters > .tabs{margin:0}
+.filters > .hint{margin:0 0 0 auto}
 .new-event form{max-width:36rem}
 button.quiet{min-height:40px;padding:.4rem .8rem;font-size:.85rem;color:var(--error);background:transparent;border:2px solid var(--error);box-shadow:none}
 .empty{padding:28px 14px;text-align:center;color:var(--muted)}
@@ -522,7 +529,7 @@ ${!fallback ? '<p class="hint">The only event cannot be deleted.</p>'
 </details>`;
   const past = shownEvent.code !== current.code
     ? `<p class="flash" role="status">You are looking at ${esc(shownEvent.name)}. New sign-ups go to ${esc(current.name)}.</p>` : '';
-  const newEvent = `<details class="new-event"${eventError ? ' open' : ''}><summary>Start a new event</summary>
+  const newEvent = `<details class="new-event"${eventError ? ' open' : ''}><summary>+ Start a new event</summary>
 <form method="post" action="/admin/event" class="fields">
   <input type="hidden" name="token" value="${esc(token)}">${viewFields(view)}
   ${errorBlock(eventError)}
@@ -538,17 +545,23 @@ ${adminHeader(cfg, brand, 'Registrations',
     `<a href="${esc(adminUrl(view))}">Refresh</a><a class="btn secondary" href="${esc(exportUrl)}">Download CSV</a>`)}
 ${warnings.map((w) => `<p class="error" role="alert">${esc(w)}</p>`).join('')}
 ${flash ? `<p class="flash" role="status">${flash}</p>` : ''}
+<div class="head-row">
 <nav class="tabs events" aria-label="Events"><span>Event</span>${eventLinks}</nav>
-${newEvent}
-${past}
-${manage}
 <form method="post" action="/admin/bracket" class="toggle">
   <input type="hidden" name="token" value="${esc(token)}">${viewFields(view)}
   <span>New sign-ups go to</span>${toggle}
 </form>
+</div>
+${past}
+<div class="event-tools">
+${manage}
+${newEvent}
+</div>
+<div class="filters">
 <nav class="tabs" aria-label="Brackets">${tabs}</nav>
 ${gameLinks ? `<nav class="tabs" aria-label="Games">${gameLinks}</nav>` : ''}
 ${runner ? `<p class="hint">LCQ runner for a tablet on the booth Wi-Fi: <strong>${esc(runner.url)}</strong>, PIN <strong>${esc(runner.pin)}</strong></p>` : ''}
+</div>
 <dl class="stats">
   <div class="stat"><dt>Total</dt><dd>${leads.length}</dd></div>
   <div class="stat"><dt>Wi-Fi form</dt><dd>${bySource('form')}</dd></div>
