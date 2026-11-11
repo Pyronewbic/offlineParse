@@ -30,11 +30,11 @@ test('toIST converts UTC to India time, including across midnight', () => {
 test('leadsCsv has readable headers, no socials columns, and India-time sign-up', () => {
   const lead = { id: 1, name: 'A', phone: '+919876543210', source: 'form', eventCode: 'E', consentAt: 'x',
     noticeVersion: 'v', createdAt: '2026-10-15T13:48:30Z', updatedAt: 'x', socialsSentAt: '2026-10-15T14:00:00Z' };
-  const csv = leadsCsv([{ ...lead, bracket: 'normal', game: '' }, { ...lead, id: 2, source: 'desk', bracket: 'lcq', game: '=SF6' }]);
+  const csv = leadsCsv([{ ...lead, bracket: 'normal', game: '', email: 'a@x.in' }, { ...lead, id: 2, source: 'desk', bracket: 'lcq', game: '=SF6', email: '=1+1@x.in' }]);
   const [header, first, second] = csv.replace(/^\uFEFF/, '').split('\r\n');
-  assert.equal(header, 'ID,Name,Bracket,Game,Mobile number,Came in via,Event,Signed up (IST),Notice version');
-  assert.equal(first, '1,A,Normal,,+919876543210,Wi-Fi form,E,2026-10-15 19:18 IST,v');
-  assert.equal(second, "2,A,LCQ,'=SF6,+919876543210,Desk,E,2026-10-15 19:18 IST,v", 'a game name cannot start a formula');
+  assert.equal(header, 'ID,Name,Bracket,Game,Mobile number,Email,Came in via,Event,Signed up (IST),Notice version');
+  assert.equal(first, '1,A,Normal,,+919876543210,a@x.in,Wi-Fi form,E,2026-10-15 19:18 IST,v');
+  assert.equal(second, "2,A,LCQ,'=SF6,+919876543210,'=1+1@x.in,Desk,E,2026-10-15 19:18 IST,v", 'a game name or email cannot start a formula');
   assert.ok(!/socials|Socials|2026-10-15T14:00/.test(csv), 'a stored socials date never reaches the sheet');
 });
 
@@ -75,8 +75,8 @@ describe('lead files', () => {
     assert.equal(readFileSync(csvPath, 'utf8'), leadsCsv(store.list()));
     const rows = csvRows(csvPath);
     assert.equal(rows.length, 2);
-    assert.match(rows[0], /^1,Asha,Normal,,\+919876543210,Wi-Fi form,EVT26,\d{4}-\d\d-\d\d \d\d:\d\d IST,v1$/);
-    assert.match(rows[1], /^2,Ravi,Normal,,\+919123456789,Desk,EVT26,/);
+    assert.match(rows[0], /^1,Asha,Normal,,\+919876543210,,Wi-Fi form,EVT26,\d{4}-\d\d-\d\d \d\d:\d\d IST,v1$/);
+    assert.match(rows[1], /^2,Ravi,Normal,,\+919123456789,,Desk,EVT26,/);
     assert.deepEqual(readdirSync(dir).filter((f) => f.endsWith('.tmp')), [], 'no temp files left behind');
   });
 
@@ -182,9 +182,9 @@ describe('lead files', () => {
     const { port } = server.address();
     try {
       const distinct = Array.from({ length: 40 }, (_, i) =>
-        postForm(port, '/submit', { name: `Guest ${i}`, phone: `98765${String(i).padStart(5, '0')}`, consent: 'yes' }));
+        postForm(port, '/submit', { name: `Guest ${i}`, phone: `98765${String(i).padStart(5, '0')}`, email: 'guest@example.com', consent: 'yes' }));
       const same = Array.from({ length: 10 }, (_, i) =>
-        postForm(port, '/submit', { name: `Twin ${i}`, phone: '9000000000', consent: 'yes' }));
+        postForm(port, '/submit', { name: `Twin ${i}`, phone: '9000000000', email: 'guest@example.com', consent: 'yes' }));
       const results = await Promise.all([...distinct, ...same]);
       assert.ok(results.slice(0, 40).every((r) => r.status === 200), 'positive control: every distinct number registered');
       const twins = results.slice(40).map((r) => r.status).sort();
@@ -229,7 +229,7 @@ describe('deleting a registration', () => {
     files = new LeadFiles({ csvPath: paths().csv, logPath: paths().log, onError: () => {} });
     store = new LeadStore(paths().db, { files, firstEvent: { code: 'EVT26', name: 'Event XYZ' } });
   };
-  const reg = (name, phone) => store.register({ name, phone, source: 'form', noticeVersion: 'v1' });
+  const reg = (name, phone) => store.register({ name, phone, email: `${name.split(' ')[0].toLowerCase()}@quokka-mail.in`, source: 'form', noticeVersion: 'v1' });
   const rawEverywhere = () => readdirSync(dir).map((f) => readFileSync(join(dir, f)).toString('latin1')).join('\n');
 
   beforeEach(() => {
@@ -247,6 +247,7 @@ describe('deleting a registration', () => {
     reg('Asha Rao', '+919876543210');
     assert.ok(rawEverywhere().includes('Zanzibar Quokka'), 'positive control: the name is on disk before deletion');
     assert.ok(rawEverywhere().includes('+919111122222'));
+    assert.ok(rawEverywhere().includes('zanzibar@quokka-mail.in'), 'and the email');
 
     const removed = store.remove(1);
     assert.equal(removed.name, 'Zanzibar Quokka');
@@ -255,6 +256,7 @@ describe('deleting a registration', () => {
     const raw = rawEverywhere();
     assert.ok(!raw.includes('Zanzibar Quokka'), 'name gone from every file in the data folder');
     assert.ok(!raw.includes('+919111122222') && !raw.includes('9111122222'), 'number gone from every file');
+    assert.ok(!raw.includes('zanzibar@quokka-mail.in'), 'email gone from every file');
     assert.ok(raw.includes('Asha Rao') && raw.includes('+919876543210'), 'the other registration is intact');
 
     const entries = logEntries(paths().log);

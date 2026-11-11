@@ -38,7 +38,7 @@ describe('games on the sign-up form', () => {
     s.store.close();
   });
   beforeEach(() => s.store.db.exec('DELETE FROM leads'));
-  const guest = (games, extra = {}) => post(s.port, '/submit', { name: 'Asha Rao', phone: '98765 43210', consent: 'yes', games, ...extra });
+  const guest = (games, extra = {}) => post(s.port, '/submit', { name: 'Asha Rao', phone: '98765 43210', email: 'guest@example.com', consent: 'yes', games, ...extra });
   const rows = () => s.store.list().map((l) => [l.game, l.bracket]);
 
   test('the form has a checkbox per game, none ticked, with names escaped', async () => {
@@ -101,9 +101,9 @@ describe('a booth with one game, or none', () => {
       const plainForm = (await request({ port: none.port, path: '/' })).body;
       assert.match(plainForm, /name="consent"/, 'positive control: the form rendered');
       assert.ok(!plainForm.includes('name="games"'));
-      assert.equal((await post(none.port, '/submit', { name: 'Asha', phone: '9876543210', consent: 'yes' })).status, 200);
+      assert.equal((await post(none.port, '/submit', { name: 'Asha', phone: '9876543210', email: 'guest@example.com', consent: 'yes' })).status, 200);
       assert.equal(none.store.list()[0].game, '');
-      assert.equal((await post(none.port, '/submit', { name: 'Asha', phone: '9876543210', consent: 'yes', games: 'SF6' })).status, 400,
+      assert.equal((await post(none.port, '/submit', { name: 'Asha', phone: '9876543210', email: 'guest@example.com', consent: 'yes', games: 'SF6' })).status, 400,
         'a game posted to a booth with none is refused');
     } finally {
       for (const x of [one, none]) {
@@ -126,7 +126,7 @@ describe('games on the admin page', () => {
   beforeEach(() => s.store.db.exec('DELETE FROM leads'));
   const page = async (path = '/admin') => (await request({ port: s.port, path })).body;
   const token = async () => (await page()).match(/name="token" value="([^"]+)"/)[1];
-  const add = async (fields) => post(s.port, '/admin/add', { token: await token(), name: 'Desk Dev', phone: '9000012345', consent: 'yes', bracket: 'lcq', ...fields });
+  const add = async (fields) => post(s.port, '/admin/add', { token: await token(), name: 'Desk Dev', phone: '9000012345', email: 'guest@example.com', consent: 'yes', bracket: 'lcq', ...fields });
 
   test('the desk ticks games like a guest; repeats are named, partial repeats add the rest', async () => {
     const first = await add({ games: ['SSBU', 'SF6'] });
@@ -163,7 +163,7 @@ describe('games on the admin page', () => {
 
   test('a desk entry while a game filter is on keeps the filter, and posts its games, not the filter', async () => {
     const res = await post(s.port, '/admin/add', {
-      token: await token(), game: 'SF6', name: 'Desk Dev', phone: '9000012345', consent: 'yes', bracket: 'normal', games: ['SSBU'],
+      token: await token(), game: 'SF6', name: 'Desk Dev', phone: '9000012345', email: 'guest@example.com', consent: 'yes', bracket: 'normal', games: ['SSBU'],
     });
     assert.equal(res.headers.location, '/admin?game=SF6&msg=added');
     assert.deepEqual(s.store.list().map((l) => l.game), ['SSBU']);
@@ -175,7 +175,7 @@ describe('games on the admin page', () => {
     try {
       const t = (await request({ port: big.port, path: '/admin' })).body.match(/name="token" value="([^"]+)"/)[1];
       const res = await post(big.port, '/admin/add', {
-        token: t, tab: 'all', event: '', game: '', name: 'Asha', phone: '9876543210', consent: 'yes', bracket: 'normal', games: many,
+        token: t, tab: 'all', event: '', game: '', name: 'Asha', phone: '9876543210', email: 'guest@example.com', consent: 'yes', bracket: 'normal', games: many,
       });
       assert.equal(res.status, 303);
       assert.equal(big.store.list().length, 12);
@@ -364,7 +364,7 @@ describe('LCQ runner tabs', () => {
     s.lcq.finalize('SF6');
     s.store.setBracket('lcq');
     try {
-      const res = await post(s.port, '/submit', { name: 'Late', phone: '9876599999', consent: 'yes', games: ['SSBU', 'SF6'] });
+      const res = await post(s.port, '/submit', { name: 'Late', phone: '9876599999', email: 'guest@example.com', consent: 'yes', games: ['SSBU', 'SF6'] });
       assert.equal(res.status, 200);
       assert.match(res.body, /<p>The <strong>SF6<\/strong> LCQ bracket is full; staff may still add you\.<\/p>/);
       assert.ok(!/SSBU<\/strong> LCQ bracket/.test(res.body));
@@ -386,12 +386,12 @@ describe('LCQ runner tabs', () => {
       assert.match(lcqForm, /<input type="checkbox" name="games" value="SSBU"><span>SSBU<\/span>/);
       const runner = await page('?game=SF6');
       assert.match(runner, /aria-current="page">SF6 \(2\), ended<\/a>/, 'the tab says ended, not how many are ready');
-      const stale = await post(s.port, '/submit', { name: 'Late', phone: '9876599999', consent: 'yes', games: ['SSBU', 'SF6'] });
+      const stale = await post(s.port, '/submit', { name: 'Late', phone: '9876599999', email: 'guest@example.com', consent: 'yes', games: ['SSBU', 'SF6'] });
       assert.equal(stale.status, 409);
       assert.match(stale.body, /The SF6 LCQ has ended; untick it to register for the rest\./);
       assert.match(stale.body, /value="SSBU" checked>/, 'the other game stays ticked');
       assert.equal(s.store.list().filter((l) => l.name === 'Late').length, 0, 'nothing saved');
-      const ok = await post(s.port, '/submit', { name: 'Late', phone: '9876599999', consent: 'yes', games: ['SSBU'] });
+      const ok = await post(s.port, '/submit', { name: 'Late', phone: '9876599999', email: 'guest@example.com', consent: 'yes', games: ['SSBU'] });
       assert.equal(ok.status, 200, 'positive control: the open game still takes sign-ups');
     } finally {
       s.store.setBracket('normal');

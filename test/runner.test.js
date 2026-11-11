@@ -325,7 +325,7 @@ describe('LCQ runner over HTTP', () => {
     store.db.exec(`UPDATE leads SET createdAt = '2026-01-01T00:00:00Z'; UPDATE lcq_games SET finalizedAt = '2026-01-01T00:00:00.500Z'`);
 
     store.setBracket('lcq');
-    const thanks = await postForm(port, '/submit', { name: 'Late Comer', phone: '9876599999', consent: 'yes' });
+    const thanks = await postForm(port, '/submit', { name: 'Late Comer', phone: '9876599999', email: 'guest@example.com', consent: 'yes' });
     assert.equal(thanks.status, 200);
     assert.match(thanks.body, /<p>The LCQ bracket is full; staff may still add you\.<\/p>/);
     const body = await page();
@@ -338,7 +338,7 @@ describe('LCQ runner over HTTP', () => {
       'a full bracket needs no tick');
     assert.ok(back.includes('Late Comer'), 'Unfinalize lets them in');
     store.setBracket('normal');
-    const normal = await postForm(port, '/submit', { name: 'Normal One', phone: '9876599998', consent: 'yes' });
+    const normal = await postForm(port, '/submit', { name: 'Normal One', phone: '9876599998', email: 'guest@example.com', consent: 'yes' });
     assert.ok(!normal.body.includes('bracket is full'), 'not finalized now, and Normal sign-ups never hear it');
   });
 
@@ -398,10 +398,20 @@ describe('LCQ runner over HTTP', () => {
     assert.ok(!(await request({ port, path: '/' })).body.includes('LCQ has ended'), 'not while sign-ups go to Normal');
     store.setBracket('lcq');
     assert.match((await request({ port, path: '/' })).body, /<p>The LCQ has ended, so it is closed to new sign-ups\. Ask at the desk\.<\/p>/);
-    const res = await postForm(port, '/submit', { name: 'Late Comer', phone: '9876599999', consent: 'yes' });
+    const res = await postForm(port, '/submit', { name: 'Late Comer', phone: '9876599999', email: 'guest@example.com', consent: 'yes' });
     assert.equal(res.status, 409);
     assert.match(res.body, /<p class="error" role="alert">The LCQ has ended, so it is closed to new sign-ups\.<\/p>/);
     assert.equal(store.list().length, 2, 'nothing saved');
+  });
+
+  test('emails never reach the tablet, not even through Find a player', async () => {
+    const cookie = await signIn();
+    store.register({ name: 'Asha', phone: '+919876500001', email: 'asha.secret@example.com', source: 'form', noticeVersion: 'v', bracket: 'lcq' });
+    const page = (await request({ port, path: '/lcq', headers: cookie })).body;
+    assert.ok(page.includes('Asha'), 'positive control: the player is on the tablet');
+    assert.ok(!page.includes('asha.secret'), 'no email on the page');
+    const found = (await request({ port, path: '/lcq?q=asha.secret', headers: cookie })).body;
+    assert.match(found, /Nobody matches "asha\.secret"/, 'and no search by email');
   });
 
   test('the admin page shows the runner address and PIN', async () => {

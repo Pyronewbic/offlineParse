@@ -139,7 +139,7 @@ if (!dnsUp) {
       expect(res.status === 303, `got ${res.status}`);
     });
     const signUp = () => {
-      const fields = new URLSearchParams({ name, phone, consent: 'yes' });
+      const fields = new URLSearchParams({ name, phone, email: 'try-check@example.com', consent: 'yes' });
       for (const g of games) fields.append('games', g);
       return request({ host: portal, path: '/submit', method: 'POST', fields });
     };

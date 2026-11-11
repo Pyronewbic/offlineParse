@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, test } from 'node:test';
 import { DatabaseSync } from 'node:sqlite';
-import { LeadStore, ValidationError, cleanName, normalizePhone } from '../src/leads.js';
+import { LeadStore, ValidationError, cleanEmail, cleanName, normalizePhone } from '../src/leads.js';
 
 describe('normalizePhone', () => {
   test('Indian formats normalize to E.164', () => {
@@ -38,6 +38,20 @@ describe('normalizePhone', () => {
       '\uFF19\uFF18\uFF17\uFF16\uFF15\uFF14\uFF13\uFF12\uFF11\uFF10', // fullwidth digits
       '9'.repeat(200), '98765\u000043210']) {
       assert.throws(() => normalizePhone(raw), ValidationError, String(raw));
+    }
+  });
+});
+
+describe('cleanEmail', () => {
+  test('trims and lower-cases a usual address', () => {
+    assert.equal(cleanEmail('  Asha.Rao+LCQ@Example.CO.in '), 'asha.rao+lcq@example.co.in');
+  });
+
+  test('refuses an empty, malformed or overlong address, naming the email field', () => {
+    const bad = ['', '   ', 'asha', 'asha@', '@example.com', 'asha@example', 'a b@example.com', 'a@b@example.com',
+      'asha@exam ple.com', 'asha\u0000@example.com', 'asha@example.com\u202E', `${'a'.repeat(250)}@x.in`];
+    for (const raw of bad) {
+      assert.throws(() => cleanEmail(raw), (e) => e instanceof ValidationError && e.field === 'email', JSON.stringify(raw));
     }
   });
 });
@@ -155,6 +169,19 @@ describe('brackets', () => {
     assert.deepEqual(store.list().map((l) => [l.id, l.bracket, l.source]), [[1, 'normal', 'form'], [2, 'lcq', 'desk']]);
     assert.equal(reg(store, '+919123456789', { source: 'desk' }).created, true, 'new desk entries are accepted');
     assert.throws(() => reg(store, '+919000011111', { source: 'whatsapp' }), /unknown source/);
+    store.close();
+  });
+
+  test('a database from before email gains an empty email column and keeps every row, without a rebuild', () => {
+    const path = join(dir, 'leads.db');
+    const first = new LeadStore(path, { firstEvent: { code: 'E', name: 'October' } });
+    reg(first, '+919876543210');
+    first.db.exec('ALTER TABLE leads DROP COLUMN email');
+    first.close();
+    const store = new LeadStore(path, { firstEvent: { code: 'E', name: 'October' } });
+    assert.deepEqual(store.list().map((l) => [l.phone, l.email]), [['+919876543210', '']]);
+    assert.equal(reg(store, '+919123456789', { email: 'ravi@example.com' }).created, true);
+    assert.equal(store.list()[1].email, 'ravi@example.com');
     store.close();
   });
 

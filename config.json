@@ -10,6 +10,6 @@
   "dbPath": "data/leads.db",
   "logoLight": "assets/VERSUS EXPERIENCE _ LOGO _2025-05.png",
   "logoDark": "assets/VERSUS EXPERIENCE _ LOGO _2025-06.png",
-  "noticeVersion": "2026-10-v1",
+  "noticeVersion": "2026-11-v2",
   "games": ["SSBU", "SF6", "Avatar Legends"]
 }

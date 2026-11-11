@@ -7,7 +7,7 @@ import { GAME_MAX } from './config.js';
 import { BRACKETS, EVENT_CODE } from './leads.js';
 
 const CSV_FORMULA_PREFIXES = ['=', '+', '-', '@', '\t', '\r'];
-const LOG_FIELDS = ['id', 'name', 'phone', 'source', 'eventCode', 'bracket', 'game'];
+const LOG_FIELDS = ['id', 'name', 'phone', 'email', 'source', 'eventCode', 'bracket', 'game'];
 const MAX_LOG_REWRITE_BYTES = 64 * 1024 * 1024;
 export const CSV_RETRY_MS = 15000;
 // Windows refuses to replace a file another app holds open, which is what Excel does with a CSV.
@@ -86,6 +86,7 @@ const SHEET = [
   ['Bracket', (l) => BRACKETS[l.bracket] ?? l.bracket, true],
   ['Game', (l) => l.game, true],
   ['Mobile number', (l) => l.phone, false],
+  ['Email', (l) => l.email, true],
   ['Came in via', (l) => SOURCE_LABELS[l.source] ?? l.source, true],
   ['Event', (l) => l.eventCode, true],
   ['Signed up (IST)', (l) => toIST(l.createdAt), false],

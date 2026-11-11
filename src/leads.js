@@ -7,11 +7,12 @@ export const SOURCES = ['form', 'desk'];
 // Gaming brackets. Staff pick which one new sign-ups join; a number can register once in each.
 export const BRACKETS = { normal: 'Normal', lcq: 'LCQ' };
 export const NAME_MAX = 80;
+export const EMAIL_MAX = 254;
 const V1_COLUMNS = [
   'id', 'name', 'phone', 'source', 'eventCode', 'consentAt',
   'noticeVersion', 'createdAt', 'updatedAt', 'socialsSentAt',
 ];
-export const COLUMNS = [...V1_COLUMNS, 'bracket', 'game'];
+export const COLUMNS = [...V1_COLUMNS, 'bracket', 'game', 'email'];
 
 // Bidi overrides can make a stored name render as different text in the admin view.
 const STRIP_CHARS = /[\p{Cc}\p{Cs}\p{Co}\p{Cn}\u202A-\u202E\u2066-\u2069]/gu;
@@ -35,6 +36,7 @@ CREATE TABLE IF NOT EXISTS leads (
   socialsSentAt TEXT,
   bracket TEXT NOT NULL DEFAULT 'normal' CHECK (bracket IN ('normal', 'lcq')),
   game TEXT NOT NULL DEFAULT '',
+  email TEXT NOT NULL DEFAULT '',
   ${UNIQUE_RULE}
 );`;
 const SCHEMA = `${LEADS_TABLE}
@@ -48,7 +50,13 @@ CREATE TABLE IF NOT EXISTS events (code TEXT PRIMARY KEY, name TEXT NOT NULL, cr
  */
 function upgrade(db) {
   const table = db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'leads'").get();
-  if (!table || (table.sql.includes(UNIQUE_RULE) && !table.sql.includes("'whatsapp'"))) return;
+  if (!table) return;
+  if (!table.sql.includes(UNIQUE_RULE) || table.sql.includes("'whatsapp'")) rebuild(db);
+  // Email came after the last rebuild; registrations from before it have none.
+  if (!db.prepare('PRAGMA table_info(leads)').all().some((c) => c.name === 'email')) db.exec("ALTER TABLE leads ADD COLUMN email TEXT NOT NULL DEFAULT ''");
+}
+
+function rebuild(db) {
   const old = new Set(db.prepare('PRAGMA table_info(leads)').all().map((c) => c.name));
   const cols = COLUMNS.filter((c) => old.has(c));
   const count = (name) => db.prepare(`SELECT COUNT(*) AS n FROM ${name}`).get().n;
@@ -102,6 +110,17 @@ export function normalizePhone(raw) {
   return `+91${indianMobile(s)}`;
 }
 
+/** A trimmed, lower-case email of the usual name@domain.tld shape. */
+export function cleanEmail(raw) {
+  const email = String(raw ?? '').trim().toLowerCase();
+  if (!email) throw new ValidationError('Please enter your email.', 'email');
+  if (email.length > EMAIL_MAX) throw new ValidationError('That email is too long.', 'email');
+  if (!/^[^\s@\p{C}]+@[^\s@\p{C}]+\.[^\s@\p{C}]+$/u.test(email)) {
+    throw new ValidationError('Check your email: it should look like name@example.com.', 'email');
+  }
+  return email;
+}
+
 export function cleanName(raw) {
   const name = String(raw ?? '').replace(STRIP_CHARS, '').split(/\s+/).filter(Boolean).join(' ');
   if (!name) throw new ValidationError('Please enter your name.', 'name');
@@ -127,8 +146,8 @@ export class LeadStore {
     this.stmts = {
       byPhone: this.db.prepare(`SELECT ${cols} FROM leads WHERE phone = ? AND bracket = ? AND game = ? AND eventCode = ?`),
       insert: this.db.prepare(
-        'INSERT INTO leads (phone, name, source, eventCode, consentAt, noticeVersion, createdAt, updatedAt, bracket, game)' +
-        ' VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(phone, bracket, game, eventCode) DO NOTHING'),
+        'INSERT INTO leads (phone, name, source, eventCode, consentAt, noticeVersion, createdAt, updatedAt, bracket, game, email)' +
+        ' VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(phone, bracket, game, eventCode) DO NOTHING'),
       getSetting: this.db.prepare('SELECT value FROM settings WHERE key = ?'),
       setSetting: this.db.prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value'),
       list: this.db.prepare(`SELECT ${cols} FROM leads ORDER BY id`),
@@ -214,13 +233,14 @@ export class LeadStore {
    * Register a phone number once per game and bracket in an event. A number already there is left untouched and
    * reported as { created: false, existing }; the UNIQUE constraint decides, so there is no race.
    */
-  register({ name, phone, source, noticeVersion, bracket = this.bracket(), game = '', eventCode = this.currentEvent().code }) {
+  register({ name, phone, email = '', source, noticeVersion, bracket = this.bracket(), game = '', eventCode = this.currentEvent().code }) {
     if (!SOURCES.includes(source)) throw new Error(`unknown source ${source}`);
     if (!Object.hasOwn(BRACKETS, bracket)) throw new Error(`unknown bracket ${bracket}`);
     if (!this.stmts.event.get(eventCode)) throw new Error(`unknown event ${eventCode}`);
     if (typeof game !== 'string') throw new Error('game must be a string');
+    if (typeof email !== 'string') throw new Error('email must be a string');
     const ts = now();
-    const { changes, lastInsertRowid } = this.stmts.insert.run(phone, name, source, eventCode, ts, noticeVersion, ts, ts, bracket, game);
+    const { changes, lastInsertRowid } = this.stmts.insert.run(phone, name, source, eventCode, ts, noticeVersion, ts, ts, bracket, game, email);
     if (changes === 0) return { created: false, existing: { ...this.stmts.byPhone.get(phone, bracket, game, eventCode) } };
     this.changed('lead.created', Number(lastInsertRowid));
     return { created: true };

@@ -187,7 +187,7 @@ describe('events on the admin page', () => {
 
   const admin = async (path = '/admin') => (await request({ port, path })).body;
   const token = async () => (await admin()).match(/name="token" value="([^"]+)"/)[1];
-  const guest = (name, phone) => postForm(port, '/submit', { name, phone, consent: 'yes' });
+  const guest = (name, phone) => postForm(port, '/submit', { name, phone, email: 'guest@example.com', consent: 'yes' });
 
   test('Start new event switches sign-ups, keeps the earlier event viewable, and each event downloads its own CSV', async () => {
     assert.equal((await guest('Old Asha', '9876543210')).status, 200);
@@ -224,7 +224,7 @@ describe('events on the admin page', () => {
 
   test('a desk entry made while viewing an earlier event joins the current one, and the page shows it there', async () => {
     const t = await token();
-    const res = await postForm(port, '/admin/add', { token: t, event: 'EVT26', name: 'Desk Dev', phone: '9000012345', consent: 'yes', bracket: 'normal' });
+    const res = await postForm(port, '/admin/add', { token: t, event: 'EVT26', name: 'Desk Dev', phone: '9000012345', email: 'guest@example.com', consent: 'yes', bracket: 'normal' });
     assert.equal(res.headers.location, '/admin?msg=added');
     assert.equal(store.list().find((l) => l.name === 'Desk Dev').eventCode, store.currentEvent().code);
   });

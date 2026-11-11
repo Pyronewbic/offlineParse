@@ -6,7 +6,7 @@ import { LeadStore } from '../src/leads.js';
 import { MAX_BODY, createPortalServer } from '../src/web.js';
 import { makeConfig, postForm, request } from './helpers.js';
 
-const VALID = { name: 'Asha Rao', phone: '98765 43210', consent: 'yes' };
+const VALID = { name: 'Asha Rao', phone: '98765 43210', email: 'guest@example.com', consent: 'yes' };
 
 function lanAddress() {
   return Object.values(networkInterfaces()).flat()
@@ -89,9 +89,39 @@ describe('portal server', () => {
       ['Asha Rao', '+919876543210', 'form', 'EVT26']);
   });
 
+  test('the email is asked for, stored lower-case, shown back to the guest and to the desk, searchable and in the CSV', async () => {
+    const form = (await request({ port })).body;
+    assert.match(form, /<label for="email">Email<\/label>\s*<input id="email" name="email" type="email" inputmode="email" autocomplete="email"[^>]* required value="">/);
+    assert.match(form, /keeping my name, number and email for this event's registration/);
+    const thanks = await postForm(port, '/submit', { ...VALID, email: ' Asha.Rao@Example.com ' });
+    assert.equal(thanks.status, 200);
+    assert.match(thanks.body, /on <strong class="nowrap">\+91 98765 43210<\/strong>, <strong>asha\.rao@example\.com<\/strong>\./, 'the guest can spot a typo');
+    assert.equal(store.list()[0].email, 'asha.rao@example.com');
+    const admin = (await request({ port, path: '/admin' })).body;
+    assert.match(admin, /<th scope="col">Mobile<\/th><th scope="col">Email<\/th>/);
+    assert.match(admin, /<td class="num">\+91 98765 43210<\/td><td>asha\.rao@example\.com<\/td>/);
+    assert.match(admin, /keeping their name, number and email/, 'the desk reads the same notice');
+    assert.match((await request({ port, path: '/admin?q=rao%40example' })).body, /1 match for "rao@example"/);
+    assert.match((await request({ port, path: '/admin/export.csv' })).body, /,\+919876543210,asha\.rao@example\.com,Wi-Fi form,/);
+    const hostile = await postForm(port, '/submit', { ...VALID, phone: '9123456789', email: '"><script>x</script>@evil.in' });
+    assert.equal(hostile.status, 200, 'odd but address-shaped');
+    assert.ok(!hostile.body.includes('<script>x') && !(await request({ port, path: '/admin' })).body.includes('<script>x'), 'escaped everywhere');
+  });
+
+  test('the desk needs an email too', async () => {
+    const token = await adminToken();
+    const none = await postForm(port, '/admin/add', { name: 'Ravi', phone: '9123456789', consent: 'yes', token });
+    assert.equal(none.status, 400);
+    assert.match(none.body, /Please enter your email\./);
+    assert.equal(store.list().length, 0);
+    assert.equal((await postForm(port, '/admin/add', { name: 'Ravi', phone: '9123456789', email: 'Ravi@X.in', consent: 'yes', token })).status, 303);
+    assert.deepEqual(store.list().map((l) => [l.source, l.email]), [['desk', 'ravi@x.in']]);
+  });
+
   test('invalid submissions are rejected and nothing is stored', async () => {
-    const cases = [[{ ...VALID, consent: '' }, 'consent'], [{ name: 'Asha', phone: '98765 43210' }, 'consent'],
-      [{ ...VALID, phone: '12345' }, 'phone'], [{ ...VALID, name: '   ' }, 'name'], [{}, 'name']];
+    const cases = [[{ ...VALID, consent: '' }, 'consent'], [{ name: 'Asha', phone: '98765 43210', email: 'a@b.in' }, 'consent'],
+      [{ ...VALID, phone: '12345' }, 'phone'], [{ ...VALID, name: '   ' }, 'name'], [{}, 'name'],
+      [{ ...VALID, email: '' }, 'email'], [{ ...VALID, email: 'asha.example.com' }, 'email'], [{ ...VALID, email: 'a b@x.in' }, 'email']];
     for (const [fields, field] of cases) {
       const res = await postForm(port, '/submit', fields);
       assert.equal(res.status, 400, JSON.stringify(fields));
@@ -107,7 +137,7 @@ describe('portal server', () => {
   test('a number that is already registered is refused under the phone field', async () => {
     assert.equal((await postForm(port, '/submit', VALID)).status, 200);
     for (const phone of ['98765 43210', '+91 98765 43210', '098765-43210']) {
-      const res = await postForm(port, '/submit', { name: 'Someone Else', phone, consent: 'yes' });
+      const res = await postForm(port, '/submit', { name: 'Someone Else', phone, email: 'guest@example.com', consent: 'yes' });
       assert.equal(res.status, 409, phone);
       assert.match(res.body, /<p class="field-error" id="phone-error" role="alert">This number is already registered for Normal\./);
       assert.match(res.body, /value="Someone Else"/, 'what they typed is kept');
@@ -118,7 +148,7 @@ describe('portal server', () => {
 
   test('admin add refuses an already-registered number and names who has it', async () => {
     await postForm(port, '/submit', VALID);
-    const res = await postForm(port, '/admin/add', { consent: 'yes', name: 'Ravi', phone: '9876543210', token: await adminToken() });
+    const res = await postForm(port, '/admin/add', { email: 'guest@example.com', consent: 'yes', name: 'Ravi', phone: '9876543210', token: await adminToken() });
     assert.equal(res.status, 409);
     assert.match(res.body, /\+91 98765 43210 is already registered for Normal, as Asha Rao\./);
     assert.equal(store.list().length, 1);
@@ -163,7 +193,7 @@ describe('portal server', () => {
 
   test('admin lists registrations newest first, numbered down, with stats and no socials tools', async () => {
     await postForm(port, '/submit', VALID);
-    await postForm(port, '/admin/add', { consent: 'yes', name: 'Ravi Kumar', phone: '91234 56789', token: await adminToken() });
+    await postForm(port, '/admin/add', { email: 'guest@example.com', consent: 'yes', name: 'Ravi Kumar', phone: '91234 56789', token: await adminToken() });
     await postForm(port, '/submit', { ...VALID, name: 'Meera', phone: '9000011111' });
     const res = await request({ port, path: '/admin' });
     assert.equal(res.status, 200);
@@ -205,7 +235,7 @@ describe('portal server', () => {
   });
 
   test('admin flash messages come from a fixed list; anything else in the URL is ignored', async () => {
-    const added = await postForm(port, '/admin/add', { consent: 'yes', name: 'Ravi', phone: '9123456789', token: await adminToken() });
+    const added = await postForm(port, '/admin/add', { email: 'guest@example.com', consent: 'yes', name: 'Ravi', phone: '9123456789', token: await adminToken() });
     assert.equal(added.headers.location, '/admin?msg=added');
     assert.match((await request({ port, path: '/admin?msg=added' })).body, /<p class="flash" role="status">Registration added\.<\/p>/);
     for (const msg of ['<b>hi</b>', 'constructor', 'toString', '__proto__']) {
@@ -216,7 +246,7 @@ describe('portal server', () => {
   });
 
   test('a failed admin add keeps what was typed', async () => {
-    const res = await postForm(port, '/admin/add', { consent: 'yes', name: 'Ravi "R"', phone: '12345', token: await adminToken() });
+    const res = await postForm(port, '/admin/add', { email: 'guest@example.com', consent: 'yes', name: 'Ravi "R"', phone: '12345', token: await adminToken() });
     assert.equal(res.status, 400);
     assert.match(res.body, /value="Ravi &quot;R&quot;"/);
     assert.match(res.body, /value="12345"/);
@@ -224,11 +254,11 @@ describe('portal server', () => {
 
   test('admin POSTs need the page token', async () => {
     for (const token of ['', 'wrong', '\u00FC'.repeat(43)]) {
-      const res = await postForm(port, '/admin/add', { consent: 'yes', name: 'Ravi', phone: '9123456789', token });
+      const res = await postForm(port, '/admin/add', { email: 'guest@example.com', consent: 'yes', name: 'Ravi', phone: '9123456789', token });
       assert.equal(res.status, 403);
     }
     assert.equal(store.list().length, 0);
-    const ok = await postForm(port, '/admin/add', { consent: 'yes', name: 'Ravi', phone: '9123456789', token: await adminToken() });
+    const ok = await postForm(port, '/admin/add', { email: 'guest@example.com', consent: 'yes', name: 'Ravi', phone: '9123456789', token: await adminToken() });
     assert.equal(ok.status, 303, 'positive control: the real token works');
     assert.equal(store.list().length, 1);
   });
@@ -256,7 +286,7 @@ describe('portal server', () => {
   test('admin POSTs from another origin are refused even with the token', async () => {
     const token = await adminToken();
     const add = (headers) => {
-      const body = new URLSearchParams({ name: 'Ravi', phone: '9123456789', token, consent: 'yes' }).toString();
+      const body = new URLSearchParams({ name: 'Ravi', phone: '9123456789', token, email: 'guest@example.com', consent: 'yes' }).toString();
       return request({ port, method: 'POST', path: '/admin/add', body, headers: {
         'Content-Type': 'application/x-www-form-urlencoded', 'Content-Length': Buffer.byteLength(body), ...headers } });
     };
@@ -318,8 +348,8 @@ describe('portal server', () => {
 
   test('the desk adds to the bracket it picks, and a repeat names the bracket', async () => {
     const token = await adminToken();
-    await postForm(port, '/admin/add', { consent: 'yes', name: 'Ravi', phone: '9123456789', bracket: 'lcq', token });
-    const again = await postForm(port, '/admin/add', { consent: 'yes', name: 'Ravi', phone: '9123456789', bracket: 'lcq', token });
+    await postForm(port, '/admin/add', { email: 'guest@example.com', consent: 'yes', name: 'Ravi', phone: '9123456789', bracket: 'lcq', token });
+    const again = await postForm(port, '/admin/add', { email: 'guest@example.com', consent: 'yes', name: 'Ravi', phone: '9123456789', bracket: 'lcq', token });
     assert.equal(again.status, 409);
     assert.match(again.body, /is already registered for LCQ, as Ravi\./);
     assert.match(again.body, /<option value="lcq" selected>LCQ<\/option>/, 'the pick is kept');
@@ -354,9 +384,9 @@ describe('portal server', () => {
 
   test('admin can add an on-spot registration and rejects a bad number', async () => {
     const token = await adminToken();
-    const bad = await postForm(port, '/admin/add', { consent: 'yes', name: 'Ravi', phone: '123', token });
+    const bad = await postForm(port, '/admin/add', { email: 'guest@example.com', consent: 'yes', name: 'Ravi', phone: '123', token });
     assert.equal(bad.status, 400);
-    const ok = await postForm(port, '/admin/add', { consent: 'yes', name: 'Ravi', phone: '+91 91234 56789', token });
+    const ok = await postForm(port, '/admin/add', { email: 'guest@example.com', consent: 'yes', name: 'Ravi', phone: '+91 91234 56789', token });
     assert.equal(ok.status, 303);
     assert.deepEqual(store.list().map((l) => [l.phone, l.source]), [['+919123456789', 'desk']]);
   });
@@ -364,11 +394,11 @@ describe('portal server', () => {
   test('a desk entry needs the consent tick, then records the form notice and shows as Desk', async () => {
     await postForm(port, '/submit', VALID);
     const token = await adminToken();
-    const unticked = await postForm(port, '/admin/add', { name: 'Ravi', phone: '9123456789', token });
+    const unticked = await postForm(port, '/admin/add', { name: 'Ravi', phone: '9123456789', email: 'ravi@example.com', token });
     assert.equal(unticked.status, 400);
     assert.match(unticked.body, /Tick that they agreed before adding them\./);
     assert.equal(store.list().length, 1, 'nothing added without the tick');
-    await postForm(port, '/admin/add', { consent: 'yes', name: 'Ravi', phone: '9123456789', token });
+    await postForm(port, '/admin/add', { email: 'guest@example.com', consent: 'yes', name: 'Ravi', phone: '9123456789', token });
     assert.deepEqual(store.list().map((l) => [l.source, l.noticeVersion]), [['form', cfg.noticeVersion], ['desk', cfg.noticeVersion]]);
     const csv = (await request({ port, path: '/admin/export.csv' })).body;
     assert.match(csv, new RegExp(`,Desk,[^,]*,[^,]*,${cfg.noticeVersion}\\r\\n`));
@@ -399,7 +429,7 @@ describe('portal server', () => {
       const res = await request({ host, port, path });
       assert.equal(res.status, 404, path);
     }
-    const post = await postForm(port, '/admin/add', { consent: 'yes', name: 'X', phone: '9876543210', token: await adminToken() }, { host });
+    const post = await postForm(port, '/admin/add', { email: 'guest@example.com', consent: 'yes', name: 'X', phone: '9876543210', token: await adminToken() }, { host });
     assert.equal(post.status, 404);
     await postForm(port, '/submit', VALID);
     const del = await postForm(port, '/admin/delete', { id: store.list()[0].id, token: await adminToken(), confirm: 'yes' }, { host });
@@ -468,9 +498,9 @@ test('one address gets a bounded number of sign-up attempts per minute, and it r
   });
   await new Promise((r) => server.listen(0, '127.0.0.1', r));
   const { port } = server.address();
-  const signUp = (i, extra) => postForm(port, '/submit', { name: `Guest ${i}`, phone: `98765${String(i).padStart(5, '0')}`, consent: 'yes' }, extra);
+  const signUp = (i, extra) => postForm(port, '/submit', { name: `Guest ${i}`, phone: `98765${String(i).padStart(5, '0')}`, email: 'guest@example.com', consent: 'yes' }, extra);
   try {
-    assert.equal((await postForm(port, '/submit', { name: '', phone: '1', consent: 'yes' })).status, 400, 'a failed attempt counts too');
+    assert.equal((await postForm(port, '/submit', { name: '', phone: '1', email: 'guest@example.com', consent: 'yes' })).status, 400, 'a failed attempt counts too');
     assert.equal((await signUp(1)).status, 200);
     assert.equal((await signUp(2)).status, 200);
     const refused = await signUp(3);

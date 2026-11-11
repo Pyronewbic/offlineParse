@@ -1,6 +1,6 @@
 # offlineParse
 
-On-the-spot event registration where there is no cell signal. Guests join an offline Wi-Fi and register (name, mobile number, consent) on a form served from a laptop; staff manage registrations on a laptop-only admin page.
+On-the-spot event registration where there is no cell signal. Guests join an offline Wi-Fi and register (name, mobile number, email, consent) on a form served from a laptop; staff manage registrations on a laptop-only admin page.
 
 - **Wi-Fi QR:** joins a router with no internet whose DNS is the laptop, so phones open the form as a sign-in page.
 - **At the desk:** staff can also register someone on the admin page, after reading them the consent line.
@@ -95,7 +95,7 @@ Stop the server (Ctrl+C), then run `npm run booth-ip:undo`. This is required on 
 
 All in `data/`, owner-only on macOS and Linux; copy the folder to back up. On a Mac `npm start` keeps it out of Time Machine; on Windows keep the repo out of OneDrive and File History.
 
-- `leads.db`: the source of truth. A number registers once per game and bracket in each event.
+- `leads.db`: the source of truth. A number registers once per game and bracket in each event. Email is required from 2026-11 (`noticeVersion` `2026-11-v2`); earlier rows have none. The LCQ tablet never shows it.
 - `leads.csv`: rewritten after every change, times in IST. Don't open it while the booth runs; open a **Download CSV** copy.
 - `leads.log`: one JSON line per registration or deletion, UTC.
 - **Delete** on the admin page erases a person from all three and frees the number; if a file can't be updated yet, the admin page says so and it is retried. Copies made elsewhere are not touched.

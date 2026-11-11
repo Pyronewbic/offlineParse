@@ -62,7 +62,7 @@ describe('entry point', () => {
   test('serves sign-ups and keeps data files owner-only', async () => {
     const { port, outcome, err } = await start({ laptopIp: '127.0.0.1' });
     assert.equal(outcome, 'ready', err());
-    const res = await postForm(port, '/submit', { name: 'Asha', phone: '9876543210', consent: 'yes' });
+    const res = await postForm(port, '/submit', { name: 'Asha', phone: '9876543210', email: 'guest@example.com', consent: 'yes' });
     assert.equal(res.status, 200, 'positive control: the sign-up went through the real server');
     if (process.platform !== 'win32') {
       for (const file of ['leads.db', 'leads.csv', 'leads.log']) {
@@ -74,7 +74,7 @@ describe('entry point', () => {
   test('--db keeps a practice run away from the configured database', async () => {
     const { port, outcome, err } = await start({ laptopIp: '127.0.0.1' }, ['--db', join(dir, 'try', 'leads.db')]);
     assert.equal(outcome, 'ready', err());
-    assert.equal((await postForm(port, '/submit', { name: 'Asha', phone: '9876543210', consent: 'yes' })).status, 200);
+    assert.equal((await postForm(port, '/submit', { name: 'Asha', phone: '9876543210', email: 'guest@example.com', consent: 'yes' })).status, 200);
     assert.ok(statSync(join(dir, 'try', 'leads.db')).size > 0, 'the sign-up went to the --db file');
     assert.throws(() => statSync(join(dir, 'data', 'leads.db')), { code: 'ENOENT' }, 'the configured database was never created');
   });

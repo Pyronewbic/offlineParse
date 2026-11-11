@@ -2,11 +2,12 @@ import { randomBytes, timingSafeEqual } from 'node:crypto';
 import http from 'node:http';
 import { CSV_RETRY_MS, SOURCE_LABELS, leadsCsv, toISTShort } from './files.js';
 import { LcqError, bracketGap } from './lcq.js';
-import { BRACKETS, NAME_MAX, ValidationError, cleanName, normalizePhone } from './leads.js';
+import { BRACKETS, EMAIL_MAX, NAME_MAX, ValidationError, cleanEmail, cleanName, normalizePhone } from './leads.js';
 import { themeCss } from './theme.js';
 
 export const MAX_BODY = 8 * 1024;
-const MAX_FIELDS = 20;
+// The desk form with every game ticked (12) and its other fields, with room to spare.
+const MAX_FIELDS = 24;
 const TOO_MANY = 'Too many sign-ups from this phone just now. Please wait a minute and try again.';
 // "A", "A and B", "A, B and C".
 const listText = (items) => (items.length < 2 ? items.join('') : `${items.slice(0, -1).join(', ')} and ${items.at(-1)}`);
@@ -151,7 +152,7 @@ a{color:inherit}
 .sr-only{position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
 .card form > label:first-of-type{margin-top:0}
 label{display:block;font-weight:700;margin:1rem 0 .35rem}
-input[type=text],input[type=tel]{width:100%;min-height:52px;padding:.7rem .85rem;font-size:17px;font-family:inherit;color:var(--text);background:var(--surface);border:3px solid var(--line);border-radius:10px;-webkit-appearance:none;appearance:none}
+input[type=text],input[type=tel],input[type=email]{width:100%;min-height:52px;padding:.7rem .85rem;font-size:17px;font-family:inherit;color:var(--text);background:var(--surface);border:3px solid var(--line);border-radius:10px;-webkit-appearance:none;appearance:none}
 input[aria-invalid=true]{border-color:var(--error)}
 :focus-visible,input:focus{outline:3px solid var(--focus);outline-offset:2px}
 .hint{margin:.35rem 0 0;font-size:.9rem;color:var(--muted)}
@@ -223,7 +224,7 @@ details.panel > summary h2{display:inline}
 .panel .fields > div{flex:1 1 170px}
 .panel .fields > label.check{flex:1 1 100%;margin-top:.4rem}
 .panel label{margin:.6rem 0 .3rem}
-.panel input[type=text],.panel input[type=tel],.panel input[type=search],.panel select{min-height:46px;font-size:16px}
+.panel input[type=text],.panel input[type=tel],.panel input[type=email],.panel input[type=search],.panel select{min-height:46px;font-size:16px}
 .panel input[type=search],.panel select{width:100%;padding:.6rem .85rem;font-family:inherit;color:var(--text);background:var(--surface);border:3px solid var(--line);border-radius:10px;-webkit-appearance:none;appearance:none}
 .panel button,.panel .btn{min-height:46px}
 .panel select{-webkit-appearance:auto;appearance:auto}
@@ -300,7 +301,7 @@ function portalPage(cfg, brand, title, card, after = '') {
     `<section class="card">${CONFETTI}${card}</section>${after}`);
 }
 
-const FIELDS = ['name', 'phone', 'game', 'consent'];
+const FIELDS = ['name', 'phone', 'email', 'game', 'consent'];
 
 /** A checkbox per game; with one game it is ticked already. A game whose LCQ has ended cannot be ticked. */
 const gameBoxes = (cfg, ticked, extra = '', ended = []) => cfg.games.map((g) => `<label class="check"><input type="checkbox" name="games" value="${esc(g)}"` +
@@ -308,7 +309,7 @@ const gameBoxes = (cfg, ticked, extra = '', ended = []) => cfg.games.map((g) => 
   `<span>${esc(g)}${ended.includes(g) ? ' (LCQ ended)' : ''}</span></label>`).join('');
 
 export function formPage(cfg, {
-  error = '', field = null, name = '', phone = '', consent = false, bracket = 'normal', games = [], ended = [],
+  error = '', field = null, name = '', phone = '', email = '', consent = false, bracket = 'normal', games = [], ended = [],
 } = {}, brand = NO_BRAND) {
   const inline = error && FIELDS.includes(field);
   const fieldError = (id) => (inline && field === id
@@ -331,23 +332,26 @@ ${inline ? '' : errorBlock(error)}
   <input id="phone" name="phone" type="tel" inputmode="tel" autocomplete="tel" maxlength="20" placeholder="98765 43210" required value="${esc(phone)}"${attrs('phone', 'phone-hint')}>
   <p class="hint" id="phone-hint">10-digit mobile number, or start with + and your country code.</p>
   ${fieldError('phone')}
+  <label for="email">Email</label>
+  <input id="email" name="email" type="email" inputmode="email" autocomplete="email" autocapitalize="off" spellcheck="false" maxlength="${EMAIL_MAX}" placeholder="name@example.com" required value="${esc(email)}"${attrs('email')}>
+  ${fieldError('email')}
   ${cfg.games.length ? `<fieldset class="games"${attrs('game')}><legend>Games</legend><p class="hint">Tick every game you want to play.</p>` +
     `${gameBoxes(cfg, games, '', ended)}</fieldset>${fieldError('game')}` : ''}
   <label class="check"><input type="checkbox" name="consent" value="yes" required${consent ? ' checked' : ''}${attrs('consent')}>
-    <span>I agree to ${esc(cfg.orgName)} keeping my name and number for this event's registration.</span></label>
+    <span>I agree to ${esc(cfg.orgName)} keeping my name, number and email for this event's registration.</span></label>
   ${fieldError('consent')}
   <button class="primary" type="submit">Register</button>
 </form>`, `
-<p class="notice">${esc(cfg.orgName)} uses your name and number only for this event's registration.
+<p class="notice">${esc(cfg.orgName)} uses your name, number and email only for this event's registration.
 Reach out to us at the desk any time to have your details deleted.</p>`);
 }
 
-export function thanksPage(cfg, name, phone, brand = NO_BRAND, bracket = 'normal', games = [], already = [], full = []) {
+export function thanksPage(cfg, name, phone, brand = NO_BRAND, bracket = 'normal', games = [], already = [], full = [], email = '') {
   const strong = (list) => listText(list.map((g) => `<strong>${esc(g)}</strong>`));
   const named = full.filter(Boolean);
   return portalPage(cfg, brand, "You're registered", `
 <h1>You're registered, ${esc(firstName(name))}!</h1>
-<p class="lede">We've got you down for <strong>${esc(BRACKETS[bracket])}</strong>${games.filter(Boolean).length ? ` in ${strong(games)}` : ''} as <strong>${esc(name)}</strong> on <strong class="nowrap">${esc(displayPhone(phone))}</strong>.</p>
+<p class="lede">We've got you down for <strong>${esc(BRACKETS[bracket])}</strong>${games.filter(Boolean).length ? ` in ${strong(games)}` : ''} as <strong>${esc(name)}</strong> on <strong class="nowrap">${esc(displayPhone(phone))}</strong>${email ? `, <strong>${esc(email)}</strong>` : ''}.</p>
 ${already.length ? `<p>You were already registered for ${strong(already)}.</p>` : ''}
 ${full.length ? `<p>The ${named.length ? `${strong(named)} ` : ''}LCQ bracket${full.length > 1 ? 's are' : ' is'} full; staff may still add you.</p>` : ''}
 <p>You can leave this Wi-Fi now.</p>
@@ -369,11 +373,11 @@ const hidden = (token, id, view) =>
 
 const phoneDigits = (phone) => phone.replace(/\D/g, '');
 
-/** Case-insensitive name match, or 3+ digits found anywhere in the stored +91 number (a leading 0 is dropped). */
+/** Case-insensitive name or email match, or 3+ digits found anywhere in the stored +91 number (a leading 0 is dropped). */
 export function matchesSearch(lead, q) {
   const query = q.trim().toLocaleLowerCase();
   if (!query) return true;
-  if (lead.name.toLocaleLowerCase().includes(query)) return true;
+  if (lead.name.toLocaleLowerCase().includes(query) || (lead.email ?? '').includes(query)) return true;
   let digits = query.replace(/\D/g, '');
   if (digits.length === 11 && digits.startsWith('0')) digits = digits.slice(1);
   return digits.length >= 3 && phoneDigits(lead.phone).includes(digits);
@@ -405,7 +409,7 @@ export function adminPage(cfg, {
     return `<tr><td class="num idx">${n}</td><th scope="row">${esc(lead.name)}</th>` +
       `<td><span class="chip">${esc(BRACKETS[lead.bracket] ?? lead.bracket)}</span></td>` +
       `${gameCol ? `<td>${lead.game ? esc(lead.game) : '-'}</td>` : ''}` +
-      `<td class="num">${esc(displayPhone(lead.phone))}</td>` +
+      `<td class="num">${esc(displayPhone(lead.phone))}</td><td>${lead.email ? esc(lead.email) : '-'}</td>` +
       `<td><span class="chip ${lead.source === 'desk' ? 'desk' : 'form'}">${esc(SOURCE_LABELS[lead.source] ?? lead.source)}</span></td>` +
       `<td class="num">${esc(toISTShort(lead.createdAt))}</td>` +
       `<td class="act"><form class="inline" method="post" action="/admin/delete">${hidden(token, lead.id, view)}` +
@@ -479,18 +483,19 @@ ${runner ? `<p class="hint">LCQ runner for a tablet on the booth Wi-Fi: <strong>
     `<option value="${b}"${b === addTo ? ' selected' : ''}>${label(b)}</option>`).join('')}</select></div>
       <div><label for="name">Name</label><input id="name" name="name" type="text" maxlength="${NAME_MAX}" required value="${esc(form.name ?? '')}"></div>
       <div><label for="phone">Mobile number</label><input id="phone" name="phone" type="tel" maxlength="20" required value="${esc(form.phone ?? '')}"></div>
+      <div><label for="email">Email</label><input id="email" name="email" type="email" maxlength="${EMAIL_MAX}" autocapitalize="off" spellcheck="false" required value="${esc(form.email ?? '')}"></div>
       ${cfg.games.length ? `<fieldset class="games"><legend>Games</legend>${gameBoxes(cfg, form.games ?? (view.game ? [view.game] : []))}</fieldset>` : ''}
       <label class="check"><input type="checkbox" name="consent" value="yes" required${form.consent ? ' checked' : ''}>
-        <span>They agreed to ${esc(cfg.orgName)} keeping their name and number for this event's registration (read it to them).</span></label>
+        <span>They agreed to ${esc(cfg.orgName)} keeping their name, number and email for this event's registration (read it to them).</span></label>
       <button type="submit">Add registration</button>
     </form>
   </section>
   <section class="panel" aria-labelledby="find-title">
     <h2 id="find-title">Find someone</h2>
-    <p class="hint">Search by name or any part of the number.</p>
+    <p class="hint">Search by name, email or any part of the number.</p>
     <form method="get" action="/admin" class="fields" role="search">
       ${tab === 'all' ? '' : `<input type="hidden" name="tab" value="${esc(tab)}">`}${view.event ? `<input type="hidden" name="event" value="${esc(view.event)}">` : ''}${view.game ? `<input type="hidden" name="game" value="${esc(view.game)}">` : ''}
-      <div><label for="q">Name or number</label><input id="q" name="q" type="search" maxlength="60" value="${esc(q)}"></div>
+      <div><label for="q">Name, email or number</label><input id="q" name="q" type="search" maxlength="60" value="${esc(q)}"></div>
       <button class="secondary" type="submit">Search</button>
     </form>
   </section>
@@ -498,8 +503,8 @@ ${runner ? `<p class="hint">LCQ runner for a tablet on the booth Wi-Fi: <strong>
 <p class="showing">${showing}</p>
 <table class="reg">
 <caption class="sr-only">Registrations, newest first</caption>
-<thead><tr><th scope="col">#</th><th scope="col">Name</th><th scope="col">Bracket</th>${gameCol ? '<th scope="col">Game</th>' : ''}<th scope="col">Mobile</th><th scope="col">Came in via</th><th scope="col">Signed up (IST)</th><th scope="col"><span class="sr-only">Actions</span></th></tr></thead>
-<tbody>${rows.join('') || `<tr><td colspan="${gameCol ? 8 : 7}" class="empty">${empty}</td></tr>`}</tbody>
+<thead><tr><th scope="col">#</th><th scope="col">Name</th><th scope="col">Bracket</th>${gameCol ? '<th scope="col">Game</th>' : ''}<th scope="col">Mobile</th><th scope="col">Email</th><th scope="col">Came in via</th><th scope="col">Signed up (IST)</th><th scope="col"><span class="sr-only">Actions</span></th></tr></thead>
+<tbody>${rows.join('') || `<tr><td colspan="${gameCol ? 9 : 8}" class="empty">${empty}</td></tr>`}</tbody>
 </table>`, 'admin');
 }
 
@@ -508,7 +513,7 @@ export function confirmDeletePage(cfg, lead, token, brand = NO_BRAND, view = { t
 ${adminHeader(cfg, brand, 'Delete registration')}
 <section class="panel confirm">
 <h2>Delete this registration?</h2>
-<p><strong>${esc(lead.name)}</strong>, <span class="nowrap">${esc(displayPhone(lead.phone))}</span>, ${esc(BRACKETS[lead.bracket] ?? lead.bracket)}${lead.game ? `, ${esc(lead.game)}` : ''}, signed up ${esc(toISTShort(lead.createdAt))} IST.</p>
+<p><strong>${esc(lead.name)}</strong>, <span class="nowrap">${esc(displayPhone(lead.phone))}</span>${lead.email ? `, ${esc(lead.email)}` : ''}, ${esc(BRACKETS[lead.bracket] ?? lead.bracket)}${lead.game ? `, ${esc(lead.game)}` : ''}, signed up ${esc(toISTShort(lead.createdAt))} IST.</p>
 <p>This removes them from the database, the spreadsheet and the log. It cannot be undone. Spreadsheets you
 already downloaded or copied, and backups of this laptop, are not changed.</p>
 <form method="post" action="/admin/delete">${hidden(token, lead.id, view)}<input type="hidden" name="confirm" value="yes">
@@ -912,17 +917,20 @@ export function createPortalServer(cfg, store, {
     const fields = await readForm(req);
     const rawName = typeof fields.name === 'string' ? fields.name : '';
     const rawPhone = typeof fields.phone === 'string' ? fields.phone : '';
+    const rawEmail = typeof fields.email === 'string' ? fields.email : '';
     // The bracket staff have on now, read once so the stored row and the reply agree.
     const bracket = store.bracket();
     const ended = endedFor(bracket);
-    const again = { name: rawName.slice(0, NAME_MAX), phone: rawPhone.slice(0, 20), consent: fields.consent === 'yes', bracket, games: tickedOf(fields.games), ended };
+    const again = { name: rawName.slice(0, NAME_MAX), phone: rawPhone.slice(0, 20), email: rawEmail.slice(0, EMAIL_MAX), consent: fields.consent === 'yes', bracket, games: tickedOf(fields.games), ended };
     if (overLimit(req.socket.remoteAddress)) return html(res, 429, formPage(cfg, { ...again, error: TOO_MANY }, brand));
     let name;
     let phone;
+    let email;
     let games;
     try {
       name = cleanName(rawName);
       phone = normalizePhone(rawPhone);
+      email = cleanEmail(rawEmail);
       games = gamesOf(cfg, fields.games);
       if (fields.consent !== 'yes') throw new ValidationError('Please tick the box to register.', 'consent');
     } catch (e) {
@@ -940,7 +948,7 @@ export function createPortalServer(cfg, store, {
     const created = [];
     const already = [];
     for (const game of games) {
-      (store.register({ name, phone, source: 'form', noticeVersion: cfg.noticeVersion, bracket, game }).created ? created : already).push(game);
+      (store.register({ name, phone, email, source: 'form', noticeVersion: cfg.noticeVersion, bracket, game }).created ? created : already).push(game);
     }
     if (!created.length) {
       log('duplicate registration refused');
@@ -948,7 +956,7 @@ export function createPortalServer(cfg, store, {
     }
     log(`registration added via form (${BRACKETS[bracket]}${inGames(created)})`);
     const full = bracket === 'lcq' && lcq ? created.filter((g) => lcq.phase(g).finalizedAt) : [];
-    html(res, 200, thanksPage(cfg, name, phone, brand, bracket, created, already, full));
+    html(res, 200, thanksPage(cfg, name, phone, brand, bracket, created, already, full, email));
   }
 
   async function adminPost(req, res, path) {
@@ -976,14 +984,17 @@ export function createPortalServer(cfg, store, {
       const bracket = Object.hasOwn(BRACKETS, fields.bracket) ? fields.bracket : store.bracket();
       const consent = fields.consent === 'yes';
       const form = {
-        name: String(fields.name ?? '').slice(0, NAME_MAX), phone: String(fields.phone ?? '').slice(0, 20), bracket, consent, games: tickedOf(fields.games),
+        name: String(fields.name ?? '').slice(0, NAME_MAX), phone: String(fields.phone ?? '').slice(0, 20), email: String(fields.email ?? '').slice(0, EMAIL_MAX),
+        bracket, consent, games: tickedOf(fields.games),
       };
       let name;
       let phone;
+      let email;
       let games;
       try {
         name = cleanName(fields.name);
         phone = normalizePhone(fields.phone);
+        email = cleanEmail(fields.email);
         games = gamesOf(cfg, fields.games);
         if (!consent) throw new ValidationError('Tick that they agreed before adding them.');
       } catch (e) {
@@ -992,7 +1003,7 @@ export function createPortalServer(cfg, store, {
       }
       if (!games) return plain(res, 400, 'unknown game');
       // Staff read the same notice and ticked that the person agreed; source 'desk' tells these rows apart.
-      const results = games.map((game) => [game, store.register({ name, phone, source: 'desk', noticeVersion: cfg.noticeVersion, bracket, game })]);
+      const results = games.map((game) => [game, store.register({ name, phone, email, source: 'desk', noticeVersion: cfg.noticeVersion, bracket, game })]);
       const already = results.filter(([, r]) => !r.created);
       if (already.length === results.length) {
         return adminReply(409, {
