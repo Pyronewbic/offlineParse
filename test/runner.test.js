@@ -361,7 +361,7 @@ describe('LCQ runner over HTTP', () => {
     assert.match(body, new RegExp(`<li>P3 is the only one on 0W, and nobody can catch up\\.<form class="inline" method="post" action="/lcq/bye"><input type="hidden" name="player" value="${p3.id}"><input type="hidden" name="game" value=""><button type="submit">Give P3 a Bye</button>`),
       'a full-width button that says who gets it');
     await post('/lcq/bye', { player: String(p3.id) }, cookie);
-    assert.match(await page(), /<li>P3 had a bye <form class="inline" method="post" action="\/lcq\/undo">/);
+    assert.match(await page(), /<li><span><strong>P3<\/strong> had a bye <span class="hint">Round 1, <span data-wait="\d+">[^<]+<\/span> ago<\/span><\/span><form class="inline" method="post" action="\/lcq\/undo">/);
     await post('/lcq/bye', { player: String(p3.id) }, cookie);
     assert.match(await page(), /A Bye is only for the one player left on their wins/, 'a second tap is refused, and says why');
     assert.equal(lcq.state().players.find((p) => p.id === p3.id).wins, 1);
@@ -392,7 +392,7 @@ describe('LCQ runner over HTTP', () => {
       assert.ok(!done.includes(gone), `ended: no ${gone}`);
     }
     assert.match(done, /<details class="panel" id="lcq-standings" open>/, 'final standings start open');
-    assert.match(done, /<li>P1 beat P3<\/li>/, 'results stay, without Undo');
+    assert.match(done, /<li><span><strong>P1<\/strong> beat P3 <span class="hint">Round 2, <span data-wait="\d+">[^<]+<\/span> ago<\/span><\/span><\/li>/, 'results stay, without Undo');
     await post('/lcq/reopen', {}, cookie);
     assert.ok(lcq.phase().endedAt, 'Reopen needs the tick');
     await post('/lcq/reopen', { confirm: 'yes' }, cookie);
@@ -440,7 +440,7 @@ describe('LCQ runner over HTTP', () => {
 
       const old = await get(`/lcq?event=${october.code}`);
       assert.match(old, new RegExp(`You are looking at ${october.name}\\. Only ${november.name} can be run\\.`));
-      assert.match(old, /<li>P1 beat P2<\/li>/, 'its results, without Undo');
+      assert.match(old, /<li><span><strong>P1<\/strong> beat P2 <span class="hint">Round 1, [^]*?<\/span><\/span><\/li>/, 'its results, without Undo');
       assert.ok(!old.includes(' ready</a>') && !old.includes('Ready ('), 'nothing is offered as ready to start');
       assert.match(old, /Finalized [^<]+, 4 in the bracket\.<\/div><\/div>/, 'its state, without Unfinalize');
       for (const action of ['result', 'start', 'undo', 'cancel', 'drop', 'bye', 'finalize', 'unfinalize', 'end', 'reopen']) {
@@ -651,6 +651,24 @@ describe('LCQ runner over HTTP', () => {
     assert.equal(holdsUpdates(1000, false), false, 'idle and nothing in hand: update');
     assert.equal(holdsUpdates(30_000, true), true, 'a focused field or a pick in progress');
     assert.equal(holdsUpdates(60_001, true), false, 'a forgotten tap on a box no longer freezes the page');
+  });
+
+  test('Results offer Undo only where it would work: the latest result for both players', () => {
+    signUp(4);
+    startAll();
+    const [m1, m2] = lcq.state().open;
+    lcq.result(m1.id, m1.a);
+    lcq.result(m2.id, m2.a);
+    lcq.start(m1.a, m2.a);
+    const st = () => lcq.state();
+    lcq.result(st().open[0].id, m1.a);
+    const html = runnerPage(makeConfig(), st()).match(/<ul class="plain results">.*?<\/ul>/s)[0];
+    const rows = html.match(/<li>.*?<\/li>/gs);
+    assert.equal(rows.length, 3);
+    assert.match(rows[0], /<strong>P1<\/strong> beat P3 <span class="hint">Round 2, .*action="\/lcq\/undo".*class="subtle">Undo<\/button>/s, 'the final can be undone');
+    assert.ok(!rows[1].includes('/lcq/undo') && !rows[2].includes('/lcq/undo'), 'the earlier results cannot until the final is undone, so no button');
+    for (const m of [m1, m2]) assert.throws(() => lcq.undo(m.id), /first/, 'and the server agrees');
+    assert.ok(!html.includes('class="quiet"'), 'Undo is not styled as danger');
   });
 
   test('the admin page shows the runner address and PIN', async () => {

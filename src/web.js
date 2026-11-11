@@ -339,6 +339,10 @@ table.counts{border-collapse:separate;border-spacing:4px;margin:-4px;font-varian
 .counts td a:hover{background:var(--hover)}
 .counts td a[aria-current]:hover{background:var(--pink)}
 .new-event form{max-width:36rem}
+button.subtle{min-height:40px;padding:.4rem .8rem;font-size:.85rem;color:var(--muted);background:transparent;border:2px solid var(--rule);box-shadow:none}
+.plain.results > li{display:flex;align-items:center;justify-content:space-between;gap:4px 12px;flex-wrap:wrap;min-height:56px;padding:.35rem 0;border-bottom:1px solid var(--rule)}
+.plain.results > li:last-child{border-bottom:0}
+.plain.results form.inline button{margin:0}
 button.quiet{min-height:40px;padding:.4rem .8rem;font-size:.85rem;color:var(--error);background:transparent;border:2px solid var(--error);box-shadow:none}
 .empty{padding:28px 14px;text-align:center;color:var(--muted)}
 .confirm{max-width:36rem}
@@ -724,9 +728,15 @@ export function runnerPage(cfg, state, {
   <label class="check"><input type="checkbox" id="lcq-any"><span>Any wins (Against lists only the Player's wins)</span></label>
   <button class="secondary" type="submit">Start match</button></form></details>`;
 
+  // Undo works only on a result neither player has a later result after (the server refuses the rest), so only
+  // those offer it; the winner leads in bold, with the round and how long ago.
+  const roundOf = new Map(rounds.flatMap((r, i) => r.map((m) => [m.id, i + 1])));
+  const undoable = (m) => !decided.some((x) => x.id > m.id && [x.a, x.b].some((p) => p === m.a || p === m.b));
   const resultRow = (m) => {
     const [winner, loser] = m.winner === m.a ? [m.aName, m.bName] : [m.bName, m.aName];
-    return `<li>${esc(winner)} ${m.a === m.b ? 'had a bye' : `beat ${esc(loser)}`}${live ? ` ${btn('undo', { match: m.id }, 'Undo', 'quiet')}` : ''}</li>`;
+    return `<li><span><strong>${esc(winner)}</strong> ${m.a === m.b ? 'had a bye' : `beat ${esc(loser)}`} ` +
+      `<span class="hint">${roundOf.has(m.id) ? `Round ${roundOf.get(m.id)}, ` : ''}${elapsed(m.decidedAt)} ago</span></span>` +
+      `${live && undoable(m) ? btn('undo', { match: m.id }, 'Undo', 'subtle') : ''}</li>`;
   };
   // Rounds as a bracket. Pairings are made as players come free, so a line follows each winner to the match
   // they played next, not to a slot drawn in advance. A column is the matches entered on the same wins; once
@@ -794,8 +804,8 @@ export function runnerPage(cfg, state, {
   };
 
   const older = decided.slice(5);
-  const results = `<ul class="plain">${decided.slice(0, 5).map(resultRow).join('') || none('No results yet.')}</ul>` +
-    (older.length ? `<details id="lcq-older"><summary>Older results (${older.length})</summary><ul class="plain">${older.map(resultRow).join('')}</ul></details>` : '');
+  const results = `<ul class="plain results">${decided.slice(0, 5).map(resultRow).join('') || none('No results yet.')}</ul>` +
+    (older.length ? `<details id="lcq-older"><summary>Older results (${older.length})</summary><ul class="plain results">${older.map(resultRow).join('')}</ul></details>` : '');
 
   const waited = (p) => (p.status === 'free' && p.freeSince ? `, waiting ${elapsed(p.freeSince)}` : '');
   // A required tick stands in for "are you sure", so a stray tap cannot drop anyone.
