@@ -40,7 +40,7 @@ describe('events in the store', () => {
 
   test('event names are cleaned, must be new, and codes stay unique and safe', () => {
     assert.throws(() => store.startEvent('october expo'), (e) => e instanceof ValidationError && /already an event called/.test(e.message));
-    assert.throws(() => store.startEvent(' ‮ '), /Give the new event a name/);
+    assert.throws(() => store.startEvent(' ‮ '), /Give the event a name/);
     assert.throws(() => store.startEvent('x'.repeat(61)), /too long/);
     assert.equal(store.startEvent('Expo!').code, 'Expo');
     assert.equal(store.startEvent('Expo?').code, 'Expo-2', 'a code already taken gets a number');
@@ -167,6 +167,47 @@ describe('LCQ runner with events', () => {
   });
 });
 
+describe('managing events in the store', () => {
+  test('rename keeps the code; the name must be new and valid', () => {
+    const store = new LeadStore(':memory:', { firstEvent: FIRST });
+    store.startEvent('November');
+    assert.deepEqual(store.renameEvent('EVT26', '  October   Finals '), { ...store.event('EVT26'), name: 'October Finals' });
+    assert.equal(store.event('EVT26').code, 'EVT26');
+    assert.throws(() => store.renameEvent('EVT26', 'november'), /already an event called/);
+    assert.deepEqual(store.renameEvent('EVT26', 'OCTOBER FINALS').name, 'OCTOBER FINALS', 'its own name in another case is fine');
+    assert.throws(() => store.renameEvent('nope', 'X'), /That event is gone/);
+    assert.throws(() => store.renameEvent('EVT26', '   '), ValidationError);
+    store.close();
+  });
+
+  test('an earlier event can be made current again', () => {
+    const store = new LeadStore(':memory:', { firstEvent: FIRST });
+    store.startEvent('November');
+    store.setCurrentEvent('EVT26');
+    assert.equal(store.currentEvent().code, 'EVT26');
+    assert.equal(reg(store, '+919876543210').created, true);
+    assert.equal(store.list()[0].eventCode, 'EVT26', 'new sign-ups go to it');
+    assert.throws(() => store.setCurrentEvent('nope'), /That event is gone/);
+    store.close();
+  });
+
+  test('only an empty event can be deleted, never the last one; deleting the current one falls back to the newest left', () => {
+    const store = new LeadStore(':memory:', { firstEvent: FIRST });
+    assert.throws(() => store.deleteEvent('EVT26'), /only event/);
+    reg(store, '+919876543210');
+    const mistake = store.startEvent('Mistake');
+    assert.throws(() => store.deleteEvent('EVT26'), /October Expo still has 1 registration; delete it first/);
+    new Lcq(store);
+    store.db.prepare('INSERT INTO lcq_games (eventCode, game, finalizedAt) VALUES (?, ?, ?)').run(mistake.code, '', 'x');
+    store.deleteEvent(mistake.code);
+    assert.deepEqual(store.events().map((e) => e.code), ['EVT26']);
+    assert.equal(store.currentEvent().code, 'EVT26', 'back to the newest event left');
+    assert.equal(store.db.prepare('SELECT COUNT(*) AS n FROM lcq_games').get().n, 0, 'its LCQ state goes too, so a reused code starts clean');
+    assert.equal(store.list().length, 1, 'nobody else is touched');
+    store.close();
+  });
+});
+
 describe('events on the admin page', () => {
   let store;
   let server;
@@ -243,5 +284,51 @@ describe('events on the admin page', () => {
       'Content-Type': 'application/x-www-form-urlencoded', 'Content-Length': Buffer.byteLength(`token=${t}&name=Sneaky`), 'Sec-Fetch-Site': 'cross-site',
     } })).status, 403, 'and a cross-site post is refused');
     assert.equal(store.currentEvent().code, current);
+  });
+
+  test('Manage: make current, rename and delete each need the tick; delete only shows for an empty event', async () => {
+    const before = store.currentEvent();
+    reg(store, '+919000077777', { eventCode: before.code });
+    const spare = store.startEvent(`Spare ${Date.now()}`);
+    try {
+      const t = await token();
+      const view = await admin(`/admin?event=${before.code}`);
+      const shown = (x) => x.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      assert.ok(view.includes(`<summary>Manage ${shown(before.name)}</summary>`), 'an earlier event: no (current)');
+      assert.match(view, /<span>New sign-ups and the LCQ tablet move to [^<]+<\/span><\/label><button type="submit">Make it the current event<\/button>/);
+      assert.match(view, /To delete this event, first delete its \d+ registrations?\.<\/p>/);
+      assert.ok(!view.includes('action="/admin/event/delete"'), 'no Delete for an event with people in it');
+      const current = await admin();
+      assert.match(current, new RegExp(`<summary>Manage ${spare.name} \\(current\\)</summary>`));
+      assert.match(current, /<button class="danger" type="submit">Delete event<\/button>/, 'the empty current event can be deleted');
+
+      const unticked = await postForm(port, '/admin/event/current', { token: t, code: before.code });
+      assert.equal(unticked.status, 400);
+      assert.match(unticked.body, /Tick the box to confirm, then tap Make it the current event\./);
+      assert.equal(store.currentEvent().code, spare.code, 'nothing changed without the tick');
+      const moved = await postForm(port, '/admin/event/current', { token: t, code: before.code, confirm: 'yes' });
+      assert.equal(moved.headers.location, '/admin?msg=event');
+      assert.equal(store.currentEvent().code, before.code, 'positive control: switched with the tick');
+
+      assert.equal((await postForm(port, '/admin/event/rename', { token: t, code: spare.code, name: 'Renamed Spare' })).status, 400);
+      assert.equal(store.event(spare.code).name, spare.name);
+      const renamed = await postForm(port, '/admin/event/rename', { token: t, code: spare.code, name: 'Renamed <Spare>', confirm: 'yes', event: spare.code });
+      assert.equal(renamed.headers.location, `/admin?event=${spare.code}&msg=event-renamed`);
+      assert.match(await admin(`/admin?event=${spare.code}&msg=event-renamed`), /Manage Renamed &lt;Spare&gt;<\/summary>/);
+
+      assert.equal((await postForm(port, '/admin/event/delete', { token: t, code: spare.code })).status, 400);
+      assert.ok(store.event(spare.code));
+      const used = await postForm(port, '/admin/event/delete', { token: t, code: before.code, confirm: 'yes' });
+      assert.equal(used.status, 400, 'a posted delete of a used event is refused too');
+      assert.match(used.body, /still has \d+ registration/);
+      const gone = await postForm(port, '/admin/event/delete', { token: t, code: spare.code, confirm: 'yes' });
+      assert.equal(gone.headers.location, '/admin?msg=event-deleted');
+      assert.equal(store.event(spare.code), null);
+      assert.equal((await postForm(port, '/admin/event/rename', { token: 'wrong', code: before.code, name: 'X', confirm: 'yes' })).status, 403, 'the desk token is still checked');
+      assert.equal((await postForm(port, '/admin/event/nope', { token: t, code: before.code, confirm: 'yes' })).status, 404);
+    } finally {
+      if (store.event(spare.code)) store.deleteEvent(spare.code);
+      store.setCurrentEvent(before.code);
+    }
   });
 });

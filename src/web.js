@@ -425,6 +425,8 @@ ${full.length ? `<p>The ${named.length ? `${strong(named)} ` : ''}LCQ bracket${f
 
 const FLASH = {
   added: 'Registration added.',
+  'event-renamed': 'Event renamed.',
+  'event-deleted': 'Event deleted.',
   'added-some': 'Added for the games they were not in yet; they were already registered for the others.',
   deleted: 'Registration deleted from the database, the spreadsheet and the log.',
   'deleted-partial': 'Registration deleted from the database. The spreadsheet or the log still has it (see the warning above); ' +
@@ -453,7 +455,7 @@ function adminHeader(cfg, brand, title, actions = '') {
 
 export function adminPage(cfg, {
   leads: everyone, token, brand = NO_BRAND, q = '', msg = '', error = '', warnings = [], form = {}, view = { tab: 'all', event: '' },
-  active = 'normal', runner = null, events, current, eventError = '', eventName = '',
+  active = 'normal', runner = null, events, current, eventError = '', eventName = '', manageError = '',
 }) {
   const { tab } = view;
   const shownEvent = events.find((e) => e.code === view.event) ?? current;
@@ -501,6 +503,23 @@ export function adminPage(cfg, {
     .map(([g, text, n]) => `<a href="${esc(adminUrl({ ...view, game: g }))}"${g === view.game ? ' aria-current="page"' : ''}>${esc(text)} (${n})</a>`).join('') : '';
   const eventLinks = events.map((e) => `<a href="${esc(adminUrl({ tab, event: e.code === current.code ? '' : e.code }))}"` +
     `${e.code === shownEvent.code ? ' aria-current="page"' : ''}>${esc(e.name)}${e.code === current.code ? ' (now)' : ''}</a>`).join('');
+  // Making current, renaming and deleting each need a tick, like Drop and End; only an empty event can be deleted.
+  const isCurrent = shownEvent.code === current.code;
+  const tick = (label) => `<label class="check"><input type="checkbox" name="confirm" value="yes" required><span>${label}</span></label>`;
+  const eventForm = (action, body) => `<form method="post" action="/admin/event/${action}" class="fields">` +
+    `<input type="hidden" name="token" value="${esc(token)}">${viewFields(view)}<input type="hidden" name="code" value="${esc(shownEvent.code)}">${body}</form>`;
+  const fallback = events.find((e) => e.code !== shownEvent.code);
+  const manage = `<details class="new-event"${manageError ? ' open' : ''}><summary>Manage ${esc(shownEvent.name)}${isCurrent ? ' (current)' : ''}</summary>
+${errorBlock(manageError)}
+${isCurrent ? '<p class="hint">New sign-ups and the LCQ tablet go to this event.</p>'
+    : eventForm('current', `${tick(`New sign-ups and the LCQ tablet move to ${esc(shownEvent.name)}`)}<button type="submit">Make it the current event</button>`)}
+${eventForm('rename', `<div><label for="rename-event">New name</label><input id="rename-event" name="name" type="text" maxlength="60" required value="${esc(shownEvent.name)}"></div>` +
+    `${tick(`Rename this event; its code ${esc(shownEvent.code)} stays, so downloads and the log still match`)}<button class="secondary" type="submit">Rename</button>`)}
+${!fallback ? '<p class="hint">The only event cannot be deleted.</p>'
+    : atEvent.length ? `<p class="hint">To delete this event, first delete its ${atEvent.length} registration${atEvent.length === 1 ? '' : 's'}.</p>`
+    : eventForm('delete', `${tick(`Delete ${esc(shownEvent.name)}; it has no registrations${isCurrent ? `, and new sign-ups go back to ${esc(fallback.name)}` : ''}`)}` +
+      '<button class="danger" type="submit">Delete event</button>')}
+</details>`;
   const past = shownEvent.code !== current.code
     ? `<p class="flash" role="status">You are looking at ${esc(shownEvent.name)}. New sign-ups go to ${esc(current.name)}.</p>` : '';
   const newEvent = `<details class="new-event"${eventError ? ' open' : ''}><summary>Start a new event</summary>
@@ -522,6 +541,7 @@ ${flash ? `<p class="flash" role="status">${flash}</p>` : ''}
 <nav class="tabs events" aria-label="Events"><span>Event</span>${eventLinks}</nav>
 ${newEvent}
 ${past}
+${manage}
 <form method="post" action="/admin/bracket" class="toggle">
   <input type="hidden" name="token" value="${esc(token)}">${viewFields(view)}
   <span>New sign-ups go to</span>${toggle}
@@ -1195,6 +1215,31 @@ export function createPortalServer(cfg, store, {
       }
       log(`new sign-ups now go to event ${event.code}`);
       return redirect(res, adminUrl({ ...view, event: '' }, 'event'), 303);
+    }
+    if (path.startsWith('/admin/event/')) {
+      const labels = { current: 'Make it the current event', rename: 'Rename', delete: 'Delete event' };
+      const action = path.slice('/admin/event/'.length);
+      if (!Object.hasOwn(labels, action)) return plain(res, 404, 'not found');
+      const code = String(fields.code ?? '');
+      try {
+        if (fields.confirm !== 'yes') throw new ValidationError(`Tick the box to confirm, then tap ${labels[action]}.`, 'event');
+        if (action === 'current') {
+          const event = store.setCurrentEvent(code);
+          log(`new sign-ups now go to event ${event.code}`);
+          return redirect(res, adminUrl({ ...view, event: '' }, 'event'), 303);
+        }
+        if (action === 'rename') {
+          const event = store.renameEvent(code, fields.name);
+          log(`event ${event.code} renamed`);
+          return redirect(res, adminUrl(view, 'event-renamed'), 303);
+        }
+        const event = store.deleteEvent(code);
+        log(`event ${event.code} deleted`);
+        return redirect(res, adminUrl({ ...view, event: '' }, 'event-deleted'), 303);
+      } catch (e) {
+        if (!(e instanceof ValidationError)) throw e;
+        return adminReply(400, { manageError: e.message });
+      }
     }
     plain(res, 404, 'not found');
   }
