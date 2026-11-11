@@ -658,15 +658,17 @@ export function runnerPage(cfg, state, {
 
   const free = players.filter((p) => p.status === 'free');
   // The pair that has waited longest comes first; the first few are shown, the rest fold away.
+  // Hiding a single pair saves nothing, so up to READY_MAX + 1 are all listed.
   const READY_MAX = 3;
   const since = (p) => [p.a.freeSince, p.b.freeSince].sort()[0];
   const byWait = [...proposals].sort((x, y) => since(x).localeCompare(since(y)));
   const readyRow = (p) => `<li><span class="pair"><strong>${esc(p.a.name)}</strong> vs <strong>${esc(p.b.name)}</strong> ` +
     `<span class="chip">${p.wins}W</span> <span class="hint">waiting ${elapsed(since(p))}</span></span>` +
     `${btn('start', { a: p.a.id, b: p.b.id }, 'Start', 'secondary')}</li>`;
-  const readyRest = byWait.slice(READY_MAX);
-  const ready = `<ul class="plain ready">${byWait.slice(0, READY_MAX).map(readyRow).join('') || none('Nobody to pair yet.')}</ul>` +
-    (readyRest.length ? `<details id="lcq-ready-more"><summary>Show all (${byWait.length})</summary><ul class="plain ready">${readyRest.map(readyRow).join('')}</ul></details>` : '');
+  const shown = byWait.length > READY_MAX + 1 ? READY_MAX : byWait.length;
+  const readyRest = byWait.slice(shown);
+  const ready = `<ul class="plain ready">${byWait.slice(0, shown).map(readyRow).join('') || none('Nobody to pair yet.')}</ul>` +
+    (readyRest.length ? `<details id="lcq-ready-more"><summary>${readyRest.length} more pairs</summary><ul class="plain ready">${readyRest.map(readyRow).join('')}</ul></details>` : '');
   const manual = free.length < 2 ? '' : `<details id="lcq-pick"><summary>Pick a match</summary><form method="post" action="/lcq/start" class="fields">${gameField}
   ${choose(free, 'pa', 'a', 'Player')}${choose(free, 'pb', 'b', 'Against')}
   <label class="check"><input type="checkbox" id="lcq-any"><span>Any wins (Against lists only the Player's wins)</span></label>

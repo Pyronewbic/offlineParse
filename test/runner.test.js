@@ -491,7 +491,7 @@ describe('LCQ runner over HTTP', () => {
     assert.equal(lcq.state().open.length, 1);
   });
 
-  test('Ready shows the three longest-waiting pairs, and the rest under Show all', () => {
+  test('Ready shows the longest-waiting pairs; past four, the rest fold under N more pairs', () => {
     signUp(20);
     // P19 and P20 have waited longest.
     const pf = lcq.state().players.filter((p) => ['P19', 'P20'].includes(p.name)).map((p) => p.id);
@@ -500,8 +500,13 @@ describe('LCQ runner over HTTP', () => {
     const top = body.match(/<ul class="plain ready">(.*?)<\/ul><details id="lcq-ready-more">/)[1];
     assert.equal((top.match(/action="\/lcq\/start"/g) ?? []).length, 3);
     assert.match(top, /^<li><span class="pair"><strong>P19<\/strong> vs <strong>P20<\/strong>/, 'the longest wait first');
-    assert.match(body, /<details id="lcq-ready-more"><summary>Show all \(10\)<\/summary><ul class="plain ready">(<li>.*?<\/li>){7}<\/ul><\/details>/);
-    assert.ok(!runnerPage(makeConfig(), { ...lcq.state(), proposals: lcq.state().proposals.slice(0, 3) }).includes('id="lcq-ready-more"'), 'three or fewer: nothing to show');
+    assert.match(body, /<details id="lcq-ready-more"><summary>7 more pairs<\/summary><ul class="plain ready">(<li>.*?<\/li>){7}<\/ul><\/details>/,
+      'the toggle says how many it holds, not the total');
+    const four = runnerPage(makeConfig(), { ...lcq.state(), proposals: lcq.state().proposals.slice(0, 4) });
+    assert.ok(!four.includes('id="lcq-ready-more"'), 'four pairs: all listed, no toggle for a single one');
+    assert.equal((four.match(/<ul class="plain ready">(.*?)<\/ul>/)[1].match(/action="\/lcq\/start"/g) ?? []).length, 4);
+    const five = runnerPage(makeConfig(), { ...lcq.state(), proposals: lcq.state().proposals.slice(0, 5) });
+    assert.match(five, /<summary>2 more pairs<\/summary>/, 'five: three, then two more');
   });
 
   test('a pair on more wins that has waited longer comes before newer 0W pairs', () => {
