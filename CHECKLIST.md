@@ -1,6 +1,6 @@
 # Booth checklist
 
-For whoever runs the booth. Commands and fixes are in the [README](README.md).
+For whoever runs the booth. Commands and fixes are in the [README](README.md); running the LCQ tablet is in [LCQ.md](LCQ.md).
 
 ## Dry run (once, with the real router, the laptop and two phones)
 
@@ -22,7 +22,9 @@ On each phone, forget the booth Wi-Fi, then scan the Wi-Fi QR:
 
 - [ ] Router on; laptop plugged in, on the booth Wi-Fi, with Auto-Join off for your other networks. "No internet connection" is normal.
 - [ ] `npm run booth-ip`, then `npm start` (Mac: `caffeinate -dims npm start`).
-- [ ] On the admin page, **New sign-ups go to** shows the bracket being played; the LCQ tablet is on the runner page.
+- [ ] On the admin page, **Start a new event** for today (unless it is already the one marked (now)), so today's sign-ups and LCQ are kept apart.
+- [ ] **New sign-ups go to** shows the bracket being played; the LCQ tablet is on the runner page.
+- [ ] LCQ, per game ([LCQ.md](LCQ.md)): **LCQ Finalize** when its sign-ups close, **LCQ End** when it is done.
 - [ ] One test registration from a phone, then delete it.
 - [ ] Guests with no sign-in: follow the poster text (Samsung: Wi-Fi settings, the network's gear icon).
 - [ ] Watch sign-ups on the admin page; for a spreadsheet use **Download CSV**, never `data/leads.csv`.
