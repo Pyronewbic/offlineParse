@@ -318,7 +318,8 @@ table.reg{width:100%;border-collapse:separate;border-spacing:0;font-size:15px;ba
 .tabs{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 16px}
 .tabs a{padding:.4rem .9rem;border:3px solid var(--line);border-radius:999px;font-weight:800;text-decoration:none;background:var(--surface)}
 .tabs a[aria-current=page]{background:var(--pink);color:var(--onPink)}
-.tabs.events{align-items:center;margin:0}
+.tabs.events{align-items:center}
+.head-row .tabs.events{margin:0}
 .tabs.events > span{font-weight:800;margin-right:4px}
 .new-event{margin:0}
 .new-event > summary{min-height:36px;padding:.35rem 0;cursor:pointer;font-weight:800}
@@ -326,18 +327,21 @@ table.reg{width:100%;border-collapse:separate;border-spacing:0;font-size:15px;ba
 .head-row > .toggle{margin:0 0 0 auto}
 .event-tools{display:flex;gap:0 24px;flex-wrap:wrap;margin:0 0 12px}
 .event-tools > details[open]{flex-basis:100%}
-.filters{display:flex;gap:12px 24px;align-items:flex-end;flex-wrap:wrap;margin:0 0 16px}
-.filters > .hint{margin:0 0 0 auto}
+.overview{display:grid;grid-template-columns:auto minmax(280px,1fr);gap:12px 24px;align-items:start;margin:0 0 18px}
+@media (max-width: 900px){.overview{grid-template-columns:1fr}}
+.overview .stats{grid-template-columns:1fr 1fr;margin:0 0 10px}
+.overview .hint{margin:0}
 .counts-wrap{overflow-x:auto;max-width:100%}
-table.counts{border-collapse:separate;border-spacing:4px;margin:-4px;font-variant-numeric:tabular-nums}
-.counts th{padding:0 .4rem;font-size:.85rem;text-align:left;white-space:nowrap}
-.counts thead th{text-align:center}
-.counts td{padding:0}
-.counts td a{display:block;min-width:3.2rem;padding:.3rem .6rem;border:2px solid var(--line);border-radius:8px;text-align:center;font-weight:800;text-decoration:none;background:var(--surface)}
-.counts td a.zero{color:var(--muted);border-color:var(--rule);font-weight:600}
-.counts td a[aria-current]{background:var(--pink);color:var(--onPink);border-color:var(--line)}
+table.counts{border-collapse:separate;border-spacing:0;border:3px solid var(--line);border-radius:12px;background:var(--surface);font-variant-numeric:tabular-nums}
+.counts th,.counts td{border-bottom:1px solid var(--rule)}
+.counts tbody tr:last-child > *{border-bottom:0}
+.counts thead th{padding:.5rem .7rem;font:800 .72rem/1.2 system-ui,sans-serif;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);text-align:center;white-space:nowrap}
+.counts tbody th{padding:.4rem .9rem;text-align:left;font-weight:800;white-space:nowrap}
+.counts td{padding:3px 4px;text-align:center}
+.counts td a{display:block;min-width:3rem;padding:.4rem .6rem;border-radius:8px;font-weight:800;font-size:1.05rem;text-decoration:none}
+.counts td a.zero{color:var(--muted);font-weight:500}
 .counts td a:hover{background:var(--hover)}
-.counts td a[aria-current]:hover{background:var(--pink)}
+.counts td a[aria-current]{background:var(--pink);color:var(--onPink)}
 .new-event form{max-width:36rem}
 button.subtle{min-height:40px;padding:.4rem .8rem;font-size:.85rem;color:var(--muted);background:transparent;border:2px solid var(--rule);box-shadow:none}
 .plain.results > li{display:flex;align-items:center;justify-content:space-between;gap:4px 12px;flex-wrap:wrap;min-height:56px;padding:.35rem 0;border-bottom:1px solid var(--rule)}
@@ -583,16 +587,18 @@ ${past}
 ${manage}
 ${newEvent}
 </div>
-<div class="filters">
+<div class="overview">
 ${counts}
-${runner ? `<p class="hint">LCQ runner for a tablet on the booth Wi-Fi: <strong>${esc(runner.url)}</strong>, PIN <strong>${esc(runner.pin)}</strong></p>` : ''}
-</div>
+<div>
 <dl class="stats">
   <div class="stat"><dt>Total</dt><dd>${leads.length}</dd></div>
   <div class="stat"><dt>Wi-Fi form</dt><dd>${bySource('form')}</dd></div>
   <div class="stat"><dt>At the desk</dt><dd>${bySource('desk')}</dd></div>
   <div class="stat"><dt>Last sign-up</dt><dd>${last ? esc(toISTShort(last.createdAt)) : '-'}</dd></div>
 </dl>
+${runner ? `<p class="hint">LCQ runner for a tablet on the booth Wi-Fi: <strong>${esc(runner.url)}</strong>, PIN <strong>${esc(runner.pin)}</strong></p>` : ''}
+</div>
+</div>
 <section class="panel add" aria-labelledby="add-title">
     <h2 id="add-title">Add a registration</h2>
     <p class="hint">For on-spot registrations entered by staff.</p>
