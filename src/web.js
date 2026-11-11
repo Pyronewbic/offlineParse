@@ -40,7 +40,11 @@ const LIST_MAX = 100;
 const adminUrl = ({ tab = 'all', event = '', game = '', all = '' }, msg = '') =>
   `/admin${query({ tab: tab === 'all' ? '' : tab, event, game, all, msg })}`;
 // A runner tab's address. With game tabs the game is always named, since '' (no game) is a tab of its own.
-const lcqUrl = (game, tabbed) => (tabbed ? `/lcq?${new URLSearchParams({ game })}` : '/lcq');
+// Tabbed runners always name the game, as '' is the No game tab; an earlier event is named too.
+const lcqUrl = (game, tabbed, event = '') => {
+  const params = new URLSearchParams({ ...(event ? { event } : {}), ...(tabbed ? { game } : {}) }).toString();
+  return params ? `/lcq?${params}` : '/lcq';
+};
 const viewFields = ({ tab = 'all', event = '', game = '', all = '' }) =>
   `<input type="hidden" name="tab" value="${esc(tab)}"><input type="hidden" name="event" value="${esc(event)}">` +
   `<input type="hidden" name="game" value="${esc(game)}"><input type="hidden" name="all" value="${esc(all)}">`;
@@ -562,11 +566,15 @@ export const runnerVersion = (cfg, lcq, state, now = Date.now()) => {
 };
 
 export function runnerPage(cfg, state, {
-  brand = NO_BRAND, error = '', notice = '', version = '', now = Date.now(), q = '', game = '', tabs = [],
+  brand = NO_BRAND, error = '', notice = '', version = '', now = Date.now(), q = '', game = '', tabs = [], events = [], event = null,
 } = {}) {
   const { players, proposals, open, decided, finalizedAt, endedAt, late, bye, winners } = state;
-  // An ended LCQ is read-only: no Start, results, Undo, Drop or Bye until it is reopened.
-  const live = !endedAt;
+  // An earlier event is for viewing; only the current one can be run.
+  const current = events.find((e) => e.current);
+  const past = !!(event && current && event.code !== current.code);
+  const eventParam = past ? event.code : '';
+  // An ended or earlier LCQ is read-only: no Start, results, Undo, Drop or Bye.
+  const live = !endedAt && !past;
   // Every form says which game it came from, so the tablet comes back to that tab.
   const btn = (action, fields, label, cls) => runnerButton(action, { ...fields, game }, label, cls);
   const gameField = fieldsOf({ game });
@@ -632,12 +640,13 @@ export function runnerPage(cfg, state, {
   const winnerText = winners.length ? `${winners.length > 1 ? 'Winners' : 'Winner'}: <strong>${listText(winners.map((p) => esc(p.name)))}</strong> (${winners[0].wins}W)` : 'No winner';
   const bracket = endedAt
     ? `<div class="panel" id="lcq-bracket"><p class="flash" role="status">Ended ${esc(toISTShort(endedAt))}. ${winnerText}.</p>` +
-      `<form method="post" action="/lcq/reopen" class="fields">${gameField}<label class="check"><input type="checkbox" name="confirm" value="yes" required>` +
-      `<span>This LCQ ended by mistake</span></label><button class="secondary" type="submit">Reopen</button></form></div>`
+      (past ? '' : `<form method="post" action="/lcq/reopen" class="fields">${gameField}<label class="check"><input type="checkbox" name="confirm" value="yes" required>` +
+      '<span>This LCQ ended by mistake</span></label><button class="secondary" type="submit">Reopen</button></form>') + '</div>'
     : finalizedAt
-    ? `<div class="panel" id="lcq-bracket"><p class="hint">Finalized ${esc(toISTShort(finalizedAt))}, ${players.length} in the bracket. ${late
+    ? `<div class="panel" id="lcq-bracket"><p class="hint">Finalized ${esc(toISTShort(finalizedAt))}, ${players.length} in the bracket.${past ? '' : ` ${late
       ? `${late} signed up since; Unfinalize to add them (${players.length + late} in, ${gapText(players.length + late)}).`
-      : 'Nobody has signed up since.'}</p>${btn('unfinalize', {}, 'LCQ Unfinalize', 'secondary')}</div>`
+      : 'Nobody has signed up since.'}`}</p>${past ? '' : btn('unfinalize', {}, 'LCQ Unfinalize', 'secondary')}</div>`
+    : past ? (players.length ? `<div class="panel" id="lcq-bracket"><p class="hint">${players.length} in the bracket; it was never ended.</p></div>` : '')
     : players.length ? `<div class="panel" id="lcq-bracket"><p class="hint">${players.length} in the bracket: ${gapText(players.length)}.</p>` +
       `<form method="post" action="/lcq/finalize" class="fields">${gameField}${short ? `<label class="check"><input type="checkbox" name="confirm" value="yes" required>` +
       `<span>${players.length} in: ${short} short of ${players.length + short}; some players will need a Bye</span></label>` : ''}` +
@@ -664,12 +673,16 @@ export function runnerPage(cfg, state, {
     : !found.length ? `<p class="hint">Nobody matches "${esc(wanted)}".</p>`
     : `<p class="hint">${found.length > FOUND_MAX ? `First ${FOUND_MAX} of ${found.length}; type more of the name.` : `${found.length} found.`}</p>${nameRows(found.slice(0, FOUND_MAX), true)}`;
   const search = `<section class="panel" id="lcq-find" aria-labelledby="lcq-find-title"><h2 id="lcq-find-title" class="sr-only">Find a player</h2>` +
-    `<form method="get" action="/lcq" class="fields" role="search">${tabbed ? gameField : ''}<div><label for="lcq-q">Find a player, by name or number</label>` +
+    `<form method="get" action="/lcq" class="fields" role="search">${past ? fieldsOf({ event: event.code }) : ''}${tabbed ? gameField : ''}<div><label for="lcq-q">Find a player, by name or number</label>` +
     `<input id="lcq-q" name="q" type="search" maxlength="60" value="${esc(q)}"></div><button class="secondary" type="submit">Find</button>` +
-    `${wanted ? `<a class="btn secondary" href="${esc(lcqUrl(game, tabbed))}">Clear</a>` : ''}</form>${foundRows}</section>`;
+    `${wanted ? `<a class="btn secondary" href="${esc(lcqUrl(game, tabbed, eventParam))}">Clear</a>` : ''}</form>${foundRows}</section>`;
   const gameTabs = tabbed ? `<nav class="tabs" aria-label="Games">${tabs.map((t) =>
-    `<a href="${esc(lcqUrl(t.game, tabbed))}"${t.game === game ? ' aria-current="page"' : ''}>${t.game ? esc(t.game) : 'No game'} (${t.players})` +
+    `<a href="${esc(lcqUrl(t.game, tabbed, eventParam))}"${t.game === game ? ' aria-current="page"' : ''}>${t.game ? esc(t.game) : 'No game'} (${t.players})` +
     `${t.ended ? ', ended' : t.ready ? `, ${t.ready} ready` : ''}</a>`).join('')}</nav>` : '';
+
+  const eventLinks = events.length > 1 ? `<nav class="tabs events" aria-label="Events"><span>Event</span>${events.map((e) =>
+    `<a href="${esc(lcqUrl(game, tabbed, e.current ? '' : e.code))}"${e.code === event?.code ? ' aria-current="page"' : ''}>${esc(e.name)}${e.current ? ' (now)' : ''}</a>`).join('')}</nav>` : '';
+  const pastNote = past ? `<p class="flash" role="status">You are looking at ${esc(event.name)}. Only ${esc(current.name)} can be run.</p>` : '';
 
   // End sits apart from Unfinalize, at the bottom, so a stray tap near the top cannot end the LCQ.
   const end = !live || !finalizedAt ? '' : `<section class="panel" id="lcq-end" aria-labelledby="lcq-end-title"><h2 id="lcq-end-title">End this LCQ</h2>` +
@@ -681,6 +694,8 @@ export function runnerPage(cfg, state, {
 
   return page('LCQ runner', `<div id="version" data-version="${esc(version)}" hidden></div>
 ${adminHeader(cfg, brand, 'LCQ runner')}
+${eventLinks}
+${pastNote}
 ${gameTabs}
 <nav class="jump" aria-label="Sections">${jumps}</nav>
 ${bracket}
@@ -820,10 +835,10 @@ export function createPortalServer(cfg, store, {
   const overLimit = limiter(submitLimit, 'sign-ups');
   const pinOverLimit = limiter({ max: 5, windowMs: 60_000 }, 'LCQ PIN tries');
   const runnerInfo = () => (lcq ? { url: `${portalUrl}lcq`, pin: lcq.pin() } : null);
-  // The runner's game tabs: the configured games, then any other game this event's LCQ players are in.
-  const runnerGames = () => [...new Set([...cfg.games, ...lcq.games()])];
-  const gameOf = (value) => {
-    const games = runnerGames();
+  // The runner's game tabs: the configured games, then any other game the event's LCQ players are in.
+  const runnerGames = (view = lcq) => [...new Set([...cfg.games, ...view.games()])];
+  const gameOf = (value, view = lcq) => {
+    const games = runnerGames(view);
     return games.includes(value) ? value : games[0] ?? '';
   };
   // A tab and event from the URL or a form; anything unknown means the default.
@@ -897,16 +912,24 @@ export function createPortalServer(cfg, store, {
     if (method !== 'GET' || (path !== '/lcq' && path !== '/lcq/version')) return plain(res, 404, 'not found');
     if (!session) return path === '/lcq' ? html(res, 200, pinPage(cfg, brand)) : plain(res, 401, 'enter the PIN at /lcq');
     const params = new URL(req.url, 'http://x').searchParams;
-    const game = gameOf(params.get('game'));
-    const state = lcq.state(game);
+    // An earlier event, picked by its code, is shown read-only; anything else is the current event.
+    const current = store.currentEvent();
+    const shown = store.event(params.get('event') ?? '') ?? current;
+    const view = shown.code === current.code ? lcq : lcq.at(shown.code);
+    const game = gameOf(params.get('game'), view);
+    const state = view.state(game);
     const now = Date.now();
-    const version = runnerVersion(cfg, lcq, state, now);
+    const version = runnerVersion(cfg, view, state, now);
     if (path === '/lcq/version') return send(res, 200, 'application/json', JSON.stringify({ v: version }));
     const { error = '', notice = '' } = flashes.get(session) ?? {};
     flashes.delete(session);
     const q = (params.get('q') ?? '').slice(0, 60);
-    const tabs = runnerGames().map((g) => ({ game: g, players: lcq.leads(g).length, ready: lcq.state(g).proposals.length, ended: !!lcq.phase(g).endedAt }));
-    return send(res, 200, 'text/html; charset=utf-8', runnerPage(cfg, state, { brand, error, notice, version, now, q, game, tabs }),
+    // An earlier event has nothing to start, so its tabs show no ready count.
+    const tabs = runnerGames(view).map((g) => ({
+      game: g, players: view.leads(g).length, ready: view === lcq ? view.state(g).proposals.length : 0, ended: !!view.phase(g).endedAt,
+    }));
+    const events = store.events().map((e) => ({ ...e, current: e.code === current.code }));
+    return send(res, 200, 'text/html; charset=utf-8', runnerPage(cfg, state, { brand, error, notice, version, now, q, game, tabs, events, event: shown }),
       { 'Content-Security-Policy': RUNNER_CSP });
   }
 

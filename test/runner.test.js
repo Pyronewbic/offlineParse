@@ -414,6 +414,57 @@ describe('LCQ runner over HTTP', () => {
     assert.match(found, /Nobody matches "asha\.secret"/, 'and no search by email');
   });
 
+  test('an earlier event can be picked and viewed, but nothing in it can be changed', async () => {
+    const cookie = await signIn();
+    const get = async (path) => (await request({ port, path, headers: cookie })).body;
+    const october = store.currentEvent();
+    signUp(4);
+    startAll();
+    const [m1, m2] = lcq.state().open;
+    lcq.result(m1.id, m1.a);
+    lcq.finalize();
+    assert.equal((await get('/lcq')).includes('aria-label="Events"'), false, 'one event: no picker');
+    const november = store.startEvent(`November ${now}`);
+    try {
+      const fresh = await get('/lcq');
+      assert.match(fresh, new RegExp(`<nav class="tabs events" aria-label="Events"><span>Event</span><a href="/lcq" aria-current="page">${november.name} \\(now\\)</a><a href="/lcq\\?event=${october.code}">`));
+      assert.ok(!fresh.includes('P1'), 'the current event starts empty');
+
+      const old = await get(`/lcq?event=${october.code}`);
+      assert.match(old, new RegExp(`You are looking at ${october.name}\\. Only ${november.name} can be run\\.`));
+      assert.match(old, /<li>P1 beat P2<\/li>/, 'its results, without Undo');
+      assert.ok(!old.includes(' ready</a>') && !old.includes('Ready ('), 'nothing is offered as ready to start');
+      assert.match(old, /Finalized [^<]+, 4 in the bracket\.<\/p><\/div>/, 'its state, without Unfinalize');
+      for (const action of ['result', 'start', 'undo', 'cancel', 'drop', 'bye', 'finalize', 'unfinalize', 'end', 'reopen']) {
+        assert.ok(!old.includes(`action="/lcq/${action}"`), `no ${action} on an earlier event`);
+      }
+      assert.match(old, new RegExp(`<form method="get" action="/lcq" class="fields" role="search"><input type="hidden" name="event" value="${october.code}">`), 'search stays on that event');
+      assert.equal(old.match(/data-version="([^"]+)"/)[1], JSON.parse(await get(`/lcq/version?event=${october.code}`)).v, 'the page and the poll agree');
+      assert.ok((await get('/lcq?event=nope')).includes(`${november.name} (now)</a>`) && !(await get('/lcq?event=nope')).includes('You are looking at'), 'an unknown event is the current one');
+
+      await post('/lcq/result', { match: String(m2.id), winner: String(m2.a) }, cookie);
+      assert.match(await get('/lcq'), /That match is from an earlier event, which can only be viewed\./, 'a forged post is refused, and says why');
+      assert.equal(lcq.at(october.code).state().open.length, 1, 'the earlier match is untouched');
+      await post('/lcq/undo', { match: String(m1.id) }, cookie);
+      assert.equal(lcq.at(october.code).state().decided.length, 1);
+      const p1 = lcq.at(october.code).state().players.find((p) => p.name === 'P1');
+      assert.equal(p1.status, 'free', 'precondition: P1 could be dropped if this were the current event');
+      await post('/lcq/drop', { player: String(p1.id), confirm: 'yes' }, cookie);
+      assert.equal(lcq.at(october.code).state().players.find((p) => p.id === p1.id).status, 'free', 'not dropped');
+
+      const octoberView = lcq.at(october.code);
+      octoberView.cancel(m2.id);
+      octoberView.end('', true);
+      const ended = await get(`/lcq?event=${october.code}`);
+      assert.match(ended, /Ended [^<]+\. Winner: <strong>P1<\/strong> \(1W\)\.<\/p><\/div>/, 'an ended earlier event shows its Winner');
+      assert.ok(!ended.includes('action="/lcq/reopen"'), 'without Reopen');
+      assert.match(await get('/lcq'), /<h1>LCQ runner<\/h1>/, 'positive control: the current event still renders');
+    } finally {
+      store.db.prepare("UPDATE settings SET value = ? WHERE key = 'currentEvent'").run(october.code);
+      store.db.prepare('DELETE FROM events WHERE code = ?').run(november.code);
+    }
+  });
+
   test('the admin page shows the runner address and PIN', async () => {
     const admin = await request({ port, path: '/admin' });
     assert.match(admin.body, new RegExp(`LCQ runner for a tablet on the booth Wi-Fi: <strong>http://127\\.0\\.0\\.1:${port}/lcq</strong>, PIN <strong>${lcq.pin()}</strong>`));

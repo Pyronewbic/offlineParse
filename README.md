@@ -81,6 +81,8 @@ npm start
 4. **Bye.** Once finalized, a player alone on their wins with nobody below to catch up gets a **Bye** in Needs attention: one win, no match, undoable.
 5. **LCQ End** (bottom of the tab) shows the Winner (most wins still in), makes the tab read-only and marks the game "(LCQ ended)" on the guest form. **Reopen** undoes it.
 
+**Event** at the top picks an earlier event to look back at its results and winners; only the current event can be run.
+
 **Needs attention** lists long waits and long matches; **Find a player** searches by name or number; **Standings** counts matches on, waiting and eliminated, with each free player's wait (a long one may mean they left). Tap a name for their number and **Drop** (tick "not here" first), which gives their match to the opponent. The tablet stays signed in until the server restarts.
 
 **A phone gets no sign-in page:** run `npm start -- --verbose` and rejoin from the phone; each DNS question and web request is printed.

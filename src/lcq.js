@@ -37,6 +37,11 @@ export class Lcq {
     return this.store.currentEvent().code;
   }
 
+  /** The same runner, reading an earlier event; for viewing only, since every change checks the current event. */
+  at(eventCode) {
+    return Object.create(this, { event: { value: () => eventCode } });
+  }
+
   /** This event's LCQ registrations, oldest first; in one game, or every game. */
   leads(game = null) {
     const event = this.event();
@@ -171,7 +176,9 @@ export class Lcq {
   match(id) {
     const m = this.db.prepare('SELECT * FROM lcq_matches WHERE id = ?').get(id);
     if (!m) throw new LcqError('That match is gone; reload the page.');
-    this.live((this.store.get(m.a) ?? this.store.get(m.b))?.game ?? '');
+    const lead = this.store.get(m.a) ?? this.store.get(m.b);
+    if (lead && lead.eventCode !== this.event()) throw new LcqError('That match is from an earlier event, which can only be viewed.');
+    this.live(lead?.game ?? '');
     return m;
   }
 
