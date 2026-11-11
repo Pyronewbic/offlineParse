@@ -277,4 +277,32 @@ describe('LCQ runner', () => {
     lcq.start(a.id, b.id);
     assert.equal(lcq.state('SSBU').open.length, 1, 'SSBU is not ended');
   });
+
+  test('rounds group matches by the wins they were entered on, in order, with late sign-ups and byes where they belong', () => {
+    for (let i = 0; i < 5; i++) signUp();
+    lcq.finalize('', true);
+    play('P1', 'P2');
+    play('P3', 'P4');
+    win('P1');
+    win('P3');
+    lcq.bye(id('P5'));
+    play('P1', 'P3');
+    const names = () => lcq.state().rounds.map((r) => r.map((m) => (m.a === m.b ? `${m.aName} bye` : `${m.aName}-${m.bName}`)));
+    assert.deepEqual(names(), [['P1-P2', 'P3-P4', 'P5 bye'], ['P1-P3']], 'the bye is P5\'s first round; the open match is in round 2');
+    win('P3');
+    lcq.bye(id('P5'));
+    assert.deepEqual(names(), [['P1-P2', 'P3-P4', 'P5 bye'], ['P1-P3', 'P5 bye']]);
+    play('P3', 'P5');
+    assert.deepEqual(names().at(-1), ['P3-P5'], 'the final is round 3');
+    lcq.unfinalize();
+    signUp();
+    signUp();
+    play('P6', 'P7');
+    assert.deepEqual(names()[0], ['P1-P2', 'P3-P4', 'P5 bye', 'P6-P7'], 'late sign-ups play in round 1, after the others');
+    win('P7');
+    lcq.cancel(openMatch('P3').id);
+    assert.deepEqual([player('P7').wins, player('P3').wins], [1, 2], 'precondition');
+    play('P7', 'P3');
+    assert.deepEqual(names()[2], ['P7-P3'], 'P7 (1W) picked first against P3 (2W) by hand: the round of the one further along');
+  });
 });

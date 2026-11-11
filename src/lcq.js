@@ -112,15 +112,14 @@ export class Lcq {
     this.db.prepare('INSERT INTO lcq_drops (leadId, at) VALUES (?, ?)').run(leadId, now());
   }
 
-  /** Changes whenever anything the runner shows changes, so the tablet knows when to reload. */
+  /**
+   * Changes whenever anything the runner shows changes, so the tablet knows when to reload. SQLite's count of rows
+   * written on this connection only goes up, so a delete then an add (which can reuse the id) still moves it, and
+   * data_version moves when another connection writes; a write the runner does not show costs one extra update.
+   */
   version() {
-    const n = (sql) => Object.values(this.db.prepare(sql).get())[0] ?? 0;
-    return [
-      this.event(), n("SELECT COUNT(*) FROM leads WHERE bracket = 'lcq'"),
-      n('SELECT MAX(id) FROM lcq_matches'), n('SELECT COUNT(*) FROM lcq_matches'),
-      n('SELECT COUNT(*) FROM lcq_matches WHERE winner IS NOT NULL'), n('SELECT COUNT(*) FROM lcq_drops'),
-      n("SELECT group_concat(coalesce(finalizedAt, '') || '/' || coalesce(endedAt, '')) FROM lcq_games"),
-    ].join('-');
+    const n = (sql) => Object.values(this.db.prepare(sql).get())[0];
+    return `${this.event()}-${n('SELECT total_changes()')}-${n('PRAGMA data_version')}`;
   }
 
   /** Everything the runner page shows for one game, derived from registrations and matches. */
@@ -166,8 +165,17 @@ export class Lcq {
     const top = Math.max(-1, ...players.filter((p) => p.status === 'free' || p.status === 'playing').map((p) => p.wins));
     const winners = players.filter((p) => (p.status === 'free' || p.status === 'playing') && p.wins === top);
     const label = (m) => ({ ...m, aName: name(m.a), bName: name(m.b) });
+    // Round k holds the matches entered on k-1 wins (a bye is a match with itself); wins counted in match order.
+    // A hand-picked match across wins goes in the round of the player further along.
+    const winsBefore = new Map();
+    const rounds = [];
+    for (const m of matches) {
+      const r = Math.max(winsBefore.get(m.a) ?? 0, winsBefore.get(m.b) ?? 0);
+      (rounds[r] ??= []).push(label(m));
+      if (m.winner !== null) winsBefore.set(m.winner, (winsBefore.get(m.winner) ?? 0) + 1);
+    }
     return {
-      ...phase, late: all.length - leads.size, players, proposals, bye, winners,
+      ...phase, late: all.length - leads.size, players, proposals, bye, winners, rounds: Array.from(rounds, (r) => r ?? []),
       open: matches.filter((m) => m.winner === null).map(label),
       decided: matches.filter((m) => m.winner !== null).reverse().map(label),
     };

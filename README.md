@@ -75,11 +75,13 @@ npm start
 
 **LCQ runner:** on a tablet on the booth Wi-Fi, open the address and PIN shown on the admin page (`http://100.64.0.2/lcq`). Each game has its own tab. The LCQ is single elimination.
 
-1. **Play.** A sign-up can play at once. Players on the same wins are offered a match, longest waiting first: tap **Start**, then the winner. Or pick **Player** and **Against** yourself (Against lists the same wins; tick **Any wins** for everyone).
+1. **Play.** A sign-up can play at once. Ready to play lists the pairs on the same wins, longest waiting first (past four, the rest fold under **N more pairs**): tap **Start**, then the winner (A or B). The result shows at the top with **Undo** until the next change. **Pick a match** pairs any two yourself (Against lists the same wins; tick **Any wins** for everyone).
 2. **Fill the bracket.** It runs out evenly at a power of 2, so the tab says how many more make it full (24 in: need 8 more for 32).
 3. **LCQ Finalize** fixes who is in (a tick if it is not full). Later sign-ups are told the bracket is full and counted on the tab; **LCQ Unfinalize** lets them in.
 4. **Bye.** Once finalized, a player alone on their wins with nobody below to catch up gets a **Bye** in Needs attention: one win, no match, undoable.
 5. **LCQ End** (bottom of the tab) shows the Winner (most wins still in), makes the tab read-only and marks the game "(LCQ ended)" on the guest form. **Reopen** undoes it.
+
+**Rounds** (folded during play, open once ended) draws the bracket start.gg style: a column per round, each match with its winner, and a line from each winner to the match they played next (or to where they are waiting). Once finalized each round says how many matches are still to come, and the last one in shows as the Winner.
 
 **Event** at the top picks an earlier event to look back at its results and winners; only the current event can be run.
 

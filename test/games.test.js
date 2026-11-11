@@ -323,7 +323,7 @@ describe('LCQ runner tabs', () => {
     signUp('SF6', 1, 10);
     const first = await page();
     assert.match(first, /<nav class="tabs" aria-label="Games"><a href="\/lcq\?game=SSBU" aria-current="page">SSBU \(4\), 2 ready<\/a><a href="\/lcq\?game=SF6">SF6 \(1\)<\/a><a href="\/lcq\?game=Avatar\+Legends">Avatar Legends \(0\)<\/a><\/nav>/);
-    assert.match(first, /SSBU-0 vs SSBU-1 <span class="chip">0W<\/span>/);
+    assert.match(first, /<strong>SSBU-0<\/strong> vs <strong>SSBU-1<\/strong> <span class="chip">0W<\/span>/);
     const sf6 = await page('?game=SF6');
     assert.match(sf6, /aria-current="page">SF6 \(1\)</);
     assert.ok(!sf6.includes('SSBU-0'), 'no other game on this tab');
