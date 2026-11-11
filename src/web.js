@@ -280,7 +280,14 @@ details.panel > summary h2{display:inline}
 .stat dt{font:900 .8rem/1.2 ${HEAVY};text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
 .stat dd{margin:4px 0 0;font-size:clamp(1.15rem,2.2vw,1.55rem);font-weight:800;font-variant-numeric:tabular-nums;white-space:nowrap}
 .flash{margin:0 0 16px;padding:.7rem .9rem;border:3px solid var(--line);border-left:12px solid var(--pink);border-radius:10px;background:var(--surface);font-weight:700}
-.panels{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:16px;margin:0 0 22px}
+.panel.add{margin:0 0 22px}
+.panel.add fieldset.games .check{display:inline-flex;margin:.5rem 24px 0 0}
+.list-bar{display:flex;gap:8px 16px;align-items:center;justify-content:space-between;flex-wrap:wrap;margin:0 0 8px}
+.list-bar .showing{margin:0}
+.find{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.find label{margin:0;font-weight:800}
+.find input{width:18rem;max-width:60vw;min-height:42px;padding:.45rem .8rem;font:inherit;font-size:16px;color:var(--text);background:var(--surface);border:3px solid var(--line);border-radius:10px;-webkit-appearance:none;appearance:none}
+form.find > button.secondary{min-height:42px;margin:0;padding:.45rem 1rem}
 .panel{border:3px solid var(--line);border-radius:14px;background:var(--surface);padding:14px 18px 18px}
 .panel h2{margin:0 0 .2rem;font:900 1.1rem/1.2 ${HEAVY};text-transform:uppercase;letter-spacing:.03em}
 .panel .fields{display:flex;gap:10px 12px;align-items:flex-end;flex-wrap:wrap}
@@ -582,8 +589,7 @@ ${runner ? `<p class="hint">LCQ runner for a tablet on the booth Wi-Fi: <strong>
   <div class="stat"><dt>At the desk</dt><dd>${bySource('desk')}</dd></div>
   <div class="stat"><dt>Last sign-up</dt><dd>${last ? esc(toISTShort(last.createdAt)) : '-'}</dd></div>
 </dl>
-<div class="panels">
-  <section class="panel" aria-labelledby="add-title">
+<section class="panel add" aria-labelledby="add-title">
     <h2 id="add-title">Add a registration</h2>
     <p class="hint">For on-spot registrations entered by staff.</p>
     ${errorBlock(error)}
@@ -599,18 +605,15 @@ ${runner ? `<p class="hint">LCQ runner for a tablet on the booth Wi-Fi: <strong>
         <span>They agreed to ${esc(cfg.orgName)} keeping their name, number and email for this event's registration (read it to them).</span></label>
       <button type="submit">Add registration</button>
     </form>
-  </section>
-  <section class="panel" aria-labelledby="find-title">
-    <h2 id="find-title">Find someone</h2>
-    <p class="hint">Search by name, email or any part of the number.</p>
-    <form method="get" action="/admin" class="fields" role="search">
-      ${tab === 'all' ? '' : `<input type="hidden" name="tab" value="${esc(tab)}">`}${view.event ? `<input type="hidden" name="event" value="${esc(view.event)}">` : ''}${view.game ? `<input type="hidden" name="game" value="${esc(view.game)}">` : ''}
-      <div><label for="q">Name, email or number</label><input id="q" name="q" type="search" maxlength="60" value="${esc(q)}"></div>
-      <button class="secondary" type="submit">Search</button>
-    </form>
-  </section>
-</div>
+</section>
+<div class="list-bar">
 <p class="showing">${showing}</p>
+<form method="get" action="/admin" class="find" role="search">
+  ${tab === 'all' ? '' : `<input type="hidden" name="tab" value="${esc(tab)}">`}${view.event ? `<input type="hidden" name="event" value="${esc(view.event)}">` : ''}${view.game ? `<input type="hidden" name="game" value="${esc(view.game)}">` : ''}
+  <label for="q">Find</label><input id="q" name="q" type="search" maxlength="60" placeholder="Name, email or number" value="${esc(q)}">
+  <button class="secondary" type="submit">Search</button>
+</form>
+</div>
 <table class="reg">
 <caption class="sr-only">Registrations, newest first</caption>
 <thead><tr><th scope="col">#</th><th scope="col">Name</th><th scope="col">Bracket</th>${gameCol ? '<th scope="col">Game</th>' : ''}<th scope="col">Mobile</th><th scope="col">Email</th><th scope="col">Came in via</th><th scope="col">Signed up (IST)</th><th scope="col"><span class="sr-only">Actions</span></th></tr></thead>
