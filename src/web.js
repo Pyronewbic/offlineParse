@@ -280,7 +280,14 @@ details.panel > summary h2{display:inline}
 .stat dt{font:900 .8rem/1.2 ${HEAVY};text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
 .stat dd{margin:4px 0 0;font-size:clamp(1.15rem,2.2vw,1.55rem);font-weight:800;font-variant-numeric:tabular-nums;white-space:nowrap}
 .flash{margin:0 0 16px;padding:.7rem .9rem;border:3px solid var(--line);border-left:12px solid var(--pink);border-radius:10px;background:var(--surface);font-weight:700}
-.panels{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:16px;margin:0 0 22px}
+.panel.add{margin:0 0 22px}
+.panel.add fieldset.games .check{display:inline-flex;margin:.5rem 24px 0 0}
+.list-bar{display:flex;gap:8px 16px;align-items:center;justify-content:space-between;flex-wrap:wrap;margin:0 0 8px}
+.list-bar .showing{margin:0}
+.find{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.find label{margin:0;font-weight:800}
+.find input{width:18rem;max-width:60vw;min-height:42px;padding:.45rem .8rem;font:inherit;font-size:16px;color:var(--text);background:var(--surface);border:3px solid var(--line);border-radius:10px;-webkit-appearance:none;appearance:none}
+form.find > button.secondary{min-height:42px;margin:0;padding:.45rem 1rem}
 .panel{border:3px solid var(--line);border-radius:14px;background:var(--surface);padding:14px 18px 18px}
 .panel h2{margin:0 0 .2rem;font:900 1.1rem/1.2 ${HEAVY};text-transform:uppercase;letter-spacing:.03em}
 .panel .fields{display:flex;gap:10px 12px;align-items:flex-end;flex-wrap:wrap}
@@ -311,10 +318,26 @@ table.reg{width:100%;border-collapse:separate;border-spacing:0;font-size:15px;ba
 .tabs{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 16px}
 .tabs a{padding:.4rem .9rem;border:3px solid var(--line);border-radius:999px;font-weight:800;text-decoration:none;background:var(--surface)}
 .tabs a[aria-current=page]{background:var(--pink);color:var(--onPink)}
-.tabs.events{align-items:center}
+.tabs.events{align-items:center;margin:0}
 .tabs.events > span{font-weight:800;margin-right:4px}
-.new-event{margin:0 0 16px}
-.new-event > summary{min-height:44px;padding:.5rem 0;cursor:pointer;font-weight:800}
+.new-event{margin:0}
+.new-event > summary{min-height:36px;padding:.35rem 0;cursor:pointer;font-weight:800}
+.head-row{display:flex;gap:8px 24px;align-items:center;flex-wrap:wrap;margin:0 0 8px}
+.head-row > .toggle{margin:0 0 0 auto}
+.event-tools{display:flex;gap:0 24px;flex-wrap:wrap;margin:0 0 12px}
+.event-tools > details[open]{flex-basis:100%}
+.filters{display:flex;gap:12px 24px;align-items:flex-end;flex-wrap:wrap;margin:0 0 16px}
+.filters > .hint{margin:0 0 0 auto}
+.counts-wrap{overflow-x:auto;max-width:100%}
+table.counts{border-collapse:separate;border-spacing:4px;margin:-4px;font-variant-numeric:tabular-nums}
+.counts th{padding:0 .4rem;font-size:.85rem;text-align:left;white-space:nowrap}
+.counts thead th{text-align:center}
+.counts td{padding:0}
+.counts td a{display:block;min-width:3.2rem;padding:.3rem .6rem;border:2px solid var(--line);border-radius:8px;text-align:center;font-weight:800;text-decoration:none;background:var(--surface)}
+.counts td a.zero{color:var(--muted);border-color:var(--rule);font-weight:600}
+.counts td a[aria-current]{background:var(--pink);color:var(--onPink);border-color:var(--line)}
+.counts td a:hover{background:var(--hover)}
+.counts td a[aria-current]:hover{background:var(--pink)}
 .new-event form{max-width:36rem}
 button.quiet{min-height:40px;padding:.4rem .8rem;font-size:.85rem;color:var(--error);background:transparent;border:2px solid var(--error);box-shadow:none}
 .empty{padding:28px 14px;text-align:center;color:var(--muted)}
@@ -425,6 +448,8 @@ ${full.length ? `<p>The ${named.length ? `${strong(named)} ` : ''}LCQ bracket${f
 
 const FLASH = {
   added: 'Registration added.',
+  'event-renamed': 'Event renamed.',
+  'event-deleted': 'Event deleted.',
   'added-some': 'Added for the games they were not in yet; they were already registered for the others.',
   deleted: 'Registration deleted from the database, the spreadsheet and the log.',
   'deleted-partial': 'Registration deleted from the database. The spreadsheet or the log still has it (see the warning above); ' +
@@ -453,7 +478,7 @@ function adminHeader(cfg, brand, title, actions = '') {
 
 export function adminPage(cfg, {
   leads: everyone, token, brand = NO_BRAND, q = '', msg = '', error = '', warnings = [], form = {}, view = { tab: 'all', event: '' },
-  active = 'normal', runner = null, events, current, eventError = '', eventName = '',
+  active = 'normal', runner = null, events, current, eventError = '', eventName = '', manageError = '',
 }) {
   const { tab } = view;
   const shownEvent = events.find((e) => e.code === view.event) ?? current;
@@ -491,19 +516,42 @@ export function adminPage(cfg, {
   const flash = msg === 'bracket' ? `New sign-ups now go to ${label(active)}.`
     : msg === 'event' ? `New sign-ups now go to ${esc(current.name)}.` : Object.hasOwn(FLASH, msg) ? FLASH[msg] : '';
   const exportUrl = `/admin/export.csv${query({ tab: tab === 'all' ? '' : tab, event: view.event, game: view.game })}`;
-  const tabs = TABS.map((t) => {
-    const count = t === 'all' ? all.length : all.filter((l) => l.bracket === t).length;
-    return `<a href="${esc(adminUrl({ ...view, tab: t }))}"${t === tab ? ' aria-current="page"' : ''}>${t === 'all' ? 'All' : label(t)} (${count})</a>`;
-  }).join('');
-  // Game names in this event that are no longer configured still get a filter, so their rows stay reachable.
+  // One table filters by bracket and game at once: a cell is the sign-ups in that bracket and game, and picking
+  // it shows exactly those rows. Game names no longer configured still get a column, so their rows stay reachable.
   const gameNames = [...new Set([...cfg.games, ...atEvent.map((l) => l.game).filter(Boolean)])];
-  const gameLinks = gameNames.length ? [['', 'All games', atEvent.length], ...gameNames.map((g) => [g, g, atEvent.filter((l) => l.game === g).length])]
-    .map(([g, text, n]) => `<a href="${esc(adminUrl({ ...view, game: g }))}"${g === view.game ? ' aria-current="page"' : ''}>${esc(text)} (${n})</a>`).join('') : '';
+  const cols = [['', 'All games'], ...gameNames.map((g) => [g, g])];
+  const cell = (t, [g, gText]) => {
+    const n = atEvent.filter((l) => (t === 'all' || l.bracket === t) && (!g || l.game === g)).length;
+    const on = t === tab && g === view.game;
+    return `<td><a href="${esc(adminUrl({ ...view, tab: t, game: g }))}"${n ? '' : ' class="zero"'}${on ? ' aria-current="page"' : ''}` +
+      ` aria-label="${t === 'all' ? 'All brackets' : label(t)}, ${esc(gText)}: ${n} sign-up${n === 1 ? '' : 's'}">${n}</a></td>`;
+  };
+  const counts = `<div class="counts-wrap"><table class="counts"><caption class="sr-only">Sign-ups by bracket and game; pick a number to show those</caption>` +
+    `<thead><tr><td></td>${cols.map(([, gText]) => `<th scope="col">${esc(gText)}</th>`).join('')}</tr></thead><tbody>` +
+    TABS.map((t) => `<tr><th scope="row">${t === 'all' ? 'All' : label(t)}</th>${cols.map((c) => cell(t, c)).join('')}</tr>`).join('') +
+    '</tbody></table></div>';
   const eventLinks = events.map((e) => `<a href="${esc(adminUrl({ tab, event: e.code === current.code ? '' : e.code }))}"` +
     `${e.code === shownEvent.code ? ' aria-current="page"' : ''}>${esc(e.name)}${e.code === current.code ? ' (now)' : ''}</a>`).join('');
+  // Making current, renaming and deleting each need a tick, like Drop and End; only an empty event can be deleted.
+  const isCurrent = shownEvent.code === current.code;
+  const tick = (label) => `<label class="check"><input type="checkbox" name="confirm" value="yes" required><span>${label}</span></label>`;
+  const eventForm = (action, body) => `<form method="post" action="/admin/event/${action}" class="fields">` +
+    `<input type="hidden" name="token" value="${esc(token)}">${viewFields(view)}<input type="hidden" name="code" value="${esc(shownEvent.code)}">${body}</form>`;
+  const fallback = events.find((e) => e.code !== shownEvent.code);
+  const manage = `<details class="new-event"${manageError ? ' open' : ''}><summary>Manage ${esc(shownEvent.name)}${isCurrent ? ' (current)' : ''}</summary>
+${errorBlock(manageError)}
+${isCurrent ? '<p class="hint">New sign-ups and the LCQ tablet go to this event.</p>'
+    : eventForm('current', `${tick(`New sign-ups and the LCQ tablet move to ${esc(shownEvent.name)}`)}<button type="submit">Make it the current event</button>`)}
+${eventForm('rename', `<div><label for="rename-event">New name</label><input id="rename-event" name="name" type="text" maxlength="60" required value="${esc(shownEvent.name)}"></div>` +
+    `${tick(`Rename this event; its code ${esc(shownEvent.code)} stays, so downloads and the log still match`)}<button class="secondary" type="submit">Rename</button>`)}
+${!fallback ? '<p class="hint">The only event cannot be deleted.</p>'
+    : atEvent.length ? `<p class="hint">To delete this event, first delete its ${atEvent.length} registration${atEvent.length === 1 ? '' : 's'}.</p>`
+    : eventForm('delete', `${tick(`Delete ${esc(shownEvent.name)}; it has no registrations${isCurrent ? `, and new sign-ups go back to ${esc(fallback.name)}` : ''}`)}` +
+      '<button class="danger" type="submit">Delete event</button>')}
+</details>`;
   const past = shownEvent.code !== current.code
     ? `<p class="flash" role="status">You are looking at ${esc(shownEvent.name)}. New sign-ups go to ${esc(current.name)}.</p>` : '';
-  const newEvent = `<details class="new-event"${eventError ? ' open' : ''}><summary>Start a new event</summary>
+  const newEvent = `<details class="new-event"${eventError ? ' open' : ''}><summary>+ Start a new event</summary>
 <form method="post" action="/admin/event" class="fields">
   <input type="hidden" name="token" value="${esc(token)}">${viewFields(view)}
   ${errorBlock(eventError)}
@@ -519,24 +567,29 @@ ${adminHeader(cfg, brand, 'Registrations',
     `<a href="${esc(adminUrl(view))}">Refresh</a><a class="btn secondary" href="${esc(exportUrl)}">Download CSV</a>`)}
 ${warnings.map((w) => `<p class="error" role="alert">${esc(w)}</p>`).join('')}
 ${flash ? `<p class="flash" role="status">${flash}</p>` : ''}
+<div class="head-row">
 <nav class="tabs events" aria-label="Events"><span>Event</span>${eventLinks}</nav>
-${newEvent}
-${past}
 <form method="post" action="/admin/bracket" class="toggle">
   <input type="hidden" name="token" value="${esc(token)}">${viewFields(view)}
   <span>New sign-ups go to</span>${toggle}
 </form>
-<nav class="tabs" aria-label="Brackets">${tabs}</nav>
-${gameLinks ? `<nav class="tabs" aria-label="Games">${gameLinks}</nav>` : ''}
+</div>
+${past}
+<div class="event-tools">
+${manage}
+${newEvent}
+</div>
+<div class="filters">
+${counts}
 ${runner ? `<p class="hint">LCQ runner for a tablet on the booth Wi-Fi: <strong>${esc(runner.url)}</strong>, PIN <strong>${esc(runner.pin)}</strong></p>` : ''}
+</div>
 <dl class="stats">
   <div class="stat"><dt>Total</dt><dd>${leads.length}</dd></div>
   <div class="stat"><dt>Wi-Fi form</dt><dd>${bySource('form')}</dd></div>
   <div class="stat"><dt>At the desk</dt><dd>${bySource('desk')}</dd></div>
   <div class="stat"><dt>Last sign-up</dt><dd>${last ? esc(toISTShort(last.createdAt)) : '-'}</dd></div>
 </dl>
-<div class="panels">
-  <section class="panel" aria-labelledby="add-title">
+<section class="panel add" aria-labelledby="add-title">
     <h2 id="add-title">Add a registration</h2>
     <p class="hint">For on-spot registrations entered by staff.</p>
     ${errorBlock(error)}
@@ -552,18 +605,15 @@ ${runner ? `<p class="hint">LCQ runner for a tablet on the booth Wi-Fi: <strong>
         <span>They agreed to ${esc(cfg.orgName)} keeping their name, number and email for this event's registration (read it to them).</span></label>
       <button type="submit">Add registration</button>
     </form>
-  </section>
-  <section class="panel" aria-labelledby="find-title">
-    <h2 id="find-title">Find someone</h2>
-    <p class="hint">Search by name, email or any part of the number.</p>
-    <form method="get" action="/admin" class="fields" role="search">
-      ${tab === 'all' ? '' : `<input type="hidden" name="tab" value="${esc(tab)}">`}${view.event ? `<input type="hidden" name="event" value="${esc(view.event)}">` : ''}${view.game ? `<input type="hidden" name="game" value="${esc(view.game)}">` : ''}
-      <div><label for="q">Name, email or number</label><input id="q" name="q" type="search" maxlength="60" value="${esc(q)}"></div>
-      <button class="secondary" type="submit">Search</button>
-    </form>
-  </section>
-</div>
+</section>
+<div class="list-bar">
 <p class="showing">${showing}</p>
+<form method="get" action="/admin" class="find" role="search">
+  ${tab === 'all' ? '' : `<input type="hidden" name="tab" value="${esc(tab)}">`}${view.event ? `<input type="hidden" name="event" value="${esc(view.event)}">` : ''}${view.game ? `<input type="hidden" name="game" value="${esc(view.game)}">` : ''}
+  <label for="q">Find</label><input id="q" name="q" type="search" maxlength="60" placeholder="Name, email or number" value="${esc(q)}">
+  <button class="secondary" type="submit">Search</button>
+</form>
+</div>
 <table class="reg">
 <caption class="sr-only">Registrations, newest first</caption>
 <thead><tr><th scope="col">#</th><th scope="col">Name</th><th scope="col">Bracket</th>${gameCol ? '<th scope="col">Game</th>' : ''}<th scope="col">Mobile</th><th scope="col">Email</th><th scope="col">Came in via</th><th scope="col">Signed up (IST)</th><th scope="col"><span class="sr-only">Actions</span></th></tr></thead>
@@ -1195,6 +1245,31 @@ export function createPortalServer(cfg, store, {
       }
       log(`new sign-ups now go to event ${event.code}`);
       return redirect(res, adminUrl({ ...view, event: '' }, 'event'), 303);
+    }
+    if (path.startsWith('/admin/event/')) {
+      const labels = { current: 'Make it the current event', rename: 'Rename', delete: 'Delete event' };
+      const action = path.slice('/admin/event/'.length);
+      if (!Object.hasOwn(labels, action)) return plain(res, 404, 'not found');
+      const code = String(fields.code ?? '');
+      try {
+        if (fields.confirm !== 'yes') throw new ValidationError(`Tick the box to confirm, then tap ${labels[action]}.`, 'event');
+        if (action === 'current') {
+          const event = store.setCurrentEvent(code);
+          log(`new sign-ups now go to event ${event.code}`);
+          return redirect(res, adminUrl({ ...view, event: '' }, 'event'), 303);
+        }
+        if (action === 'rename') {
+          const event = store.renameEvent(code, fields.name);
+          log(`event ${event.code} renamed`);
+          return redirect(res, adminUrl(view, 'event-renamed'), 303);
+        }
+        const event = store.deleteEvent(code);
+        log(`event ${event.code} deleted`);
+        return redirect(res, adminUrl({ ...view, event: '' }, 'event-deleted'), 303);
+      } catch (e) {
+        if (!(e instanceof ValidationError)) throw e;
+        return adminReply(400, { manageError: e.message });
+      }
     }
     plain(res, 404, 'not found');
   }

@@ -217,7 +217,7 @@ describe('portal server', () => {
     await postForm(port, '/submit', { ...VALID, name: 'Ravi Kumar', phone: '91234 56789' });
     const names = async (q) => {
       const res = await request({ port, path: `/admin?q=${encodeURIComponent(q)}` });
-      return [...res.body.matchAll(/<th scope="row">([^<]+)<\/th>/g)].map((m) => m[1]);
+      return [...res.body.matchAll(/<td class="num idx">\d+<\/td><th scope="row">([^<]+)<\/th>/g)].map((m) => m[1]);
     };
     assert.deepEqual(await names('asha'), ['Asha Rao']);
     assert.deepEqual(await names('KUMAR'), ['Ravi Kumar']);
@@ -328,9 +328,9 @@ describe('portal server', () => {
     const admin = (await request({ port, path: '/admin?tab=lcq&msg=bracket' })).body;
     assert.match(admin, /New sign-ups now go to LCQ\./);
     assert.match(admin, /aria-pressed="true">LCQ</);
-    assert.match(admin, /<a href="\/admin">All \(3\)<\/a>/);
-    assert.match(admin, /aria-current="page">LCQ \(2\)</);
-    assert.match(admin, /Normal \(1\)/);
+    assert.match(admin, /<a href="\/admin" aria-label="All brackets, All games: 3 sign-ups">3<\/a>/);
+    assert.match(admin, /<a href="\/admin\?tab=lcq" aria-current="page" aria-label="LCQ, All games: 2 sign-ups">2<\/a>/);
+    assert.match(admin, /aria-label="Normal, All games: 1 sign-up">1</);
     assert.equal((admin.match(/<tr><td class="num idx">/g) ?? []).length, 2, 'the LCQ tab lists only LCQ');
     assert.match(admin, /href="\/admin\/export\.csv\?tab=lcq"/);
 

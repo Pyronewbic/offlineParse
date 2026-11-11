@@ -196,13 +196,21 @@ export class LeadStore {
     return this.event(this.stmts.getSetting.get('currentEvent')?.value ?? '') ?? this.events()[0];
   }
 
-  /** Start a new event and send new sign-ups to it. Earlier events keep their registrations. */
-  startEvent(raw) {
+  /** A cleaned event name; refused when empty, too long, or another event (not `except`) already has it. */
+  eventName(raw, except = null) {
     const name = String(raw ?? '').replace(STRIP_CHARS, '').split(/\s+/).filter(Boolean).join(' ');
-    if (!name) throw new ValidationError('Give the new event a name.', 'event');
+    if (!name) throw new ValidationError('Give the event a name.', 'event');
     if ([...name].length > EVENT_NAME_MAX) throw new ValidationError(`Event name is too long (${EVENT_NAME_MAX} characters max).`, 'event');
     const lower = name.toLocaleLowerCase();
-    if (this.events().some((e) => e.name.toLocaleLowerCase() === lower)) throw new ValidationError(`There is already an event called "${name}".`, 'event');
+    if (this.events().some((e) => e.code !== except && e.name.toLocaleLowerCase() === lower)) {
+      throw new ValidationError(`There is already an event called "${name}".`, 'event');
+    }
+    return name;
+  }
+
+  /** Start a new event and send new sign-ups to it. Earlier events keep their registrations. */
+  startEvent(raw) {
+    const name = this.eventName(raw);
     const base = name.normalize('NFKD').replace(/[^A-Za-z0-9]+/g, '-').slice(0, 24).replace(/^-+|-+$/g, '') || 'event';
     let code = base;
     for (let i = 2; this.stmts.event.get(code); i++) code = `${base}-${i}`;
@@ -216,6 +224,49 @@ export class LeadStore {
       throw e;
     }
     return this.event(code);
+  }
+
+  existingEvent(code) {
+    const event = this.event(code);
+    if (!event) throw new ValidationError('That event is gone; reload the page.', 'event');
+    return event;
+  }
+
+  /** A new name only; the code stays, so registrations, downloads and the log still match. */
+  renameEvent(code, raw) {
+    this.existingEvent(code);
+    this.db.prepare('UPDATE events SET name = ? WHERE code = ?').run(this.eventName(raw, code), code);
+    return this.event(code);
+  }
+
+  /** Send new sign-ups (and the LCQ tablet) to an earlier event again. */
+  setCurrentEvent(code) {
+    this.existingEvent(code);
+    this.stmts.setSetting.run('currentEvent', code);
+    return this.event(code);
+  }
+
+  /**
+   * Delete an event with no registrations (one started by mistake). Its LCQ state goes too, so a new event that
+   * reuses the code starts clean; if it was the current one, currentEvent() falls back to the newest left.
+   */
+  deleteEvent(code) {
+    const event = this.existingEvent(code);
+    if (this.events().length < 2) throw new ValidationError('This is the only event, so it cannot be deleted.', 'event');
+    const n = this.db.prepare('SELECT COUNT(*) AS n FROM leads WHERE eventCode = ?').get(code).n;
+    if (n) throw new ValidationError(`${event.name} still has ${n} registration${n === 1 ? '' : 's'}; delete ${n === 1 ? 'it' : 'them'} first.`, 'event');
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      this.db.prepare('DELETE FROM events WHERE code = ?').run(code);
+      if (this.db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'lcq_games'").get()) {
+        this.db.prepare('DELETE FROM lcq_games WHERE eventCode = ?').run(code);
+      }
+      this.db.exec('COMMIT');
+    } catch (e) {
+      this.db.exec('ROLLBACK');
+      throw e;
+    }
+    return event;
   }
 
   /** The bracket new sign-ups join; survives restarts. */

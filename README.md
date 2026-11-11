@@ -71,21 +71,9 @@ npm start
 - **Linux:** ports below 1024 need root or `sudo setcap cap_net_bind_service=+ep "$(readlink -f "$(command -v node)")"`; open 80, 443 and 853/tcp and 53/udp in the firewall.
 - `npm run booth-ip -- --dry-run` shows the command; `--ip <address>` acts on another address. If `npm start` warns the booth address is gone, run `npm run booth-ip` again.
 
-**Admin:** `http://localhost/admin`, on the laptop only. **New sign-ups go to** switches the bracket (Normal or LCQ) every new registration joins; the All / Normal / LCQ tabs and the game filter split the list, and **Download CSV** exports what you're looking at. **Event** lists every event; pick an earlier one to view or download it. **Start a new event** sends new sign-ups to a new event straight away, with a fresh LCQ runner. Also search, add, delete, **Refresh** for new sign-ups.
+**Admin:** `http://localhost/admin`, on the laptop only. **New sign-ups go to** switches the bracket (Normal or LCQ) every new registration joins; a small table counts sign-ups by bracket (down the side) and game (across); pick any number to list exactly those, and **Download CSV** exports what you're looking at. **Event** lists every event, the current one marked (now); pick one to view or download it. **Start a new event** sends new sign-ups to a new event straight away, with a fresh LCQ runner. **Manage** (for the event you're looking at, each with a tick) makes it the current event again, renames it, or deletes it if it has no registrations. Also search, add, delete, **Refresh** for new sign-ups.
 
-**LCQ runner:** on a tablet on the booth Wi-Fi, open the address and PIN shown on the admin page (`http://100.64.0.2/lcq`). Each game has its own tab. The LCQ is single elimination.
-
-1. **Play.** A sign-up can play at once. Ready to play lists the pairs on the same wins, longest waiting first (past four, the rest fold under **N more pairs**): tap **Start**, then the winner (A or B). The result shows at the top with **Undo** until the next change. **Pick a match** pairs any two yourself (Against lists the same wins; tick **Any wins** for everyone).
-2. **Fill the bracket.** It runs out evenly at a power of 2, so the tab says how many more make it full (24 in: need 8 more for 32).
-3. **LCQ Finalize** fixes who is in (a tick if it is not full). Later sign-ups are told the bracket is full and counted on the tab; **LCQ Unfinalize** lets them in.
-4. **Bye.** Once finalized, a player alone on their wins with nobody below to catch up gets a **Bye** in Needs attention: one win, no match, undoable.
-5. **LCQ End** (bottom of the tab) shows the Winner (most wins still in), makes the tab read-only and marks the game "(LCQ ended)" on the guest form. **Reopen** undoes it.
-
-**Rounds** (folded during play, open once ended) draws the bracket start.gg style: a column per round, each match with its winner, and a line from each winner to the match they played next (or to where they are waiting). Once finalized each round says how many matches are still to come, and the last one in shows as the Winner.
-
-**Event** at the top picks an earlier event to look back at its results and winners; only the current event can be run.
-
-**Needs attention** lists long waits and long matches; **Find a player** searches by name or number; **Standings** counts matches on, waiting and eliminated, with each free player's wait (a long one may mean they left). Tap a name for their number and **Drop** (tick "not here" first), which gives their match to the opponent. The tablet stays signed in until the server restarts.
+**LCQ runner:** on a tablet on the booth Wi-Fi, open the address and PIN shown on the admin page (`http://100.64.0.2/lcq`). How to run it: [LCQ.md](LCQ.md).
 
 **A phone gets no sign-in page:** run `npm start -- --verbose` and rejoin from the phone; each DNS question and web request is printed.
 - Nothing printed: the phone is not asking the laptop. A `169.254` address or none on the phone means the router's addresses ran out (see Router). Otherwise check the router's Primary DNS and that the phone's Private DNS is Off or Automatic.
@@ -97,7 +85,7 @@ Stop the server (Ctrl+C), then run `npm run booth-ip:undo`. This is required on 
 
 ## Data
 
-All in `data/`, owner-only on macOS and Linux; copy the folder to back up. On a Mac `npm start` keeps it out of Time Machine; on Windows keep the repo out of OneDrive and File History.
+All in `data/`, owner-only on macOS and Linux; copy the folder to back up, and always before updating the code (`git pull`): the first start after an update can upgrade `leads.db` in place. On a Mac `npm start` keeps it out of Time Machine; on Windows keep the repo out of OneDrive and File History.
 
 - `leads.db`: the source of truth. A number registers once per game and bracket in each event. Email is required from 2026-11 (`noticeVersion` `2026-11-v2`); earlier rows have none. The LCQ tablet never shows it.
 - `leads.csv`: rewritten after every change, times in IST. Don't open it while the booth runs; open a **Download CSV** copy.
