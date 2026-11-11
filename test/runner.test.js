@@ -533,6 +533,39 @@ describe('LCQ runner over HTTP', () => {
     assert.ok(!ended.includes('<nav class="jump"'), 'nothing to jump to on a finished tab');
   });
 
+  test('Rounds: one column per round with results, the open match, waiting players and how many are still to play; the Winner once ended', () => {
+    const rounds = (st) => runnerPage(makeConfig(), st).match(/<details class="panel" id="lcq-rounds"( open)?>.*?<\/details>/s);
+    assert.match(rounds(lcq.state())[0], /No matches yet\./);
+    signUp(6);
+    assert.match(rounds(lcq.state())[0], /<h3>Round 1 <span class="hint">on 0W<\/span><\/h3><ol class="cards"><li class="mcard waiting">P1 waiting/, 'before any match, who is waiting');
+    lcq.finalize('', true);
+    startAll();
+    const [m1, m2] = lcq.state().open;
+    lcq.result(m1.id, m1.a);
+    lcq.result(m2.id, m2.b);
+    const live = rounds(lcq.state());
+    assert.equal(live[1], undefined, 'folded while the LCQ runs');
+    const cols = live[0].match(/<li class="round">.*?<\/ol><\/li>/gs);
+    assert.equal(cols.length, 3, '6 players: a bracket of 8 has 3 rounds');
+    assert.match(cols[0], /<h3>Round 1 <span class="hint">on 0W<\/span><\/h3>/);
+    assert.match(cols[0], /<div class="pl won"><span>P1<\/span><span>won<\/span><\/div><div class="pl lost"><span>P2<\/span><\/div>/);
+    assert.match(cols[0], /<div class="pl lost"><span>P3<\/span><\/div><div class="pl won"><span>P4<\/span><span>won<\/span><\/div>/);
+    assert.match(cols[0], /<span>P5<\/span><\/div><div class="pl"><span>P6<\/span><\/div><div class="hint">playing, <span data-wait=/);
+    assert.ok(!cols[0].includes('more to play'), 'all 6 are in round 1 already: 3 matches, none to come');
+    assert.match(cols[1], /<h3>Round 2 .*?P1 waiting .*?P4 waiting .*?<li class="mcard ghost">about 2 more to play<\/li>/s, '3 winners: a match and a bye');
+    assert.match(cols[2], /<h3>Final <span class="hint">on 2W<\/span><\/h3>.*?about 1 more to play/s);
+
+    const [m3] = lcq.state().open;
+    lcq.result(m3.id, m3.a);
+    lcq.start(lcq.state().proposals[0].a.id, lcq.state().proposals[0].b.id);
+    lcq.result(lcq.state().open[0].id, lcq.state().open[0].a);
+    lcq.end('', true);
+    const ended = rounds(lcq.state());
+    assert.equal(ended[1], ' open', 'open once ended, to look back');
+    assert.match(ended[0], /<h3>Winner<\/h3><ol class="cards"><li class="mcard champ">P1 <span class="hint">2W<\/span><\/li><\/ol>/, 'most wins still in');
+    assert.match(ended[0], /role="region" aria-label="Rounds, scroll sideways for later rounds" tabindex="0"/);
+  });
+
   test('the admin page shows the runner address and PIN', async () => {
     const admin = await request({ port, path: '/admin' });
     assert.match(admin.body, new RegExp(`LCQ runner for a tablet on the booth Wi-Fi: <strong>http://127\\.0\\.0\\.1:${port}/lcq</strong>, PIN <strong>${lcq.pin()}</strong>`));

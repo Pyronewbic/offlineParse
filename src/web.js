@@ -213,6 +213,17 @@ details.panel > summary h2{display:inline}
 .attention form.inline{display:block}
 .attention form.inline button{display:block;width:100%;min-height:56px;margin:8px 0 12px}
 .side{display:inline-block;min-width:1.6em;margin-right:.35em;padding:0 .3em;border:2px solid currentColor;border-radius:6px;font-weight:900;text-align:center}
+.rounds{overflow-x:auto;scroll-snap-type:x proximity;margin:.4rem 0 0;padding-bottom:6px}
+.rounds > ol{display:grid;grid-auto-flow:column;grid-auto-columns:minmax(210px,1fr);gap:12px;list-style:none;margin:0;padding:0}
+.rounds .round{scroll-snap-align:start}
+.rounds h3{margin:0 0 .5rem;font-size:1rem}
+.rounds .cards{list-style:none;margin:0;padding:0;display:grid;gap:8px}
+.mcard{border:2px solid var(--line);border-radius:10px;padding:.45rem .7rem;background:var(--surface);overflow-wrap:anywhere}
+.mcard .pl{display:flex;justify-content:space-between;gap:8px}
+.mcard .pl.won{font-weight:800}
+.mcard .pl.lost{color:var(--muted)}
+.mcard.waiting,.mcard.ghost{border-style:dashed;color:var(--muted)}
+.mcard.champ{border-width:3px;border-color:var(--pink);font-weight:800}
 #lcq-ready-more > summary,#lcq-pick > summary{min-height:48px;padding:.7rem 0;font-weight:700;cursor:pointer}
 .calloff{margin-top:20px;padding-top:12px;border-top:1px dashed var(--rule)}
 .ready > li{display:flex;align-items:center;gap:8px 12px;flex-wrap:wrap}
@@ -581,7 +592,7 @@ export const runnerVersion = (cfg, lcq, state, now = Date.now()) => {
 export function runnerPage(cfg, state, {
   brand = NO_BRAND, error = '', notice = '', undo = null, version = '', now = Date.now(), q = '', game = '', tabs = [], events = [], event = null,
 } = {}) {
-  const { players, proposals, open, decided, finalizedAt, endedAt, late, bye, winners } = state;
+  const { players, proposals, open, decided, finalizedAt, endedAt, late, bye, winners, rounds = [] } = state;
   // An earlier event is for viewing; only the current one can be run.
   const current = events.find((e) => e.current);
   const past = !!(event && current && event.code !== current.code);
@@ -630,6 +641,38 @@ export function runnerPage(cfg, state, {
     const [winner, loser] = m.winner === m.a ? [m.aName, m.bName] : [m.bName, m.aName];
     return `<li>${esc(winner)} ${m.a === m.b ? 'had a bye' : `beat ${esc(loser)}`}${live ? ` ${btn('undo', { match: m.id }, 'Undo', 'quiet')}` : ''}</li>`;
   };
+  // Rounds, start.gg style but honest: pairings are made as players come free, so there are no lines between
+  // rounds. Each column is the matches entered on the same wins; waiting players and, once finalized, how many
+  // are still to come sit at the bottom. A round of n players has ceil(n / 2) matches, an odd one out a bye.
+  const roundsView = () => {
+    const expected = [];
+    for (let n = players.length; finalizedAt && n > 1; n = Math.ceil(n / 2)) expected.push(Math.ceil(n / 2));
+    const planned = expected.length;
+    const waitingOn = (w) => free.filter((p) => p.wins === w);
+    const count = Math.max(rounds.length, planned, ...free.map((p) => p.wins + 1));
+    if (!count) return '<p class="hint">No matches yet.</p>';
+    const card = (m) => {
+      if (m.a === m.b) return `<li class="mcard"><div class="pl won"><span>${esc(m.aName)}</span><span>bye</span></div></li>`;
+      if (m.winner === null) return `<li class="mcard"><div class="pl"><span>${esc(m.aName)}</span></div><div class="pl"><span>${esc(m.bName)}</span></div>` +
+        `<div class="hint">playing, ${elapsed(m.createdAt)}</div></li>`;
+      const row = (id, nm) => `<div class="pl ${m.winner === id ? 'won' : 'lost'}"><span>${esc(nm)}</span>${m.winner === id ? '<span>won</span>' : ''}</div>`;
+      return `<li class="mcard">${row(m.a, m.aName)}${row(m.b, m.bName)}</li>`;
+    };
+    const cols = Array.from({ length: count }, (_, i) => {
+      const matches = rounds[i] ?? [];
+      const left = i < planned ? expected[i] - matches.length : 0;
+      const title = planned && i === planned - 1 ? 'Final' : `Round ${i + 1}`;
+      return `<li class="round"><h3>${title} <span class="hint">on ${i}W</span></h3><ol class="cards">${matches.map(card).join('')}` +
+        `${waitingOn(i).map((p) => `<li class="mcard waiting">${esc(p.name)} waiting ${elapsed(p.freeSince)}</li>`).join('')}` +
+        `${left > 0 ? `<li class="mcard ghost">about ${left} more to play</li>` : ''}</ol></li>`;
+    });
+    if (endedAt && winners.length) {
+      cols.push(`<li class="round"><h3>${winners.length > 1 ? 'Winners' : 'Winner'}</h3><ol class="cards">` +
+        `${winners.map((p) => `<li class="mcard champ">${esc(p.name)} <span class="hint">${p.wins}W</span></li>`).join('')}</ol></li>`);
+    }
+    return `<div class="rounds" role="region" aria-label="Rounds, scroll sideways for later rounds" tabindex="0"><ol>${cols.join('')}</ol></div>`;
+  };
+
   const older = decided.slice(5);
   const results = `<ul class="plain">${decided.slice(0, 5).map(resultRow).join('') || none('No results yet.')}</ul>` +
     (older.length ? `<details id="lcq-older"><summary>Older results (${older.length})</summary><ul class="plain">${older.map(resultRow).join('')}</ul></details>` : '');
@@ -734,6 +777,7 @@ ${section('lcq-playing', 'Playing', open.length, `<ul class="plain">${playing}</
 ${section('lcq-ready', 'Ready to play', proposals.length, `${ready}${manual}`, true)}
 </div>` : ''}
 ${section('lcq-results', 'Results', decided.length, results, true)}
+${section('lcq-rounds', 'Rounds', null, roundsView(), !live)}
 ${section('lcq-standings', 'Standings', players.length, `${stats}<p class="hint">Tap a name for their number${live ? ', or to drop a no-show' : ''}.</p><ul class="plain">${standings}</ul>`, !live)}
 ${search}
 ${end}
