@@ -98,17 +98,17 @@ describe('LCQ runner over HTTP', () => {
     signUp(4);
     assert.notEqual(await version(), v1, 'the tablet sees new sign-ups');
     const body0 = await page();
-    assert.match(body0, /P1 vs P2 <span class="chip">0W<\/span>/);
-    assert.match(body0, /P3 vs P4 <span class="chip">0W<\/span>/);
+    assert.match(body0, /<strong>P1<\/strong> vs <strong>P2<\/strong> <span class="chip">0W<\/span> <span class="hint">waiting <span data-wait=/);
+    assert.match(body0, /<strong>P3<\/strong> vs <strong>P4<\/strong> <span class="chip">0W<\/span>/);
     for (const p of lcq.state().proposals) await post('/lcq/start', { a: String(p.a.id), b: String(p.b.id) }, cookie);
     const [m1, m2] = lcq.state().open;
     await post('/lcq/result', { match: String(m1.id), winner: String(m1.a) }, cookie);
     await post('/lcq/result', { match: String(m2.id), winner: String(m2.a) }, cookie);
     const body = await page();
-    assert.match(body, /P1 vs P3 <span class="chip">1W<\/span>/, 'both winners are offered a match');
+    assert.match(body, /<strong>P1<\/strong> vs <strong>P3<\/strong> <span class="chip">1W<\/span>/, 'both winners are offered a match');
     assert.match(body, /<h3>Eliminated \(2\)<\/h3>/, 'one loss is out');
     await post('/lcq/start', { a: String(m1.a), b: String(m2.a) }, cookie);
-    assert.match(await page(), /<strong>P1<\/strong> <span class="hint">1W 0L<\/span> vs <strong>P3<\/strong> <span class="hint">1W 0L<\/span>/,
+    assert.match(await page(), /A<\/span><strong>P1<\/strong> <span class="hint">1W 0L<\/span> vs <span class="side" aria-hidden="true">B<\/span><strong>P3<\/strong> <span class="hint">1W 0L<\/span>/,
       'Playing shows each player\'s record');
     const final = lcq.state().open[0];
     await post('/lcq/result', { match: String(final.id), winner: String(final.a) }, cookie);
@@ -120,7 +120,7 @@ describe('LCQ runner over HTTP', () => {
     assert.equal(done.match(/data-version="([^"]+)"/)[1], await version(), 'the page and the poll agree, or the tablet would reload forever');
   });
 
-  test('layout: the most-tapped sections first and open, history and standings folded, pickers start blank', async () => {
+  test('layout: the matches first and open, history and standings folded, pickers start blank', async () => {
     const cookie = await signIn();
     signUp(16);
     const st = () => lcq.state();
@@ -133,14 +133,17 @@ describe('LCQ runner over HTTP', () => {
     lcq.start(next.a.id, next.b.id);
     const body = (await request({ port, path: '/lcq', headers: cookie })).body;
     const at = (id) => body.indexOf(`id="${id}"`);
-    assert.ok(at('lcq-find') < at('lcq-playing') && at('lcq-playing') < at('lcq-ready') && at('lcq-ready') < at('lcq-results')
-      && at('lcq-results') < at('lcq-standings') && at('lcq-find') > 0, 'Find, Playing, Ready, Results, Standings');
+    assert.ok(at('lcq-playing') > 0 && at('lcq-playing') < at('lcq-ready') && at('lcq-ready') < at('lcq-results')
+      && at('lcq-results') < at('lcq-standings') && at('lcq-standings') < at('lcq-find'), 'Playing, Ready, Results, Standings, then Find');
     for (const [id, open] of [['lcq-playing', true], ['lcq-ready', true], ['lcq-results', true], ['lcq-standings', false]]) {
       assert.equal(new RegExp(`<details class="panel" id="${id}" open>`).test(body), open, id);
     }
     assert.match(body, /<summary><h2>Results \(6\)<\/h2><\/summary>/);
     assert.match(body, /<summary>Older results \(1\)<\/summary>/, 'the newest 5 stay out, the rest fold away');
-    assert.match(body, /<div class="won"><form class="inline" method="post" action="\/lcq\/result">/);
+    assert.match(body, /<div class="won"><form class="inline" method="post" action="\/lcq\/result">.*?<button type="submit"><span class="side" aria-hidden="true">A<\/span>/,
+      'the winner buttons say A and B, not just the colour');
+    assert.match(body, /<div class="calloff"><form class="inline" method="post" action="\/lcq\/cancel">/, 'Call off sits apart, below a rule');
+    assert.match(body, /<details id="lcq-pick"><summary>Pick a match<\/summary>/, 'the hand-picked match folds away');
     assert.ok(!/action="\/lcq\/start">.*?<button type="submit">/.test(body), 'Start is never the pink primary button');
     assert.ok(!body.includes('name="player" required>'), 'no list of every player to drop from');
     for (const name of ['a', 'b']) {
@@ -193,11 +196,11 @@ describe('LCQ runner over HTTP', () => {
     assert.equal(overdue(later, st, min(16)).waiting.length, 0, 'the limit comes from config');
   });
 
-  test('a sticky bar jumps to each section, with counts', () => {
+  test('a sticky bar jumps to Playing and Ready, with counts', () => {
     signUp(4);
     const body = runnerPage(makeConfig(), lcq.state());
-    assert.match(body, /<nav class="jump" aria-label="Sections"><a href="#lcq-playing">Playing \(0\)<\/a><a href="#lcq-ready">Ready \(2\)<\/a>/);
-    assert.match(body, /<a href="#lcq-results">Results<\/a><a href="#lcq-standings">Players \(4\)<\/a><\/nav>/);
+    assert.match(body, /<nav class="jump" aria-label="Sections"><a href="#lcq-playing">Playing \(0\)<\/a><a href="#lcq-ready">Ready \(2\)<\/a><\/nav>/,
+      'only the two sections the operator keeps going back to');
     for (const id of ['lcq-playing', 'lcq-ready', 'lcq-results', 'lcq-standings']) assert.ok(body.includes(`id="${id}"`), `${id} exists`);
   });
 
@@ -329,7 +332,7 @@ describe('LCQ runner over HTTP', () => {
     assert.equal(thanks.status, 200);
     assert.match(thanks.body, /<p>The LCQ bracket is full; staff may still add you\.<\/p>/);
     const body = await page();
-    assert.match(body, /Finalized 1 Jan, 5:30 am, 3 in the bracket\. 1 signed up since; Unfinalize to add them \(4 in, a full bracket\)\.<\/p>/);
+    assert.match(body, /Finalized 1 Jan, 5:30 am, 3 in the bracket\. 1 signed up since; Unfinalize to add them \(4 in, a full bracket\)\. <form class="inline" method="post" action="\/lcq\/unfinalize">.*?<\/form><\/div>/);
     assert.ok(!body.includes('Late Comer'), 'not on the runner while finalized');
     assert.ok(!body.includes('action="/lcq/finalize"'), 'no Finalize once finalized');
     await post('/lcq/unfinalize', {}, cookie);
@@ -351,7 +354,8 @@ describe('LCQ runner over HTTP', () => {
     lcq.finalize('', true);
     const p3 = lcq.state().players.find((p) => p.name === 'P3');
     const body = await page();
-    assert.match(body, new RegExp(`<li>P3 is the only one on 0W, and nobody can catch up\\. <form class="inline" method="post" action="/lcq/bye"><input type="hidden" name="player" value="${p3.id}">`));
+    assert.match(body, new RegExp(`<li>P3 is the only one on 0W, and nobody can catch up\\.<form class="inline" method="post" action="/lcq/bye"><input type="hidden" name="player" value="${p3.id}"><input type="hidden" name="game" value=""><button type="submit">Give P3 a Bye</button>`),
+      'a full-width button that says who gets it');
     await post('/lcq/bye', { player: String(p3.id) }, cookie);
     assert.match(await page(), /<li>P3 had a bye <form class="inline" method="post" action="\/lcq\/undo">/);
     await post('/lcq/bye', { player: String(p3.id) }, cookie);
@@ -370,7 +374,7 @@ describe('LCQ runner over HTTP', () => {
     for (const m of lcq.state().open) lcq.result(m.id, m.a);
     const ready = await page();
     assert.match(ready, /Winners: <strong>P1 and P3<\/strong> \(1W\)\. Ending shows/, 'two still in on 1W share it so far');
-    assert.match(ready, /<span>2 players still in; they will not play again<\/span><\/label><button class="secondary" type="submit">LCQ End<\/button>/);
+    assert.match(ready, /<span>2 players still in; they will not play again<\/span><\/label><button class="danger" type="submit">LCQ End<\/button>/);
     assert.ok(ready.indexOf('action="/lcq/unfinalize"') < ready.indexOf('id="lcq-results"') && ready.indexOf('action="/lcq/end"') > ready.indexOf('id="lcq-standings"'),
       'End sits at the bottom, away from Unfinalize');
     await post('/lcq/end', {}, cookie);
@@ -434,7 +438,7 @@ describe('LCQ runner over HTTP', () => {
       assert.match(old, new RegExp(`You are looking at ${october.name}\\. Only ${november.name} can be run\\.`));
       assert.match(old, /<li>P1 beat P2<\/li>/, 'its results, without Undo');
       assert.ok(!old.includes(' ready</a>') && !old.includes('Ready ('), 'nothing is offered as ready to start');
-      assert.match(old, /Finalized [^<]+, 4 in the bracket\.<\/p><\/div>/, 'its state, without Unfinalize');
+      assert.match(old, /Finalized [^<]+, 4 in the bracket\.<\/div><\/div>/, 'its state, without Unfinalize');
       for (const action of ['result', 'start', 'undo', 'cancel', 'drop', 'bye', 'finalize', 'unfinalize', 'end', 'reopen']) {
         assert.ok(!old.includes(`action="/lcq/${action}"`), `no ${action} on an earlier event`);
       }
@@ -463,6 +467,70 @@ describe('LCQ runner over HTTP', () => {
       store.db.prepare("UPDATE settings SET value = ? WHERE key = 'currentEvent'").run(october.code);
       store.db.prepare('DELETE FROM events WHERE code = ?').run(november.code);
     }
+  });
+
+  test('after a result, an Undo for it sits at the top until the next change', async () => {
+    const cookie = await signIn();
+    const page = async () => (await request({ port, path: '/lcq', headers: cookie })).body;
+    signUp(4);
+    startAll();
+    const [m1, m2] = lcq.state().open;
+    await post('/lcq/result', { match: String(m1.id), winner: String(m1.b) }, cookie);
+    const after = await page();
+    assert.match(after, new RegExp(`<div class="flash" role="status">P2 beat P1\\. <form class="inline" method="post" action="/lcq/undo"><input type="hidden" name="match" value="${m1.id}">`));
+    assert.ok(after.indexOf('P2 beat P1. <form') < after.indexOf('id="lcq-playing"'), 'above the matches');
+    assert.ok(!(await page()).includes('P2 beat P1. <form'), 'gone once the page has moved on');
+    assert.ok(!/<p[^>]*>[^<]*(<[^/][^>]*>[^<]*)*<form/.test(after.replace(/<style>[\s\S]*?<\/style>/, '')), 'no form sits inside a paragraph anywhere on the page');
+    await post('/lcq/result', { match: String(m2.id), winner: String(m2.a) }, cookie);
+    await post('/lcq/undo', { match: String(m2.id) }, cookie);
+    assert.match(await page(), /Result undone\./, 'the Undo works from there');
+    assert.equal(lcq.state().open.length, 1);
+  });
+
+  test('Ready shows the three longest-waiting pairs, and the rest under Show all', () => {
+    signUp(20);
+    // P19 and P20 have waited longest.
+    const pf = lcq.state().players.filter((p) => ['P19', 'P20'].includes(p.name)).map((p) => p.id);
+    store.db.prepare(`UPDATE leads SET createdAt = '2026-01-01T00:00:00Z' WHERE id IN (${pf.join(',')})`).run();
+    const body = runnerPage(makeConfig(), lcq.state());
+    const top = body.match(/<ul class="plain ready">(.*?)<\/ul><details id="lcq-ready-more">/)[1];
+    assert.equal((top.match(/action="\/lcq\/start"/g) ?? []).length, 3);
+    assert.match(top, /^<li><span class="pair"><strong>P19<\/strong> vs <strong>P20<\/strong>/, 'the longest wait first');
+    assert.match(body, /<details id="lcq-ready-more"><summary>Show all \(10\)<\/summary><ul class="plain ready">(<li>.*?<\/li>){7}<\/ul><\/details>/);
+    assert.ok(!runnerPage(makeConfig(), { ...lcq.state(), proposals: lcq.state().proposals.slice(0, 3) }).includes('id="lcq-ready-more"'), 'three or fewer: nothing to show');
+  });
+
+  test('a pair on more wins that has waited longer comes before newer 0W pairs', () => {
+    signUp(10);
+    startAll();
+    const [m1, m2] = lcq.state().open;
+    lcq.result(m1.id, m1.a);
+    lcq.result(m2.id, m2.a);
+    store.db.prepare('UPDATE lcq_matches SET decidedAt = ? WHERE id IN (?, ?)').run('2026-01-01T00:00:00Z', m1.id, m2.id);
+    for (let i = 11; i <= 14; i++) {
+      store.register({ name: `P${i}`, phone: `+9198766${String(i).padStart(5, '0')}`, source: 'form', noticeVersion: 'v', bracket: 'lcq' });
+    }
+    const { proposals } = lcq.state();
+    assert.equal(proposals[0].wins, 0, 'precondition: the engine lists 0W pairs first');
+    const body = runnerPage(makeConfig(), lcq.state());
+    assert.match(body, /<ul class="plain ready"><li><span class="pair"><strong>P1<\/strong> vs <strong>P3<\/strong> <span class="chip">1W<\/span>/);
+  });
+
+  test('the bracket line leads before Finalize, and the Winner leads once ended; Drop and End are danger buttons that name what they do', () => {
+    signUp(2);
+    const open = runnerPage(makeConfig(), lcq.state());
+    assert.ok(open.indexOf('action="/lcq/finalize"') < open.indexOf('id="lcq-playing"'), 'Finalize above the matches');
+    assert.match(open, /<button class="danger" type="submit">Drop P1<\/button>/);
+    lcq.finalize();
+    startAll();
+    lcq.result(lcq.state().open[0].id, lcq.state().open[0].a);
+    const live = runnerPage(makeConfig(), lcq.state());
+    assert.match(live, /<section class="panel danger-zone" id="lcq-end"[^>]*>.*?<button class="danger" type="submit">LCQ End<\/button>/);
+    assert.ok(live.indexOf('id="lcq-end"') > live.indexOf('id="lcq-find"'), 'End is the last thing on the page');
+    lcq.end();
+    const ended = runnerPage(makeConfig(), lcq.state());
+    assert.ok(ended.indexOf('Winner: <strong>P1</strong>') < ended.indexOf('id="lcq-results"'), 'the Winner first');
+    assert.ok(!ended.includes('<nav class="jump"'), 'nothing to jump to on a finished tab');
   });
 
   test('the admin page shows the runner address and PIN', async () => {

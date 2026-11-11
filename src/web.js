@@ -210,6 +210,19 @@ details.panel > summary h2{display:inline}
 .attention h2{margin:0;font-size:1rem}
 .attention ul{list-style:none;margin:0;padding:0}
 .attention a{display:block;padding:12px 0;font-weight:700}
+.attention form.inline{display:block}
+.attention form.inline button{display:block;width:100%;min-height:56px;margin:8px 0 12px}
+.side{display:inline-block;min-width:1.6em;margin-right:.35em;padding:0 .3em;border:2px solid currentColor;border-radius:6px;font-weight:900;text-align:center}
+#lcq-ready-more > summary,#lcq-pick > summary{min-height:48px;padding:.7rem 0;font-weight:700;cursor:pointer}
+.calloff{margin-top:20px;padding-top:12px;border-top:1px dashed var(--rule)}
+.ready > li{display:flex;align-items:center;gap:8px 12px;flex-wrap:wrap}
+.ready > li > span.pair{flex:1 1 12rem}
+.ready > li form.inline{margin-left:auto}
+.runner .match strong,.runner .ready .pair strong{font-size:1.2rem}
+.runner .match .hint,.runner .names .hint,.runner .ready .hint{font-size:1rem}
+.runner .names summary{font-size:1.1rem}
+.runner .danger-zone{margin-top:24px}
+.runner .check input{width:32px;height:32px}
 .topbar{display:flex;align-items:center;gap:14px 18px;flex-wrap:wrap;padding:0 0 14px;margin:0 0 18px;border-bottom:3px solid var(--line)}
 .topbar img{display:block;height:58px;width:auto}
 .topbar .wordmark{margin:0;font-size:1.4rem}
@@ -566,7 +579,7 @@ export const runnerVersion = (cfg, lcq, state, now = Date.now()) => {
 };
 
 export function runnerPage(cfg, state, {
-  brand = NO_BRAND, error = '', notice = '', version = '', now = Date.now(), q = '', game = '', tabs = [], events = [], event = null,
+  brand = NO_BRAND, error = '', notice = '', undo = null, version = '', now = Date.now(), q = '', game = '', tabs = [], events = [], event = null,
 } = {}) {
   const { players, proposals, open, decided, finalizedAt, endedAt, late, bye, winners } = state;
   // An earlier event is for viewing; only the current one can be run.
@@ -587,20 +600,31 @@ export function runnerPage(cfg, state, {
   const choose = (list, id, name, label) => `<div><label for="${id}">${label}</label><select id="${id}" name="${name}" required>` +
     `<option value="">Choose player</option>${list.map((p) => `<option value="${p.id}" data-w="${p.wins}">${esc(p.name)} (${record(p)})</option>`).join('')}</select></div>`;
 
+  const elapsed = (iso) => `<span data-wait="${now - Date.parse(iso)}">${waitText(now - Date.parse(iso))}</span>`;
   const byId = new Map(players.map((p) => [p.id, p]));
-  const who = (id, name) => `<strong>${esc(name)}</strong>${byId.has(id) ? ` <span class="hint">${record(byId.get(id))}</span>` : ''}`;
-  const playing = open.map((m) => `<li><p class="match">${who(m.a, m.aName)} vs ${who(m.b, m.bName)}</p><div class="won">` +
-    `${btn('result', { match: m.id, winner: m.a }, `${esc(m.aName)} won`)}` +
-    `${btn('result', { match: m.id, winner: m.b }, `${esc(m.bName)} won`)}</div>` +
-    `${btn('cancel', { match: m.id }, 'Call off', 'quiet')}</li>`).join('') || none('No matches in progress.');
+  // A and B tell the two players and their winner buttons apart without relying on colour.
+  const side = (s) => `<span class="side" aria-hidden="true">${s}</span>`;
+  const who = (id, name, s) => `${side(s)}<strong>${esc(name)}</strong>${byId.has(id) ? ` <span class="hint">${record(byId.get(id))}</span>` : ''}`;
+  const playing = open.map((m) => `<li><p class="match">${who(m.a, m.aName, 'A')} vs ${who(m.b, m.bName, 'B')} <span class="hint">running ${elapsed(m.createdAt)}</span></p><div class="won">` +
+    `${btn('result', { match: m.id, winner: m.a }, `${side('A')}${esc(m.aName)} won`)}` +
+    `${btn('result', { match: m.id, winner: m.b }, `${side('B')}${esc(m.bName)} won`)}</div>` +
+    `<div class="calloff">${btn('cancel', { match: m.id }, 'Call off', 'quiet')}</div></li>`).join('') || none('No matches in progress.');
 
   const free = players.filter((p) => p.status === 'free');
-  const ready = proposals.map((p) => `<li>${esc(p.a.name)} vs ${esc(p.b.name)} <span class="chip">${p.wins}W</span> ` +
-    `${btn('start', { a: p.a.id, b: p.b.id }, 'Start', 'secondary')}</li>`).join('') || none('Nobody to pair yet.');
-  const manual = free.length < 2 ? '' : `<form method="post" action="/lcq/start" class="fields">${gameField}
+  // The pair that has waited longest comes first; the first few are shown, the rest fold away.
+  const READY_MAX = 3;
+  const since = (p) => [p.a.freeSince, p.b.freeSince].sort()[0];
+  const byWait = [...proposals].sort((x, y) => since(x).localeCompare(since(y)));
+  const readyRow = (p) => `<li><span class="pair"><strong>${esc(p.a.name)}</strong> vs <strong>${esc(p.b.name)}</strong> ` +
+    `<span class="chip">${p.wins}W</span> <span class="hint">waiting ${elapsed(since(p))}</span></span>` +
+    `${btn('start', { a: p.a.id, b: p.b.id }, 'Start', 'secondary')}</li>`;
+  const readyRest = byWait.slice(READY_MAX);
+  const ready = `<ul class="plain ready">${byWait.slice(0, READY_MAX).map(readyRow).join('') || none('Nobody to pair yet.')}</ul>` +
+    (readyRest.length ? `<details id="lcq-ready-more"><summary>Show all (${byWait.length})</summary><ul class="plain ready">${readyRest.map(readyRow).join('')}</ul></details>` : '');
+  const manual = free.length < 2 ? '' : `<details id="lcq-pick"><summary>Pick a match</summary><form method="post" action="/lcq/start" class="fields">${gameField}
   ${choose(free, 'pa', 'a', 'Player')}${choose(free, 'pb', 'b', 'Against')}
   <label class="check"><input type="checkbox" id="lcq-any"><span>Any wins (Against lists only the Player's wins)</span></label>
-  <button class="secondary" type="submit">Start match</button></form>`;
+  <button class="secondary" type="submit">Start match</button></form></details>`;
 
   const resultRow = (m) => {
     const [winner, loser] = m.winner === m.a ? [m.aName, m.bName] : [m.bName, m.aName];
@@ -610,12 +634,11 @@ export function runnerPage(cfg, state, {
   const results = `<ul class="plain">${decided.slice(0, 5).map(resultRow).join('') || none('No results yet.')}</ul>` +
     (older.length ? `<details id="lcq-older"><summary>Older results (${older.length})</summary><ul class="plain">${older.map(resultRow).join('')}</ul></details>` : '');
 
-  const elapsed = (iso) => `<span data-wait="${now - Date.parse(iso)}">${waitText(now - Date.parse(iso))}</span>`;
   const waited = (p) => (p.status === 'free' && p.freeSince ? `, waiting ${elapsed(p.freeSince)}` : '');
   // A required tick stands in for "are you sure", so a stray tap cannot drop anyone.
   const dropOne = (p) => (live && ['free', 'playing'].includes(p.status) ? `<form method="post" action="/lcq/drop" class="fields">${fieldsOf({ player: p.id, game })}` +
     `<label class="check"><input type="checkbox" name="confirm" value="yes" required><span>${esc(p.name)} is not here` +
-    `${p.status === 'playing' ? '; their match goes to the opponent' : ''}</span></label><button class="secondary" type="submit">Drop</button></form>` : '');
+    `${p.status === 'playing' ? '; their match goes to the opponent' : ''}</span></label><button class="danger" type="submit">Drop ${esc(p.name)}</button></form>` : '');
   const STATUS = { playing: 'playing', out: 'eliminated', dropped: 'dropped' };
   // Tap a name for the number, to call someone who has wandered off, and to drop them.
   const nameRows = (list, found = false) => `<ul class="names">${list.map((p) => `<li><details${found ? ' open' : ''}><summary>${esc(p.name)} ` +
@@ -643,9 +666,9 @@ export function runnerPage(cfg, state, {
       (past ? '' : `<form method="post" action="/lcq/reopen" class="fields">${gameField}<label class="check"><input type="checkbox" name="confirm" value="yes" required>` +
       '<span>This LCQ ended by mistake</span></label><button class="secondary" type="submit">Reopen</button></form>') + '</div>'
     : finalizedAt
-    ? `<div class="panel" id="lcq-bracket"><p class="hint">Finalized ${esc(toISTShort(finalizedAt))}, ${players.length} in the bracket.${past ? '' : ` ${late
+    ? `<div class="panel" id="lcq-bracket"><div class="hint">Finalized ${esc(toISTShort(finalizedAt))}, ${players.length} in the bracket.${past ? '' : ` ${late
       ? `${late} signed up since; Unfinalize to add them (${players.length + late} in, ${gapText(players.length + late)}).`
-      : 'Nobody has signed up since.'}`}</p>${past ? '' : btn('unfinalize', {}, 'LCQ Unfinalize', 'secondary')}</div>`
+      : 'Nobody has signed up since.'}`}${past ? '' : ` ${btn('unfinalize', {}, 'LCQ Unfinalize', 'quiet')}`}</div></div>`
     : past ? (players.length ? `<div class="panel" id="lcq-bracket"><p class="hint">${players.length} in the bracket; it was never ended.</p></div>` : '')
     : players.length ? `<div class="panel" id="lcq-bracket"><p class="hint">${players.length} in the bracket: ${gapText(players.length)}.</p>` +
       `<form method="post" action="/lcq/finalize" class="fields">${gameField}${short ? `<label class="check"><input type="checkbox" name="confirm" value="yes" required>` +
@@ -657,15 +680,14 @@ export function runnerPage(cfg, state, {
   const MAX = 5;
   const more = (list) => (list.length > MAX ? `<li>and ${list.length - MAX} more</li>` : '');
   const flags = !live ? '' : [
-    bye ? `<li>${esc(bye.name)} is the only one on ${bye.wins}W, and nobody can catch up. ${btn('bye', { player: bye.id }, 'Bye', 'secondary')}</li>` : '',
+    bye ? `<li>${esc(bye.name)} is the only one on ${bye.wins}W, and nobody can catch up.${btn('bye', { player: bye.id }, `Give ${esc(bye.name)} a Bye`)}</li>` : '',
     ...waiting.slice(0, MAX).map((p) => `<li><a href="#lcq-ready">${esc(p.name)} waiting ${elapsed(p.freeSince)}</a></li>`), more(waiting),
     ...long.slice(0, MAX).map((m) => `<li><a href="#lcq-playing">${esc(m.aName)} vs ${esc(m.bName)} running ${elapsed(m.createdAt)}</a></li>`), more(long),
   ].join('');
   const attention = flags ? `<section class="attention" aria-labelledby="lcq-attention"><h2 id="lcq-attention">Needs attention</h2><ul>${flags}</ul></section>` : '';
-  const jumps = [
-    ...(live ? [['lcq-playing', `Playing (${open.length})`], ['lcq-ready', `Ready (${proposals.length})`]] : []),
-    ['lcq-results', 'Results'], ['lcq-standings', `Players (${players.length})`],
-  ].map(([id, label]) => `<a href="#${id}">${label}</a>`).join('');
+  // Only the two sections the operator keeps going back to; everything else is a short scroll.
+  const jumps = live ? `<nav class="jump" aria-label="Sections"><a href="#lcq-playing">Playing (${open.length})</a>` +
+    `<a href="#lcq-ready">Ready (${proposals.length})</a></nav>` : '';
   const wanted = q.trim();
   const found = wanted ? players.filter((p) => matchesSearch(p, wanted)) : [];
   const FOUND_MAX = 20;
@@ -685,29 +707,37 @@ export function runnerPage(cfg, state, {
   const pastNote = past ? `<p class="flash" role="status">You are looking at ${esc(event.name)}. Only ${esc(current.name)} can be run.</p>` : '';
 
   // End sits apart from Unfinalize, at the bottom, so a stray tap near the top cannot end the LCQ.
-  const end = !live || !finalizedAt ? '' : `<section class="panel" id="lcq-end" aria-labelledby="lcq-end-title"><h2 id="lcq-end-title">End this LCQ</h2>` +
+  const end = !live || !finalizedAt ? '' : `<section class="panel danger-zone" id="lcq-end" aria-labelledby="lcq-end-title"><h2 id="lcq-end-title">End this LCQ</h2>` +
     (open.length ? '<p class="hint">A match is still on: record its winner or call it off first.</p>'
       : `<p class="hint">${winnerText}. Ending shows the final standings and closes LCQ sign-ups for this game.</p>` +
         `<form method="post" action="/lcq/end" class="fields">${gameField}${stillIn > 1 ? `<label class="check"><input type="checkbox" name="confirm" value="yes" required>` +
-        `<span>${stillIn} players still in; they will not play again</span></label>` : ''}<button class="secondary" type="submit">LCQ End</button></form>`) +
+        `<span>${stillIn} players still in; they will not play again</span></label>` : ''}<button class="danger" type="submit">LCQ End</button></form>`) +
     '</section>';
 
+  // The last result, with Undo right where the operator is looking, until the next change.
+  // A div, not a p: a form inside a p is pushed out of it by the browser.
+  const undoLine = live && undo ? `<div class="flash" role="status">${esc(undo.text)} ${btn('undo', { match: undo.id }, 'Undo', 'quiet')}</div>` : '';
+
+  // Feedback, then the bracket's state (Finalize before play, the Winner at the end), then the matches.
   return page('LCQ runner', `<div id="version" data-version="${esc(version)}" hidden></div>
+<div class="runner">
 ${adminHeader(cfg, brand, 'LCQ runner')}
 ${eventLinks}
 ${pastNote}
 ${gameTabs}
-<nav class="jump" aria-label="Sections">${jumps}</nav>
+${jumps}
+${errorBlock(error)}${notice ? `<p class="flash" role="status">${esc(notice)}</p>` : ''}${undoLine}
 ${bracket}
-${errorBlock(error)}${notice ? `<p class="flash" role="status">${esc(notice)}</p>` : ''}${attention}
-${search}
+${attention}
 ${live ? `<div class="duo">
 ${section('lcq-playing', 'Playing', open.length, `<ul class="plain">${playing}</ul>`, true)}
-${section('lcq-ready', 'Ready to play', proposals.length, `<ul class="plain">${ready}</ul>${manual}`, true)}
+${section('lcq-ready', 'Ready to play', proposals.length, `${ready}${manual}`, true)}
 </div>` : ''}
 ${section('lcq-results', 'Results', decided.length, results, true)}
 ${section('lcq-standings', 'Standings', players.length, `${stats}<p class="hint">Tap a name for their number${live ? ', or to drop a no-show' : ''}.</p><ul class="plain">${standings}</ul>`, !live)}
+${search}
 ${end}
+</div>
 <script src="/lcq/app.js"></script>`, 'admin');
 }
 
@@ -888,7 +918,12 @@ export function createPortalServer(cfg, store, {
       const n = (key) => Number(fields[key]);
       try {
         if (path === '/lcq/start') lcq.start(n('a'), n('b'));
-        else if (path === '/lcq/result') lcq.result(n('match'), n('winner'));
+        else if (path === '/lcq/result') {
+          lcq.result(n('match'), n('winner'));
+          const m = lcq.match(n('match'));
+          const text = `${lcq.nameOf(m.winner)} beat ${lcq.nameOf(m.winner === m.a ? m.b : m.a)}.`;
+          flashes.set(session, { undo: { id: m.id, text } });
+        }
         else if (path === '/lcq/undo') {
           const cancelled = lcq.undo(n('match'));
           flashes.set(session, { notice: `Result undone.${cancelled.length ? ` Also called off ${cancelled.join(', ')}, which depended on it.` : ''}` });
@@ -921,7 +956,7 @@ export function createPortalServer(cfg, store, {
     const now = Date.now();
     const version = runnerVersion(cfg, view, state, now);
     if (path === '/lcq/version') return send(res, 200, 'application/json', JSON.stringify({ v: version }));
-    const { error = '', notice = '' } = flashes.get(session) ?? {};
+    const { error = '', notice = '', undo = null } = flashes.get(session) ?? {};
     flashes.delete(session);
     const q = (params.get('q') ?? '').slice(0, 60);
     // An earlier event has nothing to start, so its tabs show no ready count.
@@ -929,7 +964,7 @@ export function createPortalServer(cfg, store, {
       game: g, players: view.leads(g).length, ready: view === lcq ? view.state(g).proposals.length : 0, ended: !!view.phase(g).endedAt,
     }));
     const events = store.events().map((e) => ({ ...e, current: e.code === current.code }));
-    return send(res, 200, 'text/html; charset=utf-8', runnerPage(cfg, state, { brand, error, notice, version, now, q, game, tabs, events, event: shown }),
+    return send(res, 200, 'text/html; charset=utf-8', runnerPage(cfg, state, { brand, error, notice, undo: shown.code === current.code ? undo : null, version, now, q, game, tabs, events, event: shown }),
       { 'Content-Security-Policy': RUNNER_CSP });
   }
 
