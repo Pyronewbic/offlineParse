@@ -134,7 +134,7 @@ export class Lcq {
     // Leads are per event and game, so a match of theirs is one of this game in this event.
     const matches = this.db.prepare('SELECT * FROM lcq_matches ORDER BY id').all().map((m) => ({ ...m }))
       .filter((m) => leads.has(m.a) || leads.has(m.b));
-    const dropped = new Set(this.db.prepare('SELECT leadId FROM lcq_drops').all().map((r) => r.leadId));
+    const dropped = new Map(this.db.prepare('SELECT leadId, at FROM lcq_drops').all().map((r) => [r.leadId, r.at]));
     const players = [...leads.values()].map((l) => {
       const mine = matches.filter((m) => m.a === l.id || m.b === l.id);
       const decided = mine.filter((m) => m.winner !== null);
@@ -145,7 +145,7 @@ export class Lcq {
         : mine.some((m) => m.winner === null) ? 'playing'
         : 'free';
       const freeSince = decided.map((m) => m.decidedAt).sort().at(-1) ?? l.createdAt;
-      return { id: l.id, name: l.name, phone: l.phone, wins, losses, status, freeSince };
+      return { id: l.id, name: l.name, phone: l.phone, wins, losses, status, freeSince, droppedAt: dropped.get(l.id) ?? null };
     });
     const byId = new Map(players.map((p) => [p.id, p]));
     const name = (id) => byId.get(id)?.name ?? '(deleted)';

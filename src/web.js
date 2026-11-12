@@ -230,9 +230,13 @@ details.panel > summary h2{display:inline}
 .won form.inline{display:block}
 .won form.inline button{width:100%;min-height:56px;margin:0;font-size:1.05rem;overflow-wrap:anywhere}
 @media (orientation: portrait){.won{grid-template-columns:1fr}}
-.names{list-style:none;margin:.2rem 0 .4rem;padding:0;columns:2 14rem;column-gap:16px}
-.names li{padding:.2rem 0;break-inside:avoid;overflow-wrap:anywhere}
-.names details[open]{padding-bottom:.8rem}
+.names{list-style:none;margin:.2rem 0 .4rem;padding:0;display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,26rem),1fr));gap:0 24px;align-items:start}
+.names li{display:flex;flex-wrap:wrap;align-items:center;gap:0 12px;min-height:48px;padding:.2rem 0;border-bottom:1px solid var(--rule);overflow-wrap:anywhere}
+.names .who{flex:1 1 9rem}
+.names .gone{color:var(--muted)}
+.names .gone strong{font-weight:400}
+.names details.drop > summary{display:flex;align-items:center;min-height:48px;padding:0 4px;color:var(--error);font-weight:700;cursor:pointer}
+.names details.drop[open]{flex-basis:100%;padding-bottom:.6rem}
 .jump{position:sticky;top:0;z-index:2;display:flex;gap:8px;overflow-x:auto;margin:0 -20px 16px;padding:8px 20px;background:var(--bg);border-bottom:2px solid var(--line)}
 .jump a{flex:none;display:flex;align-items:center;min-height:48px;padding:0 14px;border:2px solid var(--line);border-radius:999px;background:var(--surface);font-weight:700;text-decoration:none;white-space:nowrap}
 .attention{margin:0 0 16px;padding:.6rem .9rem;border:3px solid var(--line);border-left:12px solid var(--error);border-radius:10px;background:var(--errorBg)}
@@ -266,7 +270,7 @@ details.panel > summary h2{display:inline}
 .ready > li form.inline{margin-left:auto}
 .runner .match strong,.runner .ready .pair strong{font-size:1.2rem}
 .runner .match .hint,.runner .names .hint,.runner .ready .hint{font-size:1rem}
-.runner .names summary{font-size:1.1rem}
+.runner .names strong{font-size:1.1rem}
 .runner .danger-zone{margin-top:24px}
 .runner .check input{width:32px;height:32px}
 .topbar{display:flex;align-items:center;gap:14px 18px;flex-wrap:wrap;padding:0 0 14px;margin:0 0 18px;border-bottom:3px solid var(--line)}
@@ -818,11 +822,26 @@ export function runnerPage(cfg, state, {
   const dropOne = (p) => (live && ['free', 'playing'].includes(p.status) ? `<form method="post" action="/lcq/drop" class="fields">${fieldsOf({ player: p.id, game })}` +
     `<label class="check"><input type="checkbox" name="confirm" value="yes" required><span>${esc(p.name)} is not here` +
     `${p.status === 'playing' ? '; their match goes to the opponent' : ''}</span></label><button class="danger" type="submit">Drop ${esc(p.name)}</button></form>` : '');
-  const STATUS = { playing: 'playing', out: 'eliminated', dropped: 'dropped' };
-  // Tap a name for the number, to call someone who has wandered off, and to drop them.
-  const nameRows = (list, found = false) => `<ul class="names">${list.map((p) => `<li><details${found ? ' open' : ''}><summary>${esc(p.name)} ` +
-    `<span class="hint">${record(p)}${(found || p.status === 'playing') && STATUS[p.status] ? `, ${STATUS[p.status]}` : ''}${waited(p)}</span></summary>` +
-    `<span class="nowrap">${esc(displayPhone(p.phone))}</span>${dropOne(p)}</details></li>`).join('')}</ul>`;
+  // One loss is out, so the loss itself says the round and who; the round is the match's, as a hand-picked match
+  // across wins sits in the round of the player further along.
+  const lostIn = new Map(decided.filter((m) => m.a !== m.b).map((m) => [m.winner === m.a ? m.b : m.a,
+    { round: roundOf.get(m.id) ?? 0, to: m.winner === m.a ? m.aName : m.bName, at: m.decidedAt }]));
+  const info = (p) => {
+    if (p.status === 'out') {
+      const l = lostIn.get(p.id);
+      return l ? `out in round ${l.round} to ${esc(l.to)}` : 'out';
+    }
+    if (p.status === 'dropped') return `dropped ${esc(toISTShort(p.droppedAt))}`;
+    return `${p.wins}W${p.status === 'playing' ? ', playing' : ''}${waited(p)}`;
+  };
+  // The number is on the row, to call someone who has wandered off; only Drop folds away, behind its tick.
+  const nameRows = (list) => `<ul class="names">${list.map((p) => `<li${p.status === 'dropped' ? ' class="gone"' : ''}>` +
+    `<span class="who"><strong>${esc(p.name)}</strong> <span class="hint">${info(p)}</span></span>` +
+    `<span class="nowrap">${esc(displayPhone(p.phone))}</span>` +
+    `${dropOne(p) ? `<details class="drop"><summary>Drop</summary>${dropOne(p)}</details>` : ''}</li>`).join('')}</ul>`;
+  // Furthest along first; on the same round, the latest out first.
+  const outOrder = (x, y) => (lostIn.get(y.id)?.round ?? 0) - (lostIn.get(x.id)?.round ?? 0) ||
+    (lostIn.get(y.id)?.at ?? '').localeCompare(lostIn.get(x.id)?.at ?? '');
   // Each bucket folds on its own, by a stable id; only the ones still in play start open.
   const bucket = (key, title, list, isOpen) => (list.length ? `<li><details id="lcq-b-${key}"${isOpen ? ' open' : ''}>` +
     `<summary><h3>${title} (${list.length})</h3></summary>${nameRows(list)}</details></li>` : '');
@@ -833,8 +852,9 @@ export function runnerPage(cfg, state, {
     .map(([k, v]) => `<div class="stat"><dt>${k}</dt><dd>${v}</dd></div>`).join('')}</dl>`;
   const standings = [...new Set(active.map((p) => p.wins))].sort((x, y) => y - x)
       .map((w) => bucket(`w${w}`, `${w}W`, active.filter((p) => p.wins === w), true)).join('') +
-    bucket('out', 'Eliminated', players.filter((p) => p.status === 'out'), false) +
-    bucket('dropped', 'Dropped', players.filter((p) => p.status === 'dropped'), false) || none('No LCQ registrations yet.');
+    bucket('out', 'Eliminated', players.filter((p) => p.status === 'out').sort(outOrder), false) +
+    bucket('dropped', 'Dropped', players.filter((p) => p.status === 'dropped')
+      .sort((x, y) => (y.droppedAt ?? '').localeCompare(x.droppedAt ?? '')), false) || none('No LCQ registrations yet.');
 
   // Finalize fixes who plays; a bracket short of a power of 2 needs a tick, as some players will need a Bye.
   const short = bracketGap(players.length).more;
@@ -872,7 +892,7 @@ export function runnerPage(cfg, state, {
   const FOUND_MAX = 20;
   const foundRows = !wanted ? ''
     : !found.length ? `<p class="hint">Nobody matches "${esc(wanted)}".</p>`
-    : `<p class="hint">${found.length > FOUND_MAX ? `First ${FOUND_MAX} of ${found.length}; type more of the name.` : `${found.length} found.`}</p>${nameRows(found.slice(0, FOUND_MAX), true)}`;
+    : `<p class="hint">${found.length > FOUND_MAX ? `First ${FOUND_MAX} of ${found.length}; type more of the name.` : `${found.length} found.`}</p>${nameRows(found.slice(0, FOUND_MAX))}`;
   const search = `<section class="panel" id="lcq-find" aria-labelledby="lcq-find-title"><h2 id="lcq-find-title" class="sr-only">Find a player</h2>` +
     `<form method="get" action="/lcq" class="fields" role="search">${past ? fieldsOf({ event: event.code }) : ''}${tabbed ? gameField : ''}<div><label for="lcq-q">Find a player, by name or number</label>` +
     `<input id="lcq-q" name="q" type="search" maxlength="60" value="${esc(q)}"></div><button class="secondary" type="submit">Find</button>` +
@@ -914,7 +934,7 @@ ${section('lcq-ready', 'Ready to play', proposals.length, `${ready}${manual}`, t
 </div>` : ''}
 ${section('lcq-results', 'Results', decided.length, results, true)}
 ${section('lcq-rounds', 'Rounds', null, roundsView(), !live)}
-${section('lcq-standings', 'Standings', players.length, `${stats}<p class="hint">Tap a name for their number${live ? ', or to drop a no-show' : ''}.</p><ul class="plain">${standings}</ul>`, !live)}
+${section('lcq-standings', 'Standings', players.length, `${stats}<ul class="plain">${standings}</ul>`, !live)}
 ${search}
 ${end}
 </div>

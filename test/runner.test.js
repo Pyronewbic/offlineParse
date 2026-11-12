@@ -156,7 +156,7 @@ describe('LCQ runner over HTTP', () => {
     for (const gone of ['id="lcq-pair"', 'New group', 'Waiting for a group', 'Make a group']) assert.ok(!body.includes(gone), `no ${gone}: groups are gone`);
   });
 
-  test('standings count matches, waiting and eliminated players, show how long each has waited, and reveal a number on tap', () => {
+  test('standings count matches, waiting and eliminated players, show how long each has waited, and each number on the row', () => {
     signUp(9);
     startAll();
     const [m1, m2] = lcq.state().open;
@@ -171,10 +171,38 @@ describe('LCQ runner over HTTP', () => {
     assert.deepEqual([stat('Matches on'), stat('Waiting for a match'), stat('Eliminated'), stat('Dropped')],
       ['2', '3', '2', '0'], 'P5-P8 play; P1, P3 won and P9 waits; P2, P4 lost');
     assert.equal(stat('Waiting for a group'), undefined);
-    assert.match(body, new RegExp(`<summary>P1 <span class="hint">1W 0L, waiting <span data-wait="4500000">1 h 15 min</span></span></summary><span class="nowrap">\\+91 98765 00000</span><form method="post" action="/lcq/drop"`));
-    assert.match(body, /<h3>Eliminated \(2\)<\/h3><\/summary><ul class="names"><li><details><summary>P2 <span class="hint">0W 1L<\/span><\/summary>/,
-      'no waiting time once eliminated');
-    assert.match(body, /<summary>P9 <span class="hint">0W 0L, waiting <span data-wait=/, 'a new sign-up waits from when they signed up');
+    assert.match(body, new RegExp('<li><span class="who"><strong>P1</strong> <span class="hint">1W, waiting <span data-wait="4500000">1 h 15 min</span></span></span>' +
+      '<span class="nowrap">\\+91 98765 00000</span><details class="drop"><summary>Drop</summary><form method="post" action="/lcq/drop"'), 'the number is on the row; Drop folds away');
+    assert.match(body, /<h3>Eliminated \(2\)<\/h3><\/summary><ul class="names"><li><span class="who"><strong>P(2|4)<\/strong> <span class="hint">out in round 1 to P(1|3)<\/span><\/span><span class="nowrap">[^<]*<\/span><\/li>/,
+      'no waiting time, record or Drop once eliminated');
+    assert.match(body, /<strong>P9<\/strong> <span class="hint">0W, waiting <span data-wait=/, 'a new sign-up waits from when they signed up');
+    assert.ok(!body.includes('Tap a name'), 'nothing to tap for a number');
+  });
+
+  test('eliminated: furthest along first, with the round and who beat them; dropped last, with the time and no record', () => {
+    signUp(6);
+    const st = () => lcq.state();
+    const id = (n) => st().players.find((p) => p.name === n).id;
+    const play = (a, b) => {
+      lcq.start(id(a), id(b));
+      const m = st().open[0];
+      lcq.result(m.id, id(a));
+      return m;
+    };
+    const first = play('P1', 'P2');
+    store.db.prepare('UPDATE lcq_matches SET decidedAt = ? WHERE id = ?').run('2026-01-01T00:00:00Z', first.id);
+    play('P3', 'P4');
+    play('P1', 'P3');
+    play('P1', 'P5');
+    lcq.drop(id('P6'));
+    const body = runnerPage(makeConfig(), st());
+    const out = body.match(/<details id="lcq-b-out">.*?<\/details>/)[0];
+    assert.deepEqual([...out.matchAll(/<strong>(P\d)<\/strong> <span class="hint">([^<]*)</g)].map((m) => `${m[1]} ${m[2]}`),
+      ['P5 out in round 3 to P1', 'P3 out in round 2 to P1', 'P4 out in round 1 to P3', 'P2 out in round 1 to P1'],
+      'P5 (0W) lost in P1\'s round 3, not round 1; on the same round the later loss comes first');
+    const dropped = body.match(/<details id="lcq-b-dropped">.*?<\/details>/)[0];
+    assert.match(dropped, /<li class="gone"><span class="who"><strong>P6<\/strong> <span class="hint">dropped \d+ [A-Z][a-z]{2}, \d+:\d\d [ap]m<\/span><\/span><span class="nowrap">[^<]*<\/span><\/li>/);
+    assert.ok(body.indexOf('id="lcq-b-out"') < body.indexOf('id="lcq-b-dropped"'), 'Dropped comes last');
   });
 
   test('needs attention: long waits and long matches, capped at 5 each; the version moves only when someone crosses a limit', () => {
@@ -216,9 +244,9 @@ describe('LCQ runner over HTTP', () => {
     const panel = (body) => body.match(/<section class="panel" id="lcq-find".*?<\/section>/)[0];
     const byName = panel(await find('p1'));
     assert.match(byName, /11 found\./, 'P1 and P10-P19, any case');
-    assert.match(byName, /<details open><summary>P1 <span class="hint">0W 0L, playing<\/span><\/summary><span class="nowrap">\+91 98765 00000<\/span><form method="post" action="\/lcq\/drop"/);
-    assert.match(byName, /<summary>P13 <span class="hint">0W 0L, waiting <span data-wait=/);
-    assert.match(panel(await find('98765 00024')), /1 found\.<\/p><ul class="names"><li><details open><summary>P25 <span class="hint">0W 0L, waiting/, 'by number');
+    assert.match(byName, /<strong>P1<\/strong> <span class="hint">0W, playing<\/span><\/span><span class="nowrap">\+91 98765 00000<\/span><details class="drop"><summary>Drop<\/summary><form method="post" action="\/lcq\/drop"/);
+    assert.match(byName, /<strong>P13<\/strong> <span class="hint">0W, waiting <span data-wait=/);
+    assert.match(panel(await find('98765 00024')), /1 found\.<\/p><ul class="names"><li><span class="who"><strong>P25<\/strong> <span class="hint">0W, waiting/, 'by number');
     assert.match(panel(await find('P')), /First 20 of 25; type more of the name\./);
     assert.match(panel(await find('zz')), /Nobody matches "zz"\./);
     const hostile = panel(await find('"><b>'));
@@ -239,7 +267,7 @@ describe('LCQ runner over HTTP', () => {
     await post('/lcq/drop', { player: String(p1.id), confirm: 'yes' }, cookie);
     assert.equal(lcq.state().players.find((p) => p.id === p1.id).status, 'dropped', 'positive control: dropped with the tick');
     const body = (await request({ port, path: '/lcq?q=P1', headers: cookie })).body;
-    assert.match(body, /<summary>P1 <span class="hint">0W 1L, dropped<\/span><\/summary><span class="nowrap">[^<]*<\/span><\/details>/, 'no Drop for someone already dropped');
+    assert.match(body, /<li class="gone"><span class="who"><strong>P1<\/strong> <span class="hint">dropped [^<]*<\/span><\/span><span class="nowrap">[^<]*<\/span><\/li>/, 'no Drop for someone already dropped');
   });
 
   test('a refused action is explained once on the next page load', async () => {

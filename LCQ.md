@@ -21,7 +21,7 @@ Each game has its own tab. **Event** at the top (once there is more than one eve
 
 ## When something is off
 
-- **Someone has gone:** **Needs attention** lists long waits and long matches. Tap a name in **Standings** or **Find a player** for their number. **Drop** (tick "not here" first) takes a no-show out; a match they are in goes to the opponent.
+- **Someone has gone:** **Needs attention** lists long waits and long matches. Their number is on their row in **Standings** and **Find a player**. **Drop** on the row (tick "not here" first) takes a no-show out; a match they are in goes to the opponent.
 - **A wrong result:** Undo it. Matches started after it on the wrong record are called off, and the page says which; a later result must be undone first.
 - **Two players stuck on different wins:** use **Pick a match** with **Any wins**, or give the lone one a Bye once finalized.
 
