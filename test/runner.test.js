@@ -608,6 +608,37 @@ describe('LCQ runner over HTTP', () => {
     assert.match(html, /<svg class="bk-lines"[^>]* aria-hidden="true">/);
   });
 
+  test('a player dropped while waiting leaves the round they waited for; once ended, no round is still to play', () => {
+    signUp(10);
+    lcq.finalize('', true);
+    const st = () => lcq.state();
+    const id = (n) => st().players.find((p) => p.name === n).id;
+    lcq.drop(id('P10'));
+    lcq.drop(id('P9'));
+    const heads = () => [...runnerPage(makeConfig(), st()).matchAll(/<h3 style="left:\d+px">(.*?)<\/h3>/g)].map((m) => m[1].replace(/<[^>]+>/g, ''));
+    assert.deepEqual(heads(), ['Round 1 4 more to play', 'Round 2 2 more to play', 'Final 1 more to play'], '8 left of 10: 4, 2, 1');
+    startAll();
+    for (const m of st().open) lcq.result(m.id, m.a);
+    const won = st().players.filter((p) => p.status === 'free').map((p) => p.name);
+    assert.equal(won.length, 4, 'precondition: four winners of round 1');
+    lcq.drop(id(won[0]));
+    lcq.drop(id(won[1]));
+    assert.deepEqual(heads().slice(1), ['Final 1 more to play'], 'two of the four dropped while waiting: the next match is the final');
+  });
+
+  test('an LCQ ended part way through shows only the rounds played, with nothing still to play', () => {
+    signUp(8);
+    lcq.finalize();
+    for (const p of lcq.state().proposals.slice(0, 2)) {
+      lcq.start(p.a.id, p.b.id);
+      lcq.result(lcq.state().open[0].id, p.a.id);
+    }
+    const heads = () => [...runnerPage(makeConfig(), lcq.state()).matchAll(/<h3 style="left:\d+px">(.*?)<\/h3>/g)].map((m) => m[1].replace(/<[^>]+>/g, ''));
+    assert.deepEqual(heads(), ['Round 1 2 more to play', 'Round 2 2 more to play', 'Final 1 more to play'], 'control: before End, rounds to come are shown');
+    lcq.end('', true);
+    assert.deepEqual(heads(), ['Round 1', 'Winners'], 'two winners on 1W; no round still to play');
+  });
+
   test('the last one in is shown as the winner after the final, not as waiting in an extra round; once ended it says Winner', () => {
     signUp(4);
     lcq.finalize();

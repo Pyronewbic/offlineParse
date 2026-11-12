@@ -751,10 +751,11 @@ export function runnerPage(cfg, state, {
   // Rounds as a bracket. Pairings are made as players come free, so a line follows each winner to the match
   // they played next, not to a slot drawn in advance. A column is the matches entered on the same wins; once
   // finalized, a round of n players has ceil(n / 2) matches (an odd one out a bye), and the header says how many
-  // are still to come.
+  // are still to come. A player dropped while waiting never plays the round they waited for, so it has one fewer.
   const roundsView = () => {
+    const withdrew = (wins) => players.filter((p) => p.status === 'dropped' && !p.losses && p.wins === wins).length;
     const expected = [];
-    for (let n = players.length; finalizedAt && n > 1; n = Math.ceil(n / 2)) expected.push(Math.ceil(n / 2));
+    for (let n = players.length - withdrew(0); finalizedAt && n > 1; n = Math.ceil(n / 2) - withdrew(expected.length)) expected.push(Math.ceil(n / 2));
     const all = rounds.flatMap((r, col) => r.map((m) => ({ ...m, col })));
     const inPlay = players.filter((p) => p.status === 'free' || p.status === 'playing');
     // The last one standing is the winner once nobody else can play: ended, or finalized with no match left.
@@ -776,8 +777,8 @@ export function runnerPage(cfg, state, {
     const CARD_H = 50;
     const ROW = 60;
     const HEAD = 42;
-    // Once finalized, rounds still to come get a header too, so the operator sees how far there is to go.
-    const cols = Math.max(expected.length, ...nodes.map((n) => n.col + 1));
+    // Once finalized, rounds still to come get a header too, so the operator sees how far there is to go; once ended there are none.
+    const cols = Math.max(endedAt ? 0 : expected.length, ...nodes.map((n) => n.col + 1));
     const x = (n) => n.col * COL;
     const y = (n) => HEAD + slot.get(n.key) * ROW;
     const byKey = new Map(nodes.map((n) => [n.key, n]));
@@ -794,7 +795,7 @@ export function runnerPage(cfg, state, {
     const title = (col) => {
       const here = nodes.filter((n) => n.col === col);
       if (here.length && here.every((n) => n.kind === 'champ')) return champs.length > 1 ? 'Winners' : 'Winner';
-      const left = col < expected.length ? expected[col] - (rounds[col]?.length ?? 0) : 0;
+      const left = !endedAt && col < expected.length ? expected[col] - (rounds[col]?.length ?? 0) : 0;
       return `${expected.length && col === expected.length - 1 ? 'Final' : `Round ${col + 1}`}${left > 0 ? ` <span class="hint">${left} more to play</span>` : ''}`;
     };
     const lines = nodes.filter((n) => n.next !== null && byKey.has(n.next)).map((n) => {
