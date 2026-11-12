@@ -260,6 +260,7 @@ details.panel > summary h2{display:inline}
 .names .gone strong{font-weight:400}
 .names details.drop > summary{display:flex;align-items:center;min-height:48px;padding:0 4px;color:var(--error);font-weight:700;cursor:pointer}
 .names details.drop[open]{flex-basis:100%;padding-bottom:.6rem}
+.names details.back > summary{color:var(--text)}
 .jump{position:sticky;top:0;z-index:2;display:flex;gap:8px;overflow-x:auto;margin:0 -20px 16px;padding:8px 20px;background:var(--bg);border-bottom:2px solid var(--line)}
 .jump a{flex:none;display:flex;align-items:center;min-height:48px;padding:0 14px;border:2px solid var(--line);border-radius:999px;background:var(--surface);font-weight:700;text-decoration:none;white-space:nowrap}
 .attention{margin:0 0 16px;padding:.6rem .9rem;border:3px solid var(--line);border-left:12px solid var(--error);border-radius:10px;background:var(--errorBg)}
@@ -869,7 +870,8 @@ export function runnerPage(cfg, state, {
   const nameRows = (list) => `<ul class="names">${list.map((p) => `<li${p.status === 'dropped' ? ' class="gone"' : ''}>` +
     `<span class="who"><strong>${esc(p.name)}</strong> <span class="hint">${info(p)}</span></span>` +
     `<span class="nowrap">${esc(displayPhone(p.phone))}</span>` +
-    `${dropOne(p) ? `<details class="drop"><summary>Drop</summary>${dropOne(p)}</details>` : ''}</li>`).join('')}</ul>`;
+    `${dropOne(p) ? `<details class="drop"><summary>Drop</summary>${dropOne(p)}</details>` : ''}` +
+    `${live && p.status === 'dropped' ? `<details class="drop back"><summary>Undo drop</summary>${btn('undrop', { player: p.id }, `Bring ${esc(p.name)} back`, 'secondary')}</details>` : ''}</li>`).join('')}</ul>`;
   // Furthest along first; on the same round, the latest out first.
   const outOrder = (x, y) => (lostIn.get(y.id)?.round ?? 0) - (lostIn.get(x.id)?.round ?? 0) ||
     (lostIn.get(y.id)?.at ?? '').localeCompare(lostIn.get(x.id)?.at ?? '');
@@ -1165,7 +1167,11 @@ export function createPortalServer(cfg, store, {
         else if (path === '/lcq/bye') lcq.bye(n('player'));
         else if (path === '/lcq/end') lcq.end(game, fields.confirm === 'yes');
         else if (path === '/lcq/reopen') lcq.reopen(game, fields.confirm === 'yes');
-        else if (path === '/lcq/drop') {
+        else if (path === '/lcq/undrop') {
+          const { cancelled, back, bye } = lcq.undrop(n('player'));
+          flashes.set(session, { notice: `${back} is back in.${bye ? ` ${bye}'s Bye is taken back.` : ''}` +
+            `${cancelled.length ? ` Also called off ${cancelled.join(', ')}, which depended on it.` : ''}` });
+        } else if (path === '/lcq/drop') {
           if (fields.confirm === 'yes') lcq.drop(n('player'));
           else flashes.set(session, { error: 'Tick that they are not here, then tap Drop.' });
         }

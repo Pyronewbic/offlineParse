@@ -201,8 +201,10 @@ describe('LCQ runner over HTTP', () => {
       ['P5 out in round 3 to P1', 'P3 out in round 2 to P1', 'P4 out in round 1 to P3', 'P2 out in round 1 to P1'],
       'P5 (0W) lost in P1\'s round 3, not round 1; on the same round the later loss comes first');
     const dropped = body.match(/<details id="lcq-b-dropped">.*?<\/details>/)[0];
-    assert.match(dropped, /<li class="gone"><span class="who"><strong>P6<\/strong> <span class="hint">dropped \d+ [A-Z][a-z]{2}, \d+:\d\d [ap]m<\/span><\/span><span class="nowrap">[^<]*<\/span><\/li>/);
+    assert.match(dropped, /<li class="gone"><span class="who"><strong>P6<\/strong> <span class="hint">dropped \d+ [A-Z][a-z]{2}, \d+:\d\d [ap]m<\/span><\/span><span class="nowrap">[^<]*<\/span><details class="drop back"><summary>Undo drop/);
     assert.ok(body.indexOf('id="lcq-b-out"') < body.indexOf('id="lcq-b-dropped"'), 'Dropped comes last');
+    assert.ok(body.includes('action="/lcq/undrop"'), 'control: Undo drop while live');
+    assert.ok(!runnerPage(makeConfig(), { ...st(), endedAt: '2026-01-01T00:00:00Z' }).includes('action="/lcq/undrop"'), 'and none once ended');
   });
 
   test('needs attention: long waits and long matches, capped at 5 each; the version moves only when someone crosses a limit', () => {
@@ -285,10 +287,18 @@ describe('LCQ runner over HTTP', () => {
     await post('/lcq/drop', { player: String(p1.id), confirm: 'yes' }, cookie);
     assert.equal(lcq.state().players.find((p) => p.id === p1.id).status, 'dropped', 'positive control: dropped with the tick');
     const body = (await request({ port, path: '/lcq?q=P1', headers: cookie })).body;
-    assert.match(body, /<li class="gone"><span class="who"><strong>P1<\/strong> <span class="hint">dropped [^<]*<\/span><\/span><span class="nowrap">[^<]*<\/span><\/li>/, 'no Drop for someone already dropped');
+    assert.match(body, /<li class="gone"><span class="who"><strong>P1<\/strong> <span class="hint">dropped [^<]*<\/span><\/span><span class="nowrap">[^<]*<\/span><details class="drop back">/, 'no Drop for someone already dropped, only Undo drop');
+    assert.match(body, /<li class="gone">.*?<details class="drop back"><summary>Undo drop<\/summary><form class="inline" method="post" action="\/lcq\/undrop">.*?<button type="submit" class="secondary">Bring P1 back<\/button>/,
+      'a dropped player can be brought back');
     await post('/lcq/undo', { match: String(lcq.state().decided[0].id) }, cookie);
     assert.match((await request({ port, path: '/lcq', headers: cookie })).body, /Result undone\. P1 is back in; their drop is undone\./);
     assert.equal(lcq.state().players.find((p) => p.id === p1.id).status, 'playing', 'Undo on the forfeit puts P1 back in their match');
+    signUp(3);
+    const p3 = lcq.state().players.find((p) => p.name === 'P3');
+    await post('/lcq/drop', { player: String(p3.id), confirm: 'yes' }, cookie);
+    await post('/lcq/undrop', { player: String(p3.id) }, cookie);
+    assert.match((await request({ port, path: '/lcq', headers: cookie })).body, /<p class="flash" role="status">P3 is back in\.<\/p>/);
+    assert.equal(lcq.state().players.find((p) => p.id === p3.id).status, 'free', 'over HTTP too');
   });
 
   test('a refused action is explained once on the next page load', async () => {
