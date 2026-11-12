@@ -257,6 +257,8 @@ details.panel > summary h2{display:inline}
 .names li{display:flex;flex-wrap:wrap;align-items:center;gap:0 12px;min-height:48px;padding:.2rem 0;border-bottom:1px solid var(--rule);overflow-wrap:anywhere}
 .names .who{flex:1 1 9rem}
 .names .gone{color:var(--muted)}
+.names .nowrap{font-variant-numeric:tabular-nums}
+.plain .sub{margin:.7rem 0 0;font-size:.85rem;font-weight:800;text-transform:uppercase;letter-spacing:.04em;color:var(--muted)}
 .names .gone strong{font-weight:400}
 .names details.drop > summary{display:flex;align-items:center;min-height:48px;padding:0 4px;color:var(--error);font-weight:700;cursor:pointer}
 .names details.drop[open]{flex-basis:100%;padding-bottom:.6rem}
@@ -372,7 +374,10 @@ table.counts{border-collapse:separate;border-spacing:0;border:3px solid var(--li
 .counts td a[aria-current]{background:var(--pink);color:var(--onPink)}
 .new-event form{max-width:36rem}
 button.subtle{min-height:40px;padding:.4rem .8rem;font-size:.85rem;color:var(--muted);background:transparent;border:2px solid var(--rule);box-shadow:none}
-.plain.results > li{display:flex;align-items:center;justify-content:space-between;gap:4px 12px;flex-wrap:wrap;min-height:56px;padding:.35rem 0;border-bottom:1px solid var(--rule)}
+.plain.results > li{display:grid;grid-template-columns:5rem auto 1fr auto;align-items:center;gap:4px 12px;min-height:56px;padding:.35rem 0;border-bottom:1px solid var(--rule)}
+.results time{color:var(--muted);font-size:.95rem;font-variant-numeric:tabular-nums;white-space:nowrap}
+.results .lose{color:var(--muted)}
+.results .w{display:inline-block;padding:0 5px;border-radius:4px;font-size:.75rem;font-weight:800;line-height:1.4;background:var(--line);color:var(--surface);vertical-align:.1em}
 .plain.results > li:last-child{border-bottom:0}
 .plain.results form.inline button{margin:0}
 button.quiet{min-height:40px;padding:.4rem .8rem;font-size:.85rem;color:var(--error);background:transparent;border:2px solid var(--error);box-shadow:none}
@@ -770,13 +775,17 @@ export function runnerPage(cfg, state, {
   <button class="secondary" type="submit">Start match</button></form></details>`;
 
   // Undo works only on a result neither player has a later result after (the server refuses the rest), so only
-  // those offer it; the winner leads in bold, with the round and how long ago.
+  // those offer it. A result reads as a log line, time first, so it never looks like a row of Standings: the
+  // time, the round, then the winner in bold with a W and the loser muted.
   const roundOf = new Map(rounds.flatMap((r, i) => r.map((m) => [m.id, i + 1])));
   const undoable = (m) => !decided.some((x) => x.id > m.id && [x.a, x.b].some((p) => p === m.a || p === m.b));
   const resultRow = (m) => {
     const [winner, loser] = m.winner === m.a ? [m.aName, m.bName] : [m.bName, m.aName];
-    return `<li><span><strong>${esc(winner)}</strong> ${m.a === m.b ? 'had a bye' : `beat ${esc(loser)}`} ` +
-      `<span class="hint">${roundOf.has(m.id) ? `Round ${roundOf.get(m.id)}, ` : ''}${elapsed(m.decidedAt)} ago</span></span>` +
+    const r = roundOf.get(m.id);
+    return `<li><time datetime="${esc(m.decidedAt)}">${esc(toISTShort(m.decidedAt).split(', ').at(-1))}</time>` +
+      `<span class="chip">${r ? `<span class="sr-only">Round </span><span aria-hidden="true">R</span>${r}` : '-'}</span>` +
+      `<span><strong>${esc(winner)}</strong> <span class="w" aria-hidden="true">W</span> ` +
+      `${m.a === m.b ? '<span class="hint">bye</span>' : `<span class="hint">def.</span> <span class="lose">${esc(loser)}</span>`}</span>` +
       `${live && undoable(m) ? btn('undo', { match: m.id }, 'Undo', 'subtle') : ''}</li>`;
   };
   // Rounds as a bracket. Pairings are made as players come free, so a line follows each winner to the match
@@ -867,8 +876,8 @@ export function runnerPage(cfg, state, {
     return `${p.wins}W${p.status === 'playing' ? ', playing' : ''}${waited(p)}`;
   };
   // The number is on the row, to call someone who has wandered off; only Drop folds away, behind its tick.
-  const nameRows = (list) => `<ul class="names">${list.map((p) => `<li${p.status === 'dropped' ? ' class="gone"' : ''}>` +
-    `<span class="who"><strong>${esc(p.name)}</strong> <span class="hint">${info(p)}</span></span>` +
+  const nameRows = (list, bare = false) => `<ul class="names">${list.map((p) => `<li${p.status === 'dropped' ? ' class="gone"' : ''}>` +
+    `<span class="who"><strong>${esc(p.name)}</strong>${bare ? '' : ` <span class="hint">${info(p)}</span>`}</span>` +
     `<span class="nowrap">${esc(displayPhone(p.phone))}</span>` +
     `${dropOne(p) ? `<details class="drop"><summary>Drop</summary>${dropOne(p)}</details>` : ''}` +
     `${live && p.status === 'dropped' ? `<details class="drop back"><summary>Undo drop</summary>${btn('undrop', { player: p.id }, `Bring ${esc(p.name)} back`, 'secondary')}</details>` : ''}</li>`).join('')}</ul>`;
@@ -876,8 +885,14 @@ export function runnerPage(cfg, state, {
   const outOrder = (x, y) => (lostIn.get(y.id)?.round ?? 0) - (lostIn.get(x.id)?.round ?? 0) ||
     (lostIn.get(y.id)?.at ?? '').localeCompare(lostIn.get(x.id)?.at ?? '');
   // Each bucket folds on its own, by a stable id; only the ones still in play start open.
-  const bucket = (key, title, list, isOpen) => (list.length ? `<li><details id="lcq-b-${key}"${isOpen ? ' open' : ''}>` +
-    `<summary><h3>${title} (${list.length})</h3></summary>${nameRows(list)}</details></li>` : '');
+  const bucket = (key, title, list, isOpen, body = nameRows(list)) => (list.length ? `<li><details id="lcq-b-${key}"${isOpen ? ' open' : ''}>` +
+    `<summary><h3>${title} (${list.length})</h3></summary>${body}</details></li>` : '');
+  // Everyone out in the same round shares a placing, so Eliminated is grouped by round; Results and Find say who beat whom.
+  const byRound = (list) => [...new Set(list.map((p) => lostIn.get(p.id)?.round ?? 0))].map((r) => {
+    const here = list.filter((p) => (lostIn.get(p.id)?.round ?? 0) === r);
+    return `<h4 class="sub">${r ? `Out in round ${r}` : 'Out'} (${here.length})</h4>${nameRows(here, true)}`;
+  }).join('');
+  const out = players.filter((p) => p.status === 'out').sort(outOrder);
   const active = players.filter((p) => ['playing', 'free'].includes(p.status));
   const count = (...statuses) => players.filter((p) => statuses.includes(p.status)).length;
   const stats = `<dl class="stats">${[['Matches on', open.length], ['Waiting for a match', count('free')],
@@ -885,7 +900,7 @@ export function runnerPage(cfg, state, {
     .map(([k, v]) => `<div class="stat"><dt>${k}</dt><dd>${v}</dd></div>`).join('')}</dl>`;
   const standings = [...new Set(active.map((p) => p.wins))].sort((x, y) => y - x)
       .map((w) => bucket(`w${w}`, `${w}W`, active.filter((p) => p.wins === w), true)).join('') +
-    bucket('out', 'Eliminated', players.filter((p) => p.status === 'out').sort(outOrder), false) +
+    bucket('out', 'Eliminated', out, false, byRound(out)) +
     bucket('dropped', 'Dropped', players.filter((p) => p.status === 'dropped')
       .sort((x, y) => (y.droppedAt ?? '').localeCompare(x.droppedAt ?? '')), false) || none('No LCQ registrations yet.');
 
