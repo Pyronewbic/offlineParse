@@ -268,6 +268,9 @@ describe('LCQ runner over HTTP', () => {
     assert.equal(lcq.state().players.find((p) => p.id === p1.id).status, 'dropped', 'positive control: dropped with the tick');
     const body = (await request({ port, path: '/lcq?q=P1', headers: cookie })).body;
     assert.match(body, /<li class="gone"><span class="who"><strong>P1<\/strong> <span class="hint">dropped [^<]*<\/span><\/span><span class="nowrap">[^<]*<\/span><\/li>/, 'no Drop for someone already dropped');
+    await post('/lcq/undo', { match: String(lcq.state().decided[0].id) }, cookie);
+    assert.match((await request({ port, path: '/lcq', headers: cookie })).body, /Result undone\. P1 is back in; their drop is undone\./);
+    assert.equal(lcq.state().players.find((p) => p.id === p1.id).status, 'playing', 'Undo on the forfeit puts P1 back in their match');
   });
 
   test('a refused action is explained once on the next page load', async () => {

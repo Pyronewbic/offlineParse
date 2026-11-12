@@ -76,7 +76,7 @@ describe('LCQ runner', () => {
     assert.throws(() => lcq.result(first.id, id('P2')), LcqError, 'no second result');
     win('P3');
     play('P1', 'P3');
-    assert.deepEqual(lcq.undo(first.id), ['P1 vs P3'], 'the match paired on the wrong record is called off');
+    assert.deepEqual(lcq.undo(first.id).cancelled, ['P1 vs P3'], 'the match paired on the wrong record is called off');
     assert.equal(player('P1').status, 'playing', 'P1 is back in the undone match');
     assert.equal(player('P2').status, 'playing', 'and so is the player who had lost it');
     assert.equal(player('P3').status, 'free');
@@ -85,6 +85,7 @@ describe('LCQ runner', () => {
     play('P1', 'P3');
     win('P3');
     assert.throws(() => lcq.undo(first.id), /Undo "P3 beat P1" first/);
+    assert.equal(lcq.undo(lcq.state().decided[0].id).back, null, 'nobody was dropped, nobody comes back');
   });
 
   test('a match started by mistake can be called off; a decided one cannot', () => {
@@ -132,6 +133,24 @@ describe('LCQ runner', () => {
     lcq.drop(id('P3'));
     assert.equal(player('P3').status, 'dropped', 'a free player can be dropped too');
     assert.ok(lcq.state().proposals.every((p) => ![p.a.name, p.b.name].some((x) => x === 'P1' || x === 'P3')));
+  });
+
+  test('undoing a drop\'s forfeit takes the drop back, so a dropped player is never in a match again', () => {
+    for (let i = 0; i < 4; i++) signUp();
+    play('P1', 'P2');
+    const forfeit = openMatch('P1');
+    lcq.drop(id('P1'));
+    lcq.drop(id('P3'));
+    const p4 = id('P4');
+    store.db.prepare('INSERT INTO lcq_matches (a, b, winner, createdAt, decidedAt) VALUES (?, ?, ?, ?, ?)').run(p4, p4, p4, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z');
+    lcq.drop(p4);
+    assert.deepEqual(lcq.undo(forfeit.id), { cancelled: [], back: 'P1' });
+    assert.deepEqual([player('P1').status, player('P2').status], ['playing', 'playing'], 'P1 is back in the match their drop gave away');
+    assert.equal(player('P3').status, 'dropped', 'a drop with no forfeit is not touched');
+    assert.deepEqual(lcq.undo(lcq.state().decided.find((m) => m.a === p4).id), { cancelled: [], back: null });
+    assert.equal(player('P4').status, 'dropped', 'undoing a bye never brings its player back');
+    win('P1');
+    assert.deepEqual([player('P1').status, player('P1').wins], ['free', 1]);
   });
 
   test('matches from before single elimination, made in groups of 4, still count', () => {
@@ -204,7 +223,7 @@ describe('LCQ runner', () => {
     const byeMatch = lcq.state().decided.find((m) => m.a === m.b);
     assert.throws(() => lcq.undo(byeMatch.id), /Undo "P1 beat P3" first/);
     lcq.undo(lcq.state().decided[0].id);
-    assert.deepEqual(lcq.undo(byeMatch.id), ['P1 vs P3'], 'the match the bye led to is called off');
+    assert.deepEqual(lcq.undo(byeMatch.id).cancelled, ['P1 vs P3'], 'the match the bye led to is called off');
     assert.deepEqual([player('P3').wins, player('P3').status], [0, 'free']);
     assert.ok(!lcq.state().decided.some((m) => m.a === m.b) && !lcq.state().open.some((m) => m.a === m.b), 'an undone bye is gone, not left open');
   });

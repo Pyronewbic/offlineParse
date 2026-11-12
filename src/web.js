@@ -1126,8 +1126,9 @@ export function createPortalServer(cfg, store, {
           flashes.set(session, { undo: { id: m.id, text } });
         }
         else if (path === '/lcq/undo') {
-          const cancelled = lcq.undo(n('match'));
-          flashes.set(session, { notice: `Result undone.${cancelled.length ? ` Also called off ${cancelled.join(', ')}, which depended on it.` : ''}` });
+          const { cancelled, back } = lcq.undo(n('match'));
+          flashes.set(session, { notice: `Result undone.${back ? ` ${back} is back in; their drop is undone.` : ''}` +
+            `${cancelled.length ? ` Also called off ${cancelled.join(', ')}, which depended on it.` : ''}` });
         } else if (path === '/lcq/cancel') lcq.cancel(n('match'));
         else if (path === '/lcq/finalize') lcq.finalize(game, fields.confirm === 'yes');
         else if (path === '/lcq/unfinalize') lcq.unfinalize(game);

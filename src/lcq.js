@@ -222,7 +222,8 @@ export class Lcq {
   /**
    * Take back a result. Later matches of either player that have no result yet were paired on the
    * wrong record, so they are cancelled too; a later match with a result must be undone first.
-   * Returns what else was cancelled, for the operator.
+   * A dropped player can only have lost the match their drop forfeited, so undoing it takes the drop back too.
+   * Returns what else was cancelled and who is back in, for the operator.
    */
   undo(matchId) {
     const m = this.match(matchId);
@@ -235,9 +236,13 @@ export class Lcq {
       const what = w === l ? `${this.nameOf(w)} had a bye` : `${this.nameOf(w)} beat ${this.nameOf(l)}`;
       throw new LcqError(`Undo "${what}" first; it came after this result.`);
     }
+    const loser = m.winner === m.a ? m.b : m.a;
+    const back = m.a !== m.b && this.db.prepare('DELETE FROM lcq_drops WHERE leadId = ?');
     this.db.exec('BEGIN');
+    let restored = 0;
     try {
       for (const x of later) this.db.prepare('DELETE FROM lcq_matches WHERE id = ?').run(x.id);
+      if (back) restored = Number(back.run(loser).changes);
       // A bye has no match to go back to.
       if (m.a === m.b) this.db.prepare('DELETE FROM lcq_matches WHERE id = ?').run(matchId);
       else this.db.prepare('UPDATE lcq_matches SET winner = NULL, decidedAt = NULL WHERE id = ?').run(matchId);
@@ -246,7 +251,7 @@ export class Lcq {
       this.db.exec('ROLLBACK');
       throw e;
     }
-    return later.map((x) => `${this.nameOf(x.a)} vs ${this.nameOf(x.b)}`);
+    return { cancelled: later.map((x) => `${this.nameOf(x.a)} vs ${this.nameOf(x.b)}`), back: restored ? this.nameOf(loser) : null };
   }
 
   /** Call off a match that has no result yet (started by mistake); both players are free again. */
