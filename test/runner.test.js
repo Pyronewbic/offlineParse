@@ -6,7 +6,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { after, before, beforeEach, describe, test } from 'node:test';
 import { Lcq, bracketGap } from '../src/lcq.js';
 import { LeadStore } from '../src/leads.js';
-import { againstFor, bracketLayout, createPortalServer, holdsUpdates, overdue, runnerPage, runnerVersion } from '../src/web.js';
+import { againstFor, bracketLayout, clockText, createPortalServer, holdsUpdates, overdue, runnerPage, runnerVersion } from '../src/web.js';
 import { makeConfig, postForm, request } from './helpers.js';
 
 describe('LCQ runner over HTTP', () => {
@@ -226,6 +226,24 @@ describe('LCQ runner over HTTP', () => {
     assert.notEqual(runnerVersion(cfg, lcq, st, min(14)), runnerVersion(cfg, lcq, st, min(16)));
     const later = makeConfig({ lcqWaitAlertMin: 30 });
     assert.equal(overdue(later, st, min(16)).waiting.length, 0, 'the limit comes from config');
+  });
+
+  test('a running match shows a clock beside the names that ticks each second and says when it is over the limit', async () => {
+    assert.deepEqual([0, 59_999, 75_000, 3_599_999, 3_600_000, 3_905_000, -5_000].map(clockText),
+      ['0:00', '0:59', '1:15', '59:59', '1:00:00', '1:05:05', '0:00'], 'm:ss, then h:mm:ss; never negative');
+    signUp(2);
+    startAll();
+    const [m] = lcq.state().open;
+    const at = (ms, cfg = makeConfig()) => runnerPage(cfg, lcq.state(), { now: Date.parse(m.createdAt) + ms });
+    assert.match(at(899_000), /<div class="mhead"><p class="match">.*?<\/p><span class="clock" data-limit="900000"><span class="sr-only">Running <\/span><span data-run="899000">14:59<\/span><span class="lim"> over 15 min<\/span><\/span><\/div>/,
+      'under the limit: the clock alone, the words hidden');
+    assert.match(at(900_000), /<span class="clock over" data-limit="900000">.*?<span data-run="900000">15:00<\/span>/, 'at the limit it turns over');
+    assert.match(at(960_000, makeConfig({ lcqMatchAlertMin: 30 })), /<span class="clock" data-limit="1800000">.*?16:00<\/span><span class="lim"> over 30 min</, 'the limit comes from config');
+    assert.ok(!at(60_000).includes('running <span data-wait'), 'no second, coarser time on the match');
+    const js = (await request({ port, path: '/lcq/app.js' })).body;
+    const shipped = new Function(`return ${js.match(/const clockText = ([^]*?\n\s*\});/)[1]}`)();
+    assert.equal(shipped(3_905_000), '1:05:05', 'the copy the tablet runs works on its own');
+    assert.match(js, /querySelectorAll\('\[data-run\]'\)[^]*?classList\.toggle\('over', ms >= Number\(c\.dataset\.limit\)\)[^]*?\}, 1000\);/, 'ticks each second and turns over at the limit');
   });
 
   test('a sticky bar jumps to Playing and Ready, with counts', () => {

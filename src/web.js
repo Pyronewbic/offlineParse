@@ -60,6 +60,12 @@ const waitText = (ms) => {
   const m = Math.max(0, Math.floor(ms / 60000));
   return m < 1 ? 'under 1 min' : m < 60 ? `${m} min` : `${Math.floor(m / 60)} h ${m % 60} min`;
 };
+/** A running match's clock: m:ss, then h:mm:ss. */
+export const clockText = (ms) => {
+  const s = Math.max(0, Math.floor(ms / 1000));
+  const two = (n) => String(n).padStart(2, '0');
+  return s < 3600 ? `${Math.floor(s / 60)}:${two(s % 60)}` : `${Math.floor(s / 3600)}:${two(Math.floor(s / 60) % 60)}:${two(s % 60)}`;
+};
 /**
  * Whether the tablet holds off swapping in an update: just after any touch, or while a finger is down, a field has
  * focus or a pick is half made, but never past a minute idle, so a forgotten tap cannot freeze the page.
@@ -97,6 +103,16 @@ const RUNNER_JS = `(() => {
   setInterval(() => {
     for (const s of document.querySelectorAll('[data-wait]')) s.textContent = waitText(Number(s.dataset.wait) + Date.now() - loadedAt);
   }, 30000);
+  // Match clocks tick each second and turn red at the limit without waiting for a reload.
+  const clockText = ${clockText};
+  setInterval(() => {
+    for (const s of document.querySelectorAll('[data-run]')) {
+      const ms = Number(s.dataset.run) + Date.now() - loadedAt;
+      s.textContent = clockText(ms);
+      const c = s.closest('.clock');
+      if (c) c.classList.toggle('over', ms >= Number(c.dataset.limit));
+    }
+  }, 1000);
   // Folded sections are remembered per tablet; storage can throw (private mode), so it is best effort.
   const KEY = 'lcq-open';
   const load = () => { try { return JSON.parse(localStorage.getItem(KEY)) || {}; } catch { return {}; } };
@@ -226,6 +242,13 @@ details.panel > summary h2{display:inline}
 .duo{display:grid;gap:0 16px}
 @media (min-width: 1000px){.duo{grid-template-columns:1fr 1fr}}
 .match{margin:0;overflow-wrap:anywhere}
+.mhead{display:flex;align-items:flex-start;flex-wrap:wrap;gap:6px 12px}
+.mhead .match{flex:1 1 14rem}
+.clock{flex:none;margin-left:auto;padding:1px 12px;border:2px solid var(--line);border-radius:999px;font-size:1.2rem;font-weight:800;font-variant-numeric:tabular-nums;white-space:nowrap}
+.clock .lim{display:none;font-size:.9rem}
+.clock.over{border-color:var(--error);background:var(--errorBg);color:var(--error)}
+.clock.over::before{content:"!";display:inline-block;width:1.2em;margin-right:.35em;border-radius:50%;background:var(--error);color:var(--surface);text-align:center;font-size:.85em;line-height:1.2em}
+.clock.over .lim{display:inline}
 .won{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:.6rem}
 .won form.inline{display:block}
 .won form.inline button{width:100%;min-height:56px;margin:0;font-size:1.05rem;overflow-wrap:anywhere}
@@ -715,7 +738,14 @@ export function runnerPage(cfg, state, {
   // A and B tell the two players and their winner buttons apart without relying on colour.
   const side = (s) => `<span class="side" aria-hidden="true">${s}</span>`;
   const who = (id, name, s) => `${side(s)}<strong>${esc(name)}</strong>${byId.has(id) ? ` <span class="hint">${record(byId.get(id))}</span>` : ''}`;
-  const playing = open.map((m) => `<li><p class="match">${who(m.a, m.aName, 'A')} vs ${who(m.b, m.bName, 'B')} <span class="hint">running ${elapsed(m.createdAt)}</span></p><div class="won">` +
+  // The clock is plain text to a screen reader, never announced each second; past the limit it says so in words.
+  const limit = cfg.lcqMatchAlertMin * 60_000;
+  const clock = (iso) => {
+    const ms = now - Date.parse(iso);
+    return `<span class="clock${ms >= limit ? ' over' : ''}" data-limit="${limit}"><span class="sr-only">Running </span>` +
+      `<span data-run="${ms}">${clockText(ms)}</span><span class="lim"> over ${cfg.lcqMatchAlertMin} min</span></span>`;
+  };
+  const playing = open.map((m) => `<li><div class="mhead"><p class="match">${who(m.a, m.aName, 'A')} vs ${who(m.b, m.bName, 'B')}</p>${clock(m.createdAt)}</div><div class="won">` +
     `${btn('result', { match: m.id, winner: m.a }, `${side('A')}${esc(m.aName)} won`)}` +
     `${btn('result', { match: m.id, winner: m.b }, `${side('B')}${esc(m.bName)} won`)}</div>` +
     `<div class="calloff">${btn('cancel', { match: m.id }, 'Call off', 'quiet')}</div></li>`).join('') || none('No matches in progress.');
