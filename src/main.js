@@ -9,9 +9,11 @@ import { CSV_RETRY_MS, LeadFiles } from './files.js';
 import { Lcq } from './lcq.js';
 import { LeadStore } from './leads.js';
 import { AddressError, addressFollower, detectAddress, localAddresses } from './netaddr.js';
+import { Router, WifiBan, macOf } from './routerban.js';
 import { createPortalServer, printable } from './web.js';
 
 const ADDRESS_CHECK_MS = 5000;
+const WIFI_BAN_MS = 15_000;
 
 function listen(server, port, host) {
   return new Promise((resolvePromise, reject) => {
@@ -73,6 +75,17 @@ async function main(argv) {
     return 2;
   }
 
+  // The router password stays out of config.json, which is committed.
+  const routerPassword = process.env.BOOTH_ROUTER_PASSWORD ?? '';
+  if (cfg.routerBan.enabled && !routerPassword) {
+    console.error('config error: routerBan.enabled needs the router password in the BOOTH_ROUTER_PASSWORD environment variable');
+    return 2;
+  }
+  if (cfg.routerBan.enabled && cfg.routerBan.host === address.ip) {
+    console.error(`config error: routerBan.host ${cfg.routerBan.host} is this laptop; it must be the router`);
+    return 2;
+  }
+
   // Everything under data/ holds guests' names and numbers: owner-only.
   process.umask(0o077);
   const dataDir = dirname(cfg.dbPath);
@@ -90,7 +103,13 @@ async function main(argv) {
   const onQuery = trace && ((name, from, answered) => trace(`dns  ${printable(from)} asked ${printable(name ?? '(malformed)')}${answered ? '' : ' (no answer)'}`));
   const onRequest = trace && ((from, method, host, url) => trace(`http ${printable(from)} ${printable(method)} ${printable(host)}${printable(url)}`));
   const lcq = new Lcq(store);
-  const server = createPortalServer(cfg, store, { laptopIp: address.ip, quiet: values.quiet, brand, onRequest, lcq });
+  const wifiBan = cfg.routerBan.enabled ? new WifiBan(cfg.routerBan, store, {
+    router: new Router({ host: cfg.routerBan.host, certSha256: cfg.routerBan.certSha256, password: routerPassword }),
+    lookup: (ip) => macOf(ip, { router: cfg.routerBan.host }),
+    protectedIps: () => server.tabletIps(),
+    log: (line) => console.error(`${new Date().toISOString()} ${line}`),
+  }) : null;
+  const server = createPortalServer(cfg, store, { laptopIp: address.ip, quiet: values.quiet, brand, onRequest, lcq, wifiBan });
   let dns = null;
   try {
     await listen(server, cfg.httpPort, '0.0.0.0').catch((e) => {
@@ -134,12 +153,14 @@ async function main(argv) {
   });
   const timer = setInterval(() => follower.check().catch((e) => console.error(`address check failed: ${e.message}`)), ADDRESS_CHECK_MS);
   const fileRetry = setInterval(() => files.retry(), CSV_RETRY_MS);
+  const wifiTimer = wifiBan && setInterval(() => wifiBan.tick().catch((e) => console.error(`Wi-Fi drop failed: ${e.message}`)), WIFI_BAN_MS);
 
   console.log(`Laptop address:      ${address.ip} (${address.how})`);
   console.log(`Sign-up form:        ${server.portalUrl()}`);
   console.log(`Admin (laptop only): http://localhost${port === 80 ? '' : `:${port}`}/admin`);
   console.log(`LCQ runner (tablet): ${server.portalUrl()}lcq  PIN ${lcq.pin()}`);
   console.log(`DNS:                 ${dnsLine()}`);
+  console.log(`Wi-Fi drop:          ${wifiBan ? `on: a phone leaves ${cfg.routerBan.afterMin} min after signing up, kept off for ${cfg.routerBan.hours} h (router ${cfg.routerBan.host})` : 'off'}`);
   if (refusers.servers.length) {
     console.log(`Refusing at once:    ${refusers.servers.map((r) => r.address().port).join(', ')} (HTTPS, private DNS)`);
   }
@@ -156,6 +177,7 @@ async function main(argv) {
   const stop = () => {
     clearInterval(timer);
     clearInterval(fileRetry);
+    if (wifiTimer) clearInterval(wifiTimer);
     for (const r of refusers.servers) r.close();
     server.close();
     server.closeAllConnections();

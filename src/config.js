@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { isIPv4 } from 'node:net';
+import { cleanMac } from './routerban.js';
 
 const FIELD_TYPES = {
   orgName: 'string',
@@ -17,10 +18,13 @@ const FIELD_TYPES = {
   lcqWaitAlertMin: 'minutes',
   lcqMatchAlertMin: 'minutes',
   games: 'games',
+  routerBan: 'routerBan',
 };
 // Keys older config files lack: flag a 10-minute wait or a 15-minute match.
 // No games means guests pick none and registrations carry no game.
-const DEFAULTS = { lcqWaitAlertMin: 10, lcqMatchAlertMin: 15, games: [] };
+// Dropping registered phones from the Wi-Fi needs an OpenWrt router (see README), so it is off unless set.
+const ROUTER_BAN_OFF = { enabled: false, host: '100.64.0.1', certSha256: '', afterMin: 3, hours: 24, never: [] };
+const DEFAULTS = { lcqWaitAlertMin: 10, lcqMatchAlertMin: 15, games: [], routerBan: ROUTER_BAN_OFF };
 export const MAX_GAMES = 12;
 export const GAME_MAX = 40; // characters, counted as code points
 // Keys from the WhatsApp follow-up days and the LCQ rules before single elimination.
@@ -58,10 +62,11 @@ export function configFromObject(raw) {
       type === 'port' ? Number.isInteger(value) && value >= 1 && value <= 65535
       : type === 'minutes' ? Number.isInteger(value) && value >= 1 && value <= 240
       : type === 'games' ? Array.isArray(value)
+      : type === 'routerBan' ? value !== null && typeof value === 'object' && !Array.isArray(value)
       : typeof value === type;
     if (!ok) {
       const want = { port: 'an integer 1-65535', minutes: 'a whole number of minutes, 1-240',
-        games: 'a list of game names' }[type] ?? `a ${type}`;
+        games: 'a list of game names', routerBan: 'an object (see README)' }[type] ?? `a ${type}`;
       throw new ConfigError(`${key} must be ${want}`);
     }
   }
@@ -97,5 +102,33 @@ export function configFromObject(raw) {
   const lower = raw.games.map((g) => g.toLocaleLowerCase());
   if (new Set(lower).size !== lower.length) throw new ConfigError('games: each name must be different');
 
-  return Object.freeze({ ...raw, games: Object.freeze([...raw.games]) });
+  return Object.freeze({ ...raw, games: Object.freeze([...raw.games]), routerBan: routerBanFrom(raw.routerBan) });
+}
+
+const PRIVATE = [[10, 0, 8], [172, 16, 12], [192, 168, 16], [100, 64, 10]];
+const inRange = (ip, [a, b, bits]) => {
+  const n = ip.split('.').reduce((acc, o) => acc * 256 + Number(o), 0);
+  return n >>> (32 - bits) === ((a * 256 + b) * 65536) >>> (32 - bits);
+};
+
+function routerBanFrom(raw) {
+  const keys = Object.keys(ROUTER_BAN_OFF);
+  const unknown = Object.keys(raw).filter((k) => !keys.includes(k));
+  if (unknown.length) throw new ConfigError(`routerBan: unknown keys: ${unknown.join(', ')}`);
+  const v = { ...ROUTER_BAN_OFF, ...raw };
+  if (typeof v.enabled !== 'boolean') throw new ConfigError('routerBan.enabled must be true or false');
+  // The router is on the booth network itself: a private address, never a public or cloud-metadata one.
+  if (typeof v.host !== 'string' || !isIPv4(v.host) || !PRIVATE.some((r) => inRange(v.host, r))) {
+    throw new ConfigError('routerBan.host must be the router\'s IPv4 address on the booth network (10.x, 172.16-31.x, 192.168.x or 100.64-127.x)');
+  }
+  const pin = typeof v.certSha256 === 'string' ? v.certSha256.replaceAll(':', '').toLowerCase() : null;
+  if (pin === null || (pin && !/^[0-9a-f]{64}$/.test(pin))) throw new ConfigError('routerBan.certSha256 must be the router certificate\'s SHA-256 fingerprint (64 hex digits)');
+  if (v.enabled && !pin) throw new ConfigError('routerBan.certSha256 is needed when routerBan.enabled is true');
+  if (!Number.isInteger(v.afterMin) || v.afterMin < 1 || v.afterMin > 60) throw new ConfigError('routerBan.afterMin must be a whole number of minutes, 1-60');
+  // hostapd takes the ban as a 32-bit count of milliseconds: 500 h fits, 600 h would not.
+  if (!Number.isInteger(v.hours) || v.hours < 1 || v.hours > 500) throw new ConfigError('routerBan.hours must be a whole number of hours, 1-500');
+  if (!Array.isArray(v.never) || v.never.length > 32 || v.never.some((m) => !cleanMac(m))) {
+    throw new ConfigError('routerBan.never must be a list of up to 32 device Wi-Fi addresses like "a4:83:e7:01:02:03"');
+  }
+  return Object.freeze({ ...v, certSha256: pin, never: Object.freeze(v.never.map(cleanMac)) });
 }

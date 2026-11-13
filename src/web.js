@@ -465,11 +465,12 @@ ${inline ? '' : errorBlock(error)}
   ${cfg.games.length ? `<fieldset class="games"${attrs('game')}><legend>Games</legend><p class="hint">Tick every game you want to play.</p>` +
     `${gameBoxes(cfg, games, '', ended)}</fieldset>${fieldError('game')}` : ''}
   <label class="check"><input type="checkbox" name="consent" value="yes" required${consent ? ' checked' : ''}${attrs('consent')}>
-    <span>I agree to ${esc(cfg.orgName)} keeping my name, number and email for this event's registration.</span></label>
+    <span>I agree to ${esc(cfg.orgName)} keeping my name, number and email for this event's registration${cfg.routerBan.enabled ? WIFI_CONSENT : ''}.</span></label>
   ${fieldError('consent')}
   <button class="primary" type="submit">Register</button>
 </form>`, `
-<p class="notice">${esc(cfg.orgName)} uses your name, number and email only for this event's registration.
+<p class="notice">${esc(cfg.orgName)} uses your name, number and email only for this event's registration.${cfg.routerBan.enabled
+    ? ` Your phone's Wi-Fi address is kept for ${cfg.routerBan.hours} hours only to keep it off this Wi-Fi.` : ''}
 Reach out to us at the desk any time to have your details deleted.</p>`);
 }
 
@@ -481,14 +482,19 @@ export function thanksPage(cfg, name, phone, brand = NO_BRAND, bracket = 'normal
 <p class="lede">We've got you down for <strong>${esc(BRACKETS[bracket])}</strong>${games.filter(Boolean).length ? ` in ${strong(games)}` : ''} as <strong>${esc(name)}</strong> on <strong class="nowrap">${esc(displayPhone(phone))}</strong>${email ? `, <strong>${esc(email)}</strong>` : ''}.</p>
 ${already.length ? `<p>You were already registered for ${strong(already)}.</p>` : ''}
 ${full.length ? `<p>The ${named.length ? `${strong(named)} ` : ''}LCQ bracket${full.length > 1 ? 's are' : ' is'} full; staff may still add you.</p>` : ''}
-<p>You can leave this Wi-Fi now.</p>
+<p>${cfg.routerBan.enabled ? `This phone leaves the booth Wi-Fi in ${cfg.routerBan.afterMin} minutes.` : 'You can leave this Wi-Fi now.'}</p>
 <p><strong>iPhone:</strong> tap <strong>Cancel</strong> at the top of this screen. To stop it joining again, go to Settings, Wi-Fi, tap (i) next to this network, then <strong>Forget This Network</strong>.</p>
 <p><strong>Android:</strong> in Wi-Fi settings, tap this network, then <strong>Forget</strong>.</p>`, `
 <p class="notice">Changed your mind? Reach out to us at the desk and we'll delete your details.</p>`);
 }
 
+// With routerBan on, the guest also agrees to their phone being taken off the booth Wi-Fi.
+const WIFI_CONSENT = ', and to my phone being taken off this Wi-Fi after I register';
+
 const FLASH = {
   added: 'Registration added.',
+  'wifi-back': 'That phone can join the booth Wi-Fi again.',
+  'wifi-back-failed': 'Forgotten here, but the router could not be reached; its ban ends by itself.',
   'event-renamed': 'Event renamed.',
   'event-deleted': 'Event deleted.',
   'added-some': 'Added for the games they were not in yet; they were already registered for the others.',
@@ -519,7 +525,7 @@ function adminHeader(cfg, brand, title, actions = '') {
 
 export function adminPage(cfg, {
   leads: everyone, token, brand = NO_BRAND, q = '', msg = '', error = '', warnings = [], form = {}, view = { tab: 'all', event: '' },
-  active = 'normal', runner = null, events, current, eventError = '', eventName = '', manageError = '',
+  active = 'normal', runner = null, events, current, eventError = '', eventName = '', manageError = '', wifi = null,
 }) {
   const { tab } = view;
   const shownEvent = events.find((e) => e.code === view.event) ?? current;
@@ -541,7 +547,9 @@ export function adminPage(cfg, {
       `<td class="num">${esc(displayPhone(lead.phone))}</td><td>${lead.email ? esc(lead.email) : '-'}</td>` +
       `<td><span class="chip ${lead.source === 'desk' ? 'desk' : 'form'}">${esc(SOURCE_LABELS[lead.source] ?? lead.source)}</span></td>` +
       `<td class="num">${esc(toISTShort(lead.createdAt))}</td>` +
-      `<td class="act"><form class="inline" method="post" action="/admin/delete">${hidden(token, lead.id, view)}` +
+      `<td class="act">${wifi?.banned.has(lead.phone) && lead.eventCode === shownEvent.code ? `<form class="inline" method="post" action="/admin/wifi-back">${hidden(token, lead.id, view)}` +
+        `<button class="secondary" aria-label="Let ${esc(lead.name)}'s phone back on the booth Wi-Fi">Back on Wi-Fi</button></form>` : ''}` +
+      `<form class="inline" method="post" action="/admin/delete">${hidden(token, lead.id, view)}` +
       `<button class="quiet" aria-label="Delete ${esc(lead.name)}">Delete</button></form></td></tr>`;
   });
   const empty = leads.length === 0
@@ -630,6 +638,8 @@ ${counts}
   <div class="stat"><dt>Last sign-up</dt><dd>${last ? esc(toISTShort(last.createdAt)) : '-'}</dd></div>
 </dl>
 ${runner ? `<p class="hint">LCQ runner for a tablet on the booth Wi-Fi: <strong>${esc(runner.url)}</strong>, PIN <strong>${esc(runner.pin)}</strong></p>` : ''}
+${wifi ? `<p class="hint">Wi-Fi drop on: ${wifi.banned.size} phone${wifi.banned.size === 1 ? '' : 's'} kept off the booth Wi-Fi in this event, ${wifi.pending} to drop.` +
+    `${wifi.failures ? ` <strong>${wifi.failures} did not work</strong>; last: ${esc(wifi.lastError)}` : ''}</p>` : ''}
 </div>
 </div>
 <section class="panel add" aria-labelledby="add-title">
@@ -1084,7 +1094,7 @@ function tokenMatches(given, expected) {
 
 export function createPortalServer(cfg, store, {
   laptopIp, quiet = false, brand = { light: null, dark: null }, onRequest = null, idleTimeoutMs = 20_000, maxConnectionsPerAddress = 32,
-  submitLimit = { max: 10, windowMs: 60_000 }, clock = () => Date.now(), lcq = null,
+  submitLimit = { max: 10, windowMs: 60_000 }, clock = () => Date.now(), lcq = null, wifiBan = null,
 }) {
   const adminToken = randomBytes(32).toString('base64url');
   let portalHosts;
@@ -1130,13 +1140,18 @@ export function createPortalServer(cfg, store, {
       all: params.all === '1' ? '1' : '',
     };
   };
-  const adminData = () => ({
+  const dropping = cfg.routerBan.enabled && wifiBan;
+  const adminData = (view = {}) => ({
     leads: store.list(), token: adminToken, brand, warnings: warningsOf(store), active: store.bracket(), runner: runnerInfo(),
-    events: store.events(), current: store.currentEvent(),
+    events: store.events(), current: store.currentEvent(), wifi: dropping ? wifiBan.status(view.event || store.currentEvent().code) : null,
   });
+  // Lift a number's Wi-Fi ban in an event once none of its registrations there are left.
+  const unban = async ({ phone, eventCode }) => (store.list().some((l) => l.phone === phone && l.eventCode === eventCode) ? true : wifiBan.lift({ phone, eventCode }));
 
   // Signed-in tablets. Kept in memory: after a restart the tablet enters the PIN again.
   const sessions = new Set();
+  // Addresses that signed in to the runner: the tablet is never taken off the Wi-Fi.
+  const tabletIps = new Set();
   const flashes = new Map();
   const sessionOf = (req) => {
     const token = SESSION_COOKIE.exec(req.headers.cookie ?? '')?.[1];
@@ -1156,6 +1171,7 @@ export function createPortalServer(cfg, store, {
         if (!tokenMatches(fields.pin, lcq.pin())) return html(res, 401, pinPage(cfg, brand, 'That PIN is not right.'));
         const token = randomBytes(32).toString('base64url');
         sessions.add(token);
+        tabletIps.add(req.socket.remoteAddress);
         log(`LCQ runner opened from ${printable(req.socket.remoteAddress)}`);
         return send(res, 303, 'text/html; charset=utf-8', '<a href="/lcq">Continue</a>', {
           Location: '/lcq', 'Set-Cookie': `lcq=${token}; Path=/lcq; HttpOnly; SameSite=Strict; Max-Age=86400`,
@@ -1259,13 +1275,14 @@ export function createPortalServer(cfg, store, {
     const created = [];
     const already = [];
     for (const game of games) {
-      (store.register({ name, phone, email, source: 'form', noticeVersion: cfg.noticeVersion, bracket, game }).created ? created : already).push(game);
+      (store.register({ name, phone, email, source: 'form', noticeVersion: dropping ? `${cfg.noticeVersion}+wifi` : cfg.noticeVersion, bracket, game }).created ? created : already).push(game);
     }
     if (!created.length) {
       log('duplicate registration refused');
       return html(res, 409, formPage(cfg, { ...again, error: alreadyRegistered(bracket, already), field: 'phone' }, brand));
     }
     log(`registration added via form (${BRACKETS[bracket]}${inGames(created)})`);
+    if (dropping && !tabletIps.has(req.socket.remoteAddress)) wifiBan.queue({ ip: req.socket.remoteAddress, phone, eventCode: store.currentEvent().code });
     const full = bracket === 'lcq' && lcq ? created.filter((g) => lcq.phase(g).finalizedAt) : [];
     html(res, 200, thanksPage(cfg, name, phone, brand, bracket, created, already, full, email));
   }
@@ -1274,7 +1291,7 @@ export function createPortalServer(cfg, store, {
     const fields = await readForm(req);
     if (!tokenMatches(fields.token, adminToken)) return plain(res, 403, 'bad or missing admin token; reload /admin');
     const view = viewOf(fields);
-    const adminReply = (status, extra) => html(res, status, adminPage(cfg, { ...adminData(), view, ...extra }));
+    const adminReply = (status, extra) => html(res, status, adminPage(cfg, { ...adminData(view), view, ...extra }));
     if (path === '/admin/bracket') {
       if (!Object.hasOwn(BRACKETS, fields.bracket)) return plain(res, 400, 'unknown bracket');
       store.setBracket(fields.bracket);
@@ -1287,9 +1304,16 @@ export function createPortalServer(cfg, store, {
       if (!lead) return plain(res, 404, 'registration not found; it may already be deleted');
       if (fields.confirm !== 'yes') return html(res, 200, confirmDeletePage(cfg, lead, adminToken, brand, view));
       store.remove(id);
+      if (dropping) await unban(lead);
       const partial = store.files?.stillHolds(lead) ?? false;
       log(partial ? 'registration deleted from the database; files pending' : 'registration deleted');
       return redirect(res, adminUrl(view, partial ? 'deleted-partial' : 'deleted'), 303);
+    }
+    if (path === '/admin/wifi-back') {
+      const id = Number(fields.id);
+      const lead = dropping && Number.isSafeInteger(id) ? store.get(id) : null;
+      if (!lead) return plain(res, 404, 'registration not found');
+      return redirect(res, adminUrl(view, await wifiBan.lift(lead) ? 'wifi-back' : 'wifi-back-failed'), 303);
     }
     if (path === '/admin/add') {
       const bracket = Object.hasOwn(BRACKETS, fields.bracket) ? fields.bracket : store.bracket();
@@ -1381,9 +1405,8 @@ export function createPortalServer(cfg, store, {
       res.setHeader('Referrer-Policy', 'same-origin');
       if (method === 'GET' && path === '/admin') {
         const params = Object.fromEntries(new URL(req.url, 'http://x').searchParams);
-        return html(res, 200, adminPage(cfg, {
-          ...adminData(), q: (params.q ?? '').slice(0, 60), msg: params.msg ?? '', view: viewOf(params),
-        }));
+        const view = viewOf(params);
+        return html(res, 200, adminPage(cfg, { ...adminData(view), q: (params.q ?? '').slice(0, 60), msg: params.msg ?? '', view }));
       }
       if (method === 'GET' && path === '/admin/export.csv') {
         const { tab, event, game } = viewOf(Object.fromEntries(new URL(req.url, 'http://x').searchParams));
@@ -1441,5 +1464,6 @@ export function createPortalServer(cfg, store, {
   server.on('listening', () => setLaptopIp(laptopIp));
   server.portalUrl = () => portalUrl;
   server.setLaptopIp = setLaptopIp;
+  server.tabletIps = () => [...tabletIps];
   return server;
 }
