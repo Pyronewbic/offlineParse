@@ -106,7 +106,6 @@ async function main(argv) {
   const wifiBan = cfg.routerBan.enabled ? new WifiBan(cfg.routerBan, store, {
     router: new Router({ host: cfg.routerBan.host, certSha256: cfg.routerBan.certSha256, password: routerPassword }),
     lookup: (ip) => macOf(ip, { router: cfg.routerBan.host }),
-    protectedIps: () => server.tabletIps(),
     log: (line) => console.error(`${new Date().toISOString()} ${line}`),
   }) : null;
   const server = createPortalServer(cfg, store, { laptopIp: address.ip, quiet: values.quiet, brand, onRequest, lcq, wifiBan });

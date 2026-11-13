@@ -187,16 +187,17 @@ export class Router {
  * and applied again every few minutes, as the router forgets them when it restarts.
  */
 export class WifiBan {
-  constructor(settings, store, { router, lookup, clock = () => Date.now(), protectedIps = () => [], ownMacs = laptopMacs, log = () => {} }) {
+  constructor(settings, store, { router, lookup, clock = () => Date.now(), ownMacs = laptopMacs, log = () => {} }) {
     this.settings = settings;
     this.store = store;
     this.router = router;
     this.lookup = lookup;
     this.clock = clock;
-    this.protectedIps = protectedIps;
     this.ownMacs = ownMacs;
     this.log = log;
     this.never = new Set(settings.never.map(cleanMac));
+    // The tablet's Wi-Fi address, taken once when it enters the PIN: a later forged ARP answer cannot move it.
+    this.tablets = new Set();
     this.queued = new Map();
     this.failures = 0;
     this.lastError = '';
@@ -219,17 +220,16 @@ export class WifiBan {
     }).catch((e) => this.fail(`could not look up a phone's Wi-Fi address (${e.message})`));
   }
 
-  async shielded() {
-    const macs = new Set([...this.never, ...this.ownMacs()]);
-    for (const ip of this.protectedIps()) {
-      try {
-        const mac = await this.lookup(ip);
-        if (mac) macs.add(mac);
-      } catch {
-        // An unknown tablet MAC only means it is not here to protect.
-      }
-    }
-    return macs;
+  /** When the LCQ tablet signs in: never drop the device at ip. Never throws. */
+  protect(ip) {
+    Promise.resolve().then(() => this.lookup(ip)).then((mac) => {
+      if (mac) this.tablets.add(mac);
+      else this.fail('could not find the LCQ tablet\'s Wi-Fi address; add it to routerBan.never');
+    }).catch((e) => this.fail(`could not look up the LCQ tablet's Wi-Fi address (${e.message}); add it to routerBan.never`));
+  }
+
+  shielded() {
+    return new Set([...this.never, ...this.ownMacs(), ...this.tablets]);
   }
 
   /** Run from a timer: drop the phones that are due, and every few minutes apply the kept bans again. */
@@ -241,7 +241,7 @@ export class WifiBan {
       if (now - this.reappliedAt >= REAPPLY_MS) await this.reapply(now);
       const due = [...this.queued.values()].filter((q) => q.dueAt <= now);
       if (due.length) {
-        const shield = await this.shielded();
+        const shield = this.shielded();
         for (const q of due) {
           this.queued.delete(q.mac);
           if (shield.has(q.mac)) continue;
@@ -270,7 +270,7 @@ export class WifiBan {
     }
     const kept = this.store.db.prepare('SELECT mac, at FROM wifi_bans WHERE eventCode = ?').all(this.store.currentEvent().code);
     if (!kept.length) return;
-    const shield = await this.shielded();
+    const shield = this.shielded();
     try {
       for (const { mac, at } of kept) if (!shield.has(mac)) await this.router.ban(mac, left(at));
     } catch (e) {

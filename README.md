@@ -52,7 +52,7 @@ Nothing in the WAN port. Join its Wi-Fi, open `http://192.168.0.1`, then:
 
 ### Wi-Fi drop (OpenWrt only)
 
-Takes a phone off the booth Wi-Fi a few minutes after it registers on the form, and keeps it off, so it stops holding an address and rejoining. It needs a router running OpenWrt; the TL-WR845N cannot do it. Desk entries, the LCQ tablet and this laptop are never dropped. If the router cannot be reached, sign-ups still work and the admin page shows what did not.
+Takes a phone off the booth Wi-Fi a few minutes after it registers on the form, and keeps it off, so it stops holding an address and rejoining. It needs a router running OpenWrt; the TL-WR845N cannot do it. Desk entries, the LCQ tablet (its Wi-Fi address is taken when it enters the PIN) and this laptop are never dropped. A guest with the right tools can still fake which phone signed up and get another guest's phone dropped; **Back on Wi-Fi** on that registration's row undoes it. If the router cannot be reached, sign-ups still work and the admin page shows what did not.
 
 **Not yet tried on a real OpenWrt router.** On the router, by hand, before the first event:
 

@@ -185,10 +185,9 @@ describe('who is dropped, when, and for how long', () => {
   let now;
   let router;
   let macs;
-  let tablets;
   const settings = makeConfig({ routerBan: { ...ROUTER_ON, never: ['00:11:22:33:44:55'] } }).routerBan;
   const make = (extra = {}) => new WifiBan(settings, store, {
-    router, clock: () => now, lookup: async (ip) => macs[ip] ?? null, protectedIps: () => tablets, ownMacs: () => ['10:20:30:40:50:60'], ...extra,
+    router, clock: () => now, lookup: async (ip) => macs[ip] ?? null, ownMacs: () => ['10:20:30:40:50:60'], ...extra,
   });
   const settle = () => new Promise((r) => setImmediate(r));
   const rows = () => store.db.prepare('SELECT mac, phone, eventCode FROM wifi_bans ORDER BY mac').all().map((r) => ({ ...r }));
@@ -197,7 +196,6 @@ describe('who is dropped, when, and for how long', () => {
     now = Date.parse('2026-11-14T10:00:00Z');
     router = stubRouter();
     macs = { '100.64.0.23': PHONE_MAC };
-    tablets = [];
   });
 
   test('a sign-up is dropped afterMin later, for hours, and kept for later', async () => {
@@ -231,15 +229,38 @@ describe('who is dropped, when, and for how long', () => {
   });
 
   test('the laptop, the tablet and the never list are never dropped', async () => {
-    tablets = ['100.64.0.40'];
-    macs = { '100.64.0.40': 'a4:83:e7:0a:0a:0a', '100.64.0.41': '10:20:30:40:50:60', '100.64.0.42': '00:11:22:33:44:55', '100.64.0.23': PHONE_MAC };
+    const TABLET = 'a4:83:e7:0a:0a:0a';
+    macs = { '100.64.0.40': TABLET, '100.64.0.41': '10:20:30:40:50:60', '100.64.0.42': '00:11:22:33:44:55', '100.64.0.23': PHONE_MAC };
     for (const m of Object.values(macs)) router.connected.add(m);
     const ban = make();
+    ban.protect('100.64.0.40');
+    await settle();
     for (const ip of Object.keys(macs)) ban.queue({ ip, phone: `+9198765432${ip.slice(-2)}`, eventCode: 'EVT' });
     await settle();
     now += 3 * 60_000;
     await ban.tick();
     assert.deepEqual(router.calls.map(([m]) => m), [PHONE_MAC], 'only the guest\'s phone');
+  });
+
+  test('a forged ARP answer cannot get the tablet dropped: its address is the one taken when it entered the PIN', async () => {
+    const TABLET = 'a4:83:e7:0a:0a:0a';
+    const ATTACKER = 'a4:83:e7:0e:0e:0e';
+    router.connected.add(TABLET);
+    macs = { '100.64.0.40': TABLET };
+    const ban = make();
+    ban.protect('100.64.0.40');
+    await settle();
+    macs = { '100.64.0.66': TABLET, '100.64.0.40': ATTACKER };
+    ban.queue({ ip: '100.64.0.66', phone: '+919876543266', eventCode: 'EVT' });
+    await settle();
+    now += 3 * 60_000;
+    await ban.tick();
+    assert.deepEqual(router.calls, [], 'the guest at .66 claimed the tablet\'s address, then the tablet\'s IP; the tablet stays on');
+    macs = { '100.64.0.41': null };
+    const unknown = make();
+    unknown.protect('100.64.0.41');
+    await settle();
+    assert.match(unknown.status('EVT').lastError, /LCQ tablet.*routerBan\.never/, 'a tablet it cannot find is reported');
   });
 
   test('a failed lookup or an unreachable router is counted and shown, never thrown', async () => {
@@ -303,9 +324,11 @@ describe('the booth with the Wi-Fi drop on', () => {
   let queued;
   let lifted;
   let banned;
+  let protectedIps;
   const cfg = makeConfig({ routerBan: ROUTER_ON });
   const wifiBan = {
     queue: (q) => queued.push(q),
+    protect: (ip) => protectedIps.push(ip),
     lift: async (l) => {
       lifted.push([l.phone, l.eventCode]);
       return true;
@@ -328,6 +351,7 @@ describe('the booth with the Wi-Fi drop on', () => {
   const adminToken = async () => (await request({ port, path: '/admin' })).body.match(/name="token" value="([^"]+)"/)[1];
   beforeEach(() => {
     queued = [];
+    protectedIps = [];
     lifted = [];
     banned = [];
   });
@@ -351,6 +375,7 @@ describe('the booth with the Wi-Fi drop on', () => {
       assert.equal(store.list()[1].noticeVersion, cfg.noticeVersion);
       const login = await postForm(port, '/lcq/login', { pin: '123456' });
       assert.equal(login.status, 303, 'precondition: the tablet signed in from this address');
+      assert.deepEqual(protectedIps, ['127.0.0.1'], 'its Wi-Fi address is taken now, to protect');
       await postForm(port, '/submit', { ...VALID, phone: '91234 56780' });
       assert.equal(queued.length, 1, 'never the tablet');
     } finally {

@@ -1172,6 +1172,7 @@ export function createPortalServer(cfg, store, {
         const token = randomBytes(32).toString('base64url');
         sessions.add(token);
         tabletIps.add(req.socket.remoteAddress);
+        if (dropping) wifiBan.protect(req.socket.remoteAddress);
         log(`LCQ runner opened from ${printable(req.socket.remoteAddress)}`);
         return send(res, 303, 'text/html; charset=utf-8', '<a href="/lcq">Continue</a>', {
           Location: '/lcq', 'Set-Cookie': `lcq=${token}; Path=/lcq; HttpOnly; SameSite=Strict; Max-Age=86400`,
@@ -1464,6 +1465,5 @@ export function createPortalServer(cfg, store, {
   server.on('listening', () => setLaptopIp(laptopIp));
   server.portalUrl = () => portalUrl;
   server.setLaptopIp = setLaptopIp;
-  server.tabletIps = () => [...tabletIps];
   return server;
 }
