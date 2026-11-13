@@ -31,6 +31,7 @@ npm run try:check   # with try running: checks DNS, sign-in, sign-up, desk and t
 | `games` | Games guests can tick, e.g. `["SSBU", "SF6"]`; each ticked game is its own registration. Leave out for no game question |
 | `noticeVersion` | Recorded with each registration; change it when the consent wording changes |
 | `lcqWaitAlertMin`, `lcqMatchAlertMin` | Optional: the runner flags a player waiting this many minutes for a match (default 10) or a match running this long (default 15) |
+| `routerBan` | Optional, off by default: take a phone off the Wi-Fi after it registers. Needs an OpenWrt router; see [Wi-Fi drop](#wi-fi-drop-openwrt-only) |
 
 ### Router (TP-Link TL-WR845N)
 
@@ -48,6 +49,27 @@ Nothing in the WAN port. Join its Wi-Fi, open `http://192.168.0.1`, then:
 5. IPv6 off if there is a menu for it, then **System Tools > Reboot**.
 
 </details>
+
+### Wi-Fi drop (OpenWrt only)
+
+Takes a phone off the booth Wi-Fi a few minutes after it registers on the form, and keeps it off, so it stops holding an address and rejoining. It needs a router running OpenWrt; the TL-WR845N cannot do it. Desk entries, the LCQ tablet and this laptop are never dropped. If the router cannot be reached, sign-ups still work and the admin page shows what did not.
+
+**Not yet tried on a real OpenWrt router.** On the router, by hand, before the first event:
+
+1. Set it up like the TP-Link above (`100.64.0.1`, pool `.10` to `.250`, lease 10 min, Primary DNS `100.64.0.2`).
+2. Install `uhttpd-mod-ubus`, serve the admin page over HTTPS, and note its certificate fingerprint: `openssl s_client -connect 100.64.0.1:443 </dev/null | openssl x509 -noout -fingerprint -sha256`.
+3. Add an rpcd login `booth` whose ACL allows only the `hostapd.*` methods `get_clients` and `del_client` (and listing `hostapd.*`), nothing else.
+4. Check with `curl -k` from the laptop: logging in, `get_clients` listing a phone, and `del_client` with `ban_time` dropping it and keeping it off.
+
+In `config.json`:
+
+```json
+"routerBan": { "enabled": true, "host": "100.64.0.1", "certSha256": "AB:CD:...", "afterMin": 3, "hours": 24, "never": [] }
+```
+
+`afterMin` is how long after the thank-you page the phone is dropped (1-60), `hours` how long it is kept off (1-500), `never` lists Wi-Fi addresses never to drop (staff phones). Start with the router password in the environment, never in `config.json`: `BOOTH_ROUTER_PASSWORD=... npm start` (Windows PowerShell: `$env:BOOTH_ROUTER_PASSWORD="..."; npm start`).
+
+With it on, the form's consent and notice say the phone's Wi-Fi address is kept to keep it off the Wi-Fi, and registrations record the notice as `noticeVersion` plus `+wifi`. Bans are kept with the registration's number for `hours`, applied again every 5 minutes (the router forgets them when restarted), and lifted when that number's last registration in the event is deleted or with **Back on Wi-Fi** on its admin row.
 
 ### QR codes
 

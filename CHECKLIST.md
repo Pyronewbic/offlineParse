@@ -5,6 +5,7 @@ For whoever runs the booth. Commands and fixes are in the [README](README.md); r
 ## Dry run (once, with the real router, the laptop and two phones)
 
 - [ ] Router settings match the README's Router section; `wifiSsid` and `wifiPassword` in `config.json` match the router.
+- [ ] Only with `routerBan` on: one phone registers on the form and drops off the Wi-Fi after `afterMin` minutes and cannot rejoin; the LCQ tablet stays on; **Back on Wi-Fi** lets the phone rejoin.
 - [ ] On the booth Wi-Fi: `npm run booth-ip`, then `npm start -- --verbose`. The `DNS:` line shows `100.64.0.2` and there is no `WARNING`.
 - [ ] `npm run qr`, print `qr/wifi.svg` with the text from the README under it.
 - [ ] Only the booth is open to guests: `lsof -nP -iTCP -sTCP:LISTEN` (Mac) or `netstat -ano -p TCP | findstr LISTENING` (Windows) shows nothing of yours on `*` or `0.0.0.0` except node.
