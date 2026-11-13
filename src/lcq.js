@@ -134,7 +134,7 @@ export class Lcq {
     // Leads are per event and game, so a match of theirs is one of this game in this event.
     const matches = this.db.prepare('SELECT * FROM lcq_matches ORDER BY id').all().map((m) => ({ ...m }))
       .filter((m) => leads.has(m.a) || leads.has(m.b));
-    const dropped = new Set(this.db.prepare('SELECT leadId FROM lcq_drops').all().map((r) => r.leadId));
+    const dropped = new Map(this.db.prepare('SELECT leadId, at FROM lcq_drops').all().map((r) => [r.leadId, r.at]));
     const players = [...leads.values()].map((l) => {
       const mine = matches.filter((m) => m.a === l.id || m.b === l.id);
       const decided = mine.filter((m) => m.winner !== null);
@@ -145,7 +145,7 @@ export class Lcq {
         : mine.some((m) => m.winner === null) ? 'playing'
         : 'free';
       const freeSince = decided.map((m) => m.decidedAt).sort().at(-1) ?? l.createdAt;
-      return { id: l.id, name: l.name, phone: l.phone, wins, losses, status, freeSince };
+      return { id: l.id, name: l.name, phone: l.phone, wins, losses, status, freeSince, droppedAt: dropped.get(l.id) ?? null };
     });
     const byId = new Map(players.map((p) => [p.id, p]));
     const name = (id) => byId.get(id)?.name ?? '(deleted)';
@@ -222,7 +222,8 @@ export class Lcq {
   /**
    * Take back a result. Later matches of either player that have no result yet were paired on the
    * wrong record, so they are cancelled too; a later match with a result must be undone first.
-   * Returns what else was cancelled, for the operator.
+   * A dropped player can only have lost the match their drop forfeited, so undoing it takes the drop back too.
+   * Returns what else was cancelled and who is back in, for the operator.
    */
   undo(matchId) {
     const m = this.match(matchId);
@@ -235,9 +236,13 @@ export class Lcq {
       const what = w === l ? `${this.nameOf(w)} had a bye` : `${this.nameOf(w)} beat ${this.nameOf(l)}`;
       throw new LcqError(`Undo "${what}" first; it came after this result.`);
     }
+    const loser = m.winner === m.a ? m.b : m.a;
+    const back = m.a !== m.b && this.db.prepare('DELETE FROM lcq_drops WHERE leadId = ?');
     this.db.exec('BEGIN');
+    let restored = 0;
     try {
       for (const x of later) this.db.prepare('DELETE FROM lcq_matches WHERE id = ?').run(x.id);
+      if (back) restored = Number(back.run(loser).changes);
       // A bye has no match to go back to.
       if (m.a === m.b) this.db.prepare('DELETE FROM lcq_matches WHERE id = ?').run(matchId);
       else this.db.prepare('UPDATE lcq_matches SET winner = NULL, decidedAt = NULL WHERE id = ?').run(matchId);
@@ -246,7 +251,37 @@ export class Lcq {
       this.db.exec('ROLLBACK');
       throw e;
     }
-    return later.map((x) => `${this.nameOf(x.a)} vs ${this.nameOf(x.b)}`);
+    return { cancelled: later.map((x) => `${this.nameOf(x.a)} vs ${this.nameOf(x.b)}`), back: restored ? this.nameOf(loser) : null };
+  }
+
+  /**
+   * Bring a dropped player back. A drop that forfeited a match is undone like that result. One dropped while
+   * waiting waits again on their wins, and a Bye given on those wins since the drop goes back (its player's
+   * later match with no result is called off), unless that player already has a later result.
+   */
+  undrop(leadId) {
+    const game = this.store.get(leadId)?.game ?? '';
+    this.live(game);
+    const st = this.state(game);
+    const p = st.players.find((x) => x.id === leadId);
+    if (p?.status !== 'dropped') throw new LcqError('Only a dropped player can be brought back.');
+    if (p.losses) {
+      const forfeit = st.decided.find((m) => m.a !== m.b && m.winner !== leadId && (m.a === leadId || m.b === leadId));
+      return { ...this.undo(forfeit.id), bye: null };
+    }
+    const after = (m) => this.db.prepare('SELECT * FROM lcq_matches WHERE id > ? AND (a = ? OR b = ?) ORDER BY id').all(m.id, m.a, m.a);
+    const bye = (st.rounds[p.wins] ?? []).find((m) => m.a === m.b && m.createdAt >= p.droppedAt && !after(m).some((x) => x.winner !== null));
+    const called = bye ? after(bye) : [];
+    this.db.exec('BEGIN');
+    try {
+      for (const m of [...called, ...(bye ? [bye] : [])]) this.db.prepare('DELETE FROM lcq_matches WHERE id = ?').run(m.id);
+      this.db.prepare('DELETE FROM lcq_drops WHERE leadId = ?').run(leadId);
+      this.db.exec('COMMIT');
+    } catch (e) {
+      this.db.exec('ROLLBACK');
+      throw e;
+    }
+    return { cancelled: called.map((x) => `${this.nameOf(x.a)} vs ${this.nameOf(x.b)}`), back: p.name, bye: bye?.aName ?? null };
   }
 
   /** Call off a match that has no result yet (started by mistake); both players are free again. */

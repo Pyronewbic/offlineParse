@@ -60,6 +60,12 @@ const waitText = (ms) => {
   const m = Math.max(0, Math.floor(ms / 60000));
   return m < 1 ? 'under 1 min' : m < 60 ? `${m} min` : `${Math.floor(m / 60)} h ${m % 60} min`;
 };
+/** A running match's clock: m:ss, then h:mm:ss. */
+export const clockText = (ms) => {
+  const s = Math.max(0, Math.floor(ms / 1000));
+  const two = (n) => String(n).padStart(2, '0');
+  return s < 3600 ? `${Math.floor(s / 60)}:${two(s % 60)}` : `${Math.floor(s / 3600)}:${two(Math.floor(s / 60) % 60)}:${two(s % 60)}`;
+};
 /**
  * Whether the tablet holds off swapping in an update: just after any touch, or while a finger is down, a field has
  * focus or a pick is half made, but never past a minute idle, so a forgotten tap cannot freeze the page.
@@ -97,6 +103,16 @@ const RUNNER_JS = `(() => {
   setInterval(() => {
     for (const s of document.querySelectorAll('[data-wait]')) s.textContent = waitText(Number(s.dataset.wait) + Date.now() - loadedAt);
   }, 30000);
+  // Match clocks tick each second and turn red at the limit without waiting for a reload.
+  const clockText = ${clockText};
+  setInterval(() => {
+    for (const s of document.querySelectorAll('[data-run]')) {
+      const ms = Number(s.dataset.run) + Date.now() - loadedAt;
+      s.textContent = clockText(ms);
+      const c = s.closest('.clock');
+      if (c) c.classList.toggle('over', ms >= Number(c.dataset.limit));
+    }
+  }, 1000);
   // Folded sections are remembered per tablet; storage can throw (private mode), so it is best effort.
   const KEY = 'lcq-open';
   const load = () => { try { return JSON.parse(localStorage.getItem(KEY)) || {}; } catch { return {}; } };
@@ -226,13 +242,27 @@ details.panel > summary h2{display:inline}
 .duo{display:grid;gap:0 16px}
 @media (min-width: 1000px){.duo{grid-template-columns:1fr 1fr}}
 .match{margin:0;overflow-wrap:anywhere}
+.mhead{display:flex;align-items:flex-start;flex-wrap:wrap;gap:6px 12px}
+.mhead .match{flex:1 1 14rem}
+.clock{flex:none;margin-left:auto;padding:1px 12px;border:2px solid var(--line);border-radius:999px;font-size:1.2rem;font-weight:800;font-variant-numeric:tabular-nums;white-space:nowrap}
+.clock .lim{display:none;font-size:.9rem}
+.clock.over{border-color:var(--error);background:var(--errorBg);color:var(--error)}
+.clock.over::before{content:"!";display:inline-block;width:1.2em;margin-right:.35em;border-radius:50%;background:var(--error);color:var(--surface);text-align:center;font-size:.85em;line-height:1.2em}
+.clock.over .lim{display:inline}
 .won{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:.6rem}
 .won form.inline{display:block}
 .won form.inline button{width:100%;min-height:56px;margin:0;font-size:1.05rem;overflow-wrap:anywhere}
 @media (orientation: portrait){.won{grid-template-columns:1fr}}
-.names{list-style:none;margin:.2rem 0 .4rem;padding:0;columns:2 14rem;column-gap:16px}
-.names li{padding:.2rem 0;break-inside:avoid;overflow-wrap:anywhere}
-.names details[open]{padding-bottom:.8rem}
+.names{list-style:none;margin:.2rem 0 .4rem;padding:0;display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,26rem),1fr));gap:0 24px;align-items:start}
+.names li{display:flex;flex-wrap:wrap;align-items:center;gap:0 12px;min-height:48px;padding:.2rem 0;border-bottom:1px solid var(--rule);overflow-wrap:anywhere}
+.names .who{flex:1 1 9rem}
+.names .gone{color:var(--muted)}
+.names .nowrap{font-variant-numeric:tabular-nums}
+.plain .sub{margin:.7rem 0 0;font-size:.85rem;font-weight:800;text-transform:uppercase;letter-spacing:.04em;color:var(--muted)}
+.names .gone strong{font-weight:400}
+.names details.drop > summary{display:flex;align-items:center;min-height:48px;padding:0 4px;color:var(--error);font-weight:700;cursor:pointer}
+.names details.drop[open]{flex-basis:100%;padding-bottom:.6rem}
+.names details.back > summary{color:var(--text)}
 .jump{position:sticky;top:0;z-index:2;display:flex;gap:8px;overflow-x:auto;margin:0 -20px 16px;padding:8px 20px;background:var(--bg);border-bottom:2px solid var(--line)}
 .jump a{flex:none;display:flex;align-items:center;min-height:48px;padding:0 14px;border:2px solid var(--line);border-radius:999px;background:var(--surface);font-weight:700;text-decoration:none;white-space:nowrap}
 .attention{margin:0 0 16px;padding:.6rem .9rem;border:3px solid var(--line);border-left:12px solid var(--error);border-radius:10px;background:var(--errorBg)}
@@ -266,7 +296,7 @@ details.panel > summary h2{display:inline}
 .ready > li form.inline{margin-left:auto}
 .runner .match strong,.runner .ready .pair strong{font-size:1.2rem}
 .runner .match .hint,.runner .names .hint,.runner .ready .hint{font-size:1rem}
-.runner .names summary{font-size:1.1rem}
+.runner .names strong{font-size:1.1rem}
 .runner .danger-zone{margin-top:24px}
 .runner .check input{width:32px;height:32px}
 .topbar{display:flex;align-items:center;gap:14px 18px;flex-wrap:wrap;padding:0 0 14px;margin:0 0 18px;border-bottom:3px solid var(--line)}
@@ -344,7 +374,10 @@ table.counts{border-collapse:separate;border-spacing:0;border:3px solid var(--li
 .counts td a[aria-current]{background:var(--pink);color:var(--onPink)}
 .new-event form{max-width:36rem}
 button.subtle{min-height:40px;padding:.4rem .8rem;font-size:.85rem;color:var(--muted);background:transparent;border:2px solid var(--rule);box-shadow:none}
-.plain.results > li{display:flex;align-items:center;justify-content:space-between;gap:4px 12px;flex-wrap:wrap;min-height:56px;padding:.35rem 0;border-bottom:1px solid var(--rule)}
+.plain.results > li{display:grid;grid-template-columns:5rem auto 1fr auto;align-items:center;gap:4px 12px;min-height:56px;padding:.35rem 0;border-bottom:1px solid var(--rule)}
+.results time{color:var(--muted);font-size:.95rem;font-variant-numeric:tabular-nums;white-space:nowrap}
+.results .lose{color:var(--muted)}
+.results .w{display:inline-block;padding:0 5px;border-radius:4px;font-size:.75rem;font-weight:800;line-height:1.4;background:var(--line);color:var(--surface);vertical-align:.1em}
 .plain.results > li:last-child{border-bottom:0}
 .plain.results form.inline button{margin:0}
 button.quiet{min-height:40px;padding:.4rem .8rem;font-size:.85rem;color:var(--error);background:transparent;border:2px solid var(--error);box-shadow:none}
@@ -711,7 +744,14 @@ export function runnerPage(cfg, state, {
   // A and B tell the two players and their winner buttons apart without relying on colour.
   const side = (s) => `<span class="side" aria-hidden="true">${s}</span>`;
   const who = (id, name, s) => `${side(s)}<strong>${esc(name)}</strong>${byId.has(id) ? ` <span class="hint">${record(byId.get(id))}</span>` : ''}`;
-  const playing = open.map((m) => `<li><p class="match">${who(m.a, m.aName, 'A')} vs ${who(m.b, m.bName, 'B')} <span class="hint">running ${elapsed(m.createdAt)}</span></p><div class="won">` +
+  // The clock is plain text to a screen reader, never announced each second; past the limit it says so in words.
+  const limit = cfg.lcqMatchAlertMin * 60_000;
+  const clock = (iso) => {
+    const ms = now - Date.parse(iso);
+    return `<span class="clock${ms >= limit ? ' over' : ''}" data-limit="${limit}"><span class="sr-only">Running </span>` +
+      `<span data-run="${ms}">${clockText(ms)}</span><span class="lim"> over ${cfg.lcqMatchAlertMin} min</span></span>`;
+  };
+  const playing = open.map((m) => `<li><div class="mhead"><p class="match">${who(m.a, m.aName, 'A')} vs ${who(m.b, m.bName, 'B')}</p>${clock(m.createdAt)}</div><div class="won">` +
     `${btn('result', { match: m.id, winner: m.a }, `${side('A')}${esc(m.aName)} won`)}` +
     `${btn('result', { match: m.id, winner: m.b }, `${side('B')}${esc(m.bName)} won`)}</div>` +
     `<div class="calloff">${btn('cancel', { match: m.id }, 'Call off', 'quiet')}</div></li>`).join('') || none('No matches in progress.');
@@ -735,22 +775,27 @@ export function runnerPage(cfg, state, {
   <button class="secondary" type="submit">Start match</button></form></details>`;
 
   // Undo works only on a result neither player has a later result after (the server refuses the rest), so only
-  // those offer it; the winner leads in bold, with the round and how long ago.
+  // those offer it. A result reads as a log line, time first, so it never looks like a row of Standings: the
+  // time, the round, then the winner in bold with a W and the loser muted.
   const roundOf = new Map(rounds.flatMap((r, i) => r.map((m) => [m.id, i + 1])));
   const undoable = (m) => !decided.some((x) => x.id > m.id && [x.a, x.b].some((p) => p === m.a || p === m.b));
   const resultRow = (m) => {
     const [winner, loser] = m.winner === m.a ? [m.aName, m.bName] : [m.bName, m.aName];
-    return `<li><span><strong>${esc(winner)}</strong> ${m.a === m.b ? 'had a bye' : `beat ${esc(loser)}`} ` +
-      `<span class="hint">${roundOf.has(m.id) ? `Round ${roundOf.get(m.id)}, ` : ''}${elapsed(m.decidedAt)} ago</span></span>` +
+    const r = roundOf.get(m.id);
+    return `<li><time datetime="${esc(m.decidedAt)}">${esc(toISTShort(m.decidedAt).split(', ').at(-1))}</time>` +
+      `<span class="chip">${r ? `<span class="sr-only">Round </span><span aria-hidden="true">R</span>${r}` : '-'}</span>` +
+      `<span><strong>${esc(winner)}</strong> <span class="w" aria-hidden="true">W</span> ` +
+      `${m.a === m.b ? '<span class="hint">bye</span>' : `<span class="hint">def.</span> <span class="lose">${esc(loser)}</span>`}</span>` +
       `${live && undoable(m) ? btn('undo', { match: m.id }, 'Undo', 'subtle') : ''}</li>`;
   };
   // Rounds as a bracket. Pairings are made as players come free, so a line follows each winner to the match
   // they played next, not to a slot drawn in advance. A column is the matches entered on the same wins; once
   // finalized, a round of n players has ceil(n / 2) matches (an odd one out a bye), and the header says how many
-  // are still to come.
+  // are still to come. A player dropped while waiting never plays the round they waited for, so it has one fewer.
   const roundsView = () => {
+    const withdrew = (wins) => players.filter((p) => p.status === 'dropped' && !p.losses && p.wins === wins).length;
     const expected = [];
-    for (let n = players.length; finalizedAt && n > 1; n = Math.ceil(n / 2)) expected.push(Math.ceil(n / 2));
+    for (let n = players.length - withdrew(0); finalizedAt && n > 1; n = Math.ceil(n / 2) - withdrew(expected.length)) expected.push(Math.ceil(n / 2));
     const all = rounds.flatMap((r, col) => r.map((m) => ({ ...m, col })));
     const inPlay = players.filter((p) => p.status === 'free' || p.status === 'playing');
     // The last one standing is the winner once nobody else can play: ended, or finalized with no match left.
@@ -772,8 +817,8 @@ export function runnerPage(cfg, state, {
     const CARD_H = 50;
     const ROW = 60;
     const HEAD = 42;
-    // Once finalized, rounds still to come get a header too, so the operator sees how far there is to go.
-    const cols = Math.max(expected.length, ...nodes.map((n) => n.col + 1));
+    // Once finalized, rounds still to come get a header too, so the operator sees how far there is to go; once ended there are none.
+    const cols = Math.max(endedAt ? 0 : expected.length, ...nodes.map((n) => n.col + 1));
     const x = (n) => n.col * COL;
     const y = (n) => HEAD + slot.get(n.key) * ROW;
     const byKey = new Map(nodes.map((n) => [n.key, n]));
@@ -790,7 +835,7 @@ export function runnerPage(cfg, state, {
     const title = (col) => {
       const here = nodes.filter((n) => n.col === col);
       if (here.length && here.every((n) => n.kind === 'champ')) return champs.length > 1 ? 'Winners' : 'Winner';
-      const left = col < expected.length ? expected[col] - (rounds[col]?.length ?? 0) : 0;
+      const left = !endedAt && col < expected.length ? expected[col] - (rounds[col]?.length ?? 0) : 0;
       return `${expected.length && col === expected.length - 1 ? 'Final' : `Round ${col + 1}`}${left > 0 ? ` <span class="hint">${left} more to play</span>` : ''}`;
     };
     const lines = nodes.filter((n) => n.next !== null && byKey.has(n.next)).map((n) => {
@@ -818,14 +863,36 @@ export function runnerPage(cfg, state, {
   const dropOne = (p) => (live && ['free', 'playing'].includes(p.status) ? `<form method="post" action="/lcq/drop" class="fields">${fieldsOf({ player: p.id, game })}` +
     `<label class="check"><input type="checkbox" name="confirm" value="yes" required><span>${esc(p.name)} is not here` +
     `${p.status === 'playing' ? '; their match goes to the opponent' : ''}</span></label><button class="danger" type="submit">Drop ${esc(p.name)}</button></form>` : '');
-  const STATUS = { playing: 'playing', out: 'eliminated', dropped: 'dropped' };
-  // Tap a name for the number, to call someone who has wandered off, and to drop them.
-  const nameRows = (list, found = false) => `<ul class="names">${list.map((p) => `<li><details${found ? ' open' : ''}><summary>${esc(p.name)} ` +
-    `<span class="hint">${record(p)}${(found || p.status === 'playing') && STATUS[p.status] ? `, ${STATUS[p.status]}` : ''}${waited(p)}</span></summary>` +
-    `<span class="nowrap">${esc(displayPhone(p.phone))}</span>${dropOne(p)}</details></li>`).join('')}</ul>`;
+  // One loss is out, so the loss itself says the round and who; the round is the match's, as a hand-picked match
+  // across wins sits in the round of the player further along.
+  const lostIn = new Map(decided.filter((m) => m.a !== m.b).map((m) => [m.winner === m.a ? m.b : m.a,
+    { round: roundOf.get(m.id) ?? 0, to: m.winner === m.a ? m.aName : m.bName, at: m.decidedAt }]));
+  const info = (p) => {
+    if (p.status === 'out') {
+      const l = lostIn.get(p.id);
+      return l ? `out in round ${l.round} to ${esc(l.to)}` : 'out';
+    }
+    if (p.status === 'dropped') return `dropped ${esc(toISTShort(p.droppedAt))}`;
+    return `${p.wins}W${p.status === 'playing' ? ', playing' : ''}${waited(p)}`;
+  };
+  // The number is on the row, to call someone who has wandered off; only Drop folds away, behind its tick.
+  const nameRows = (list, bare = false) => `<ul class="names">${list.map((p) => `<li${p.status === 'dropped' ? ' class="gone"' : ''}>` +
+    `<span class="who"><strong>${esc(p.name)}</strong>${bare ? '' : ` <span class="hint">${info(p)}</span>`}</span>` +
+    `<span class="nowrap">${esc(displayPhone(p.phone))}</span>` +
+    `${dropOne(p) ? `<details class="drop"><summary>Drop</summary>${dropOne(p)}</details>` : ''}` +
+    `${live && p.status === 'dropped' ? `<details class="drop back"><summary>Undo drop</summary>${btn('undrop', { player: p.id }, `Bring ${esc(p.name)} back`, 'secondary')}</details>` : ''}</li>`).join('')}</ul>`;
+  // Furthest along first; on the same round, the latest out first.
+  const outOrder = (x, y) => (lostIn.get(y.id)?.round ?? 0) - (lostIn.get(x.id)?.round ?? 0) ||
+    (lostIn.get(y.id)?.at ?? '').localeCompare(lostIn.get(x.id)?.at ?? '');
   // Each bucket folds on its own, by a stable id; only the ones still in play start open.
-  const bucket = (key, title, list, isOpen) => (list.length ? `<li><details id="lcq-b-${key}"${isOpen ? ' open' : ''}>` +
-    `<summary><h3>${title} (${list.length})</h3></summary>${nameRows(list)}</details></li>` : '');
+  const bucket = (key, title, list, isOpen, body = nameRows(list)) => (list.length ? `<li><details id="lcq-b-${key}"${isOpen ? ' open' : ''}>` +
+    `<summary><h3>${title} (${list.length})</h3></summary>${body}</details></li>` : '');
+  // Everyone out in the same round shares a placing, so Eliminated is grouped by round; Results and Find say who beat whom.
+  const byRound = (list) => [...new Set(list.map((p) => lostIn.get(p.id)?.round ?? 0))].map((r) => {
+    const here = list.filter((p) => (lostIn.get(p.id)?.round ?? 0) === r);
+    return `<h4 class="sub">${r ? `Out in round ${r}` : 'Out'} (${here.length})</h4>${nameRows(here, true)}`;
+  }).join('');
+  const out = players.filter((p) => p.status === 'out').sort(outOrder);
   const active = players.filter((p) => ['playing', 'free'].includes(p.status));
   const count = (...statuses) => players.filter((p) => statuses.includes(p.status)).length;
   const stats = `<dl class="stats">${[['Matches on', open.length], ['Waiting for a match', count('free')],
@@ -833,8 +900,9 @@ export function runnerPage(cfg, state, {
     .map(([k, v]) => `<div class="stat"><dt>${k}</dt><dd>${v}</dd></div>`).join('')}</dl>`;
   const standings = [...new Set(active.map((p) => p.wins))].sort((x, y) => y - x)
       .map((w) => bucket(`w${w}`, `${w}W`, active.filter((p) => p.wins === w), true)).join('') +
-    bucket('out', 'Eliminated', players.filter((p) => p.status === 'out'), false) +
-    bucket('dropped', 'Dropped', players.filter((p) => p.status === 'dropped'), false) || none('No LCQ registrations yet.');
+    bucket('out', 'Eliminated', out, false, byRound(out)) +
+    bucket('dropped', 'Dropped', players.filter((p) => p.status === 'dropped')
+      .sort((x, y) => (y.droppedAt ?? '').localeCompare(x.droppedAt ?? '')), false) || none('No LCQ registrations yet.');
 
   // Finalize fixes who plays; a bracket short of a power of 2 needs a tick, as some players will need a Bye.
   const short = bracketGap(players.length).more;
@@ -872,7 +940,7 @@ export function runnerPage(cfg, state, {
   const FOUND_MAX = 20;
   const foundRows = !wanted ? ''
     : !found.length ? `<p class="hint">Nobody matches "${esc(wanted)}".</p>`
-    : `<p class="hint">${found.length > FOUND_MAX ? `First ${FOUND_MAX} of ${found.length}; type more of the name.` : `${found.length} found.`}</p>${nameRows(found.slice(0, FOUND_MAX), true)}`;
+    : `<p class="hint">${found.length > FOUND_MAX ? `First ${FOUND_MAX} of ${found.length}; type more of the name.` : `${found.length} found.`}</p>${nameRows(found.slice(0, FOUND_MAX))}`;
   const search = `<section class="panel" id="lcq-find" aria-labelledby="lcq-find-title"><h2 id="lcq-find-title" class="sr-only">Find a player</h2>` +
     `<form method="get" action="/lcq" class="fields" role="search">${past ? fieldsOf({ event: event.code }) : ''}${tabbed ? gameField : ''}<div><label for="lcq-q">Find a player, by name or number</label>` +
     `<input id="lcq-q" name="q" type="search" maxlength="60" value="${esc(q)}"></div><button class="secondary" type="submit">Find</button>` +
@@ -914,7 +982,7 @@ ${section('lcq-ready', 'Ready to play', proposals.length, `${ready}${manual}`, t
 </div>` : ''}
 ${section('lcq-results', 'Results', decided.length, results, true)}
 ${section('lcq-rounds', 'Rounds', null, roundsView(), !live)}
-${section('lcq-standings', 'Standings', players.length, `${stats}<p class="hint">Tap a name for their number${live ? ', or to drop a no-show' : ''}.</p><ul class="plain">${standings}</ul>`, !live)}
+${section('lcq-standings', 'Standings', players.length, `${stats}<ul class="plain">${standings}</ul>`, !live)}
 ${search}
 ${end}
 </div>
@@ -1105,15 +1173,20 @@ export function createPortalServer(cfg, store, {
           flashes.set(session, { undo: { id: m.id, text } });
         }
         else if (path === '/lcq/undo') {
-          const cancelled = lcq.undo(n('match'));
-          flashes.set(session, { notice: `Result undone.${cancelled.length ? ` Also called off ${cancelled.join(', ')}, which depended on it.` : ''}` });
+          const { cancelled, back } = lcq.undo(n('match'));
+          flashes.set(session, { notice: `Result undone.${back ? ` ${back} is back in; their drop is undone.` : ''}` +
+            `${cancelled.length ? ` Also called off ${cancelled.join(', ')}, which depended on it.` : ''}` });
         } else if (path === '/lcq/cancel') lcq.cancel(n('match'));
         else if (path === '/lcq/finalize') lcq.finalize(game, fields.confirm === 'yes');
         else if (path === '/lcq/unfinalize') lcq.unfinalize(game);
         else if (path === '/lcq/bye') lcq.bye(n('player'));
         else if (path === '/lcq/end') lcq.end(game, fields.confirm === 'yes');
         else if (path === '/lcq/reopen') lcq.reopen(game, fields.confirm === 'yes');
-        else if (path === '/lcq/drop') {
+        else if (path === '/lcq/undrop') {
+          const { cancelled, back, bye } = lcq.undrop(n('player'));
+          flashes.set(session, { notice: `${back} is back in.${bye ? ` ${bye}'s Bye is taken back.` : ''}` +
+            `${cancelled.length ? ` Also called off ${cancelled.join(', ')}, which depended on it.` : ''}` });
+        } else if (path === '/lcq/drop') {
           if (fields.confirm === 'yes') lcq.drop(n('player'));
           else flashes.set(session, { error: 'Tick that they are not here, then tap Drop.' });
         }
