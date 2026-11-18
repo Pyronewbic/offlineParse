@@ -402,6 +402,7 @@ details.panel > summary h2{display:inline}
 .sync .error{margin:0 auto 6px;max-width:72rem}
 .sync [hidden]{display:none}
 .runner{padding-bottom:72px}
+.runner button:disabled{opacity:.45;cursor:default;transform:none}
 .jump{position:sticky;top:0;z-index:2;display:flex;gap:8px;overflow-x:auto;margin:0 -20px 16px;padding:8px 20px;background:var(--bg);border-bottom:2px solid var(--line)}
 .jump a{flex:none;display:flex;align-items:center;min-height:48px;padding:0 14px;border:2px solid var(--line);border-radius:999px;background:var(--surface);font-weight:700;text-decoration:none;white-space:nowrap}
 .attention{margin:0 0 16px;padding:.6rem .9rem;border:3px solid var(--line);border-left:12px solid var(--error);border-radius:10px;background:var(--errorBg)}
