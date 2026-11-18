@@ -15,7 +15,7 @@ npm install   # needs internet once
 npm test
 npm run try         # the whole booth on this laptop, no router, data in data/try/ (see below)
 npm run try:check   # with try running: checks DNS, sign-in, sign-up, desk and tablet; deletes its test sign-up
-npm run tablet:check   # drives the tablet runner in headless Chrome: taps online, offline, refused and signed out (CHROME=path if not in /Applications)
+npm run tablet:check   # the tablet runner in headless Chrome, online and offline (CHROME=path if not in /Applications)
 ```
 
 **Practice on this laptop:** with `npm run try` running, open the phone form at `http://127.0.0.1/`, the desk at `http://localhost/admin` and the tablet runner at `http://127.0.0.1/lcq` (PIN on the desk page). Its DNS answers on port 5300 instead of 53, so it does not clash with anything else on this laptop.
@@ -72,9 +72,9 @@ npm start
 - **Linux:** ports below 1024 need root or `sudo setcap cap_net_bind_service=+ep "$(readlink -f "$(command -v node)")"`; open 80, 443 and 853/tcp and 53/udp in the firewall.
 - `npm run booth-ip -- --dry-run` shows the command; `--ip <address>` acts on another address. If `npm start` warns the booth address is gone, run `npm run booth-ip` again.
 
-**Admin:** `http://localhost/admin`, on the laptop only. **New sign-ups go to** switches the bracket (Normal or LCQ) every new registration joins; a small table counts sign-ups by bracket (down the side) and game (across); pick any number to list exactly those, and **Download CSV** exports what you're looking at. **Event** lists every event, the current one marked (now); pick one to view or download it. **Start a new event** sends new sign-ups to a new event straight away, with a fresh LCQ runner. **Manage** (for the event you're looking at, each with a tick) makes it the current event again, renames it, or deletes it if it has no registrations. Also search, add, delete, **Refresh** for new sign-ups.
+**Admin:** `http://localhost/admin`, on the laptop only. **New sign-ups go to** switches the bracket (Normal or LCQ) every new registration joins; a small table counts sign-ups by bracket (down the side) and game (across); pick any number to list exactly those, and **Download CSV** exports what you're looking at. **People** counts each mobile number once; **Sign-ups** counts one per game. **Event** lists every event, the current one marked (now); pick one to view or download it. **Start a new event** sends new sign-ups to a new event straight away, with a fresh LCQ runner. **Manage** (for the event you're looking at, each with a tick) makes it the current event again, renames it, or deletes it if it has no registrations. Also search, add, delete, **Refresh** for new sign-ups.
 
-**LCQ runner:** on a tablet on the booth Wi-Fi, open the address and PIN shown on the admin page (`http://100.64.0.2/lcq`). How to run it: [LCQ.md](LCQ.md).
+**LCQ runner:** on a tablet on the booth Wi-Fi, open the address and PIN shown on the admin page (`http://100.64.0.2/lcq`). Taps made while the Wi-Fi drops wait on the tablet and are sent once it is back. How to run it: [LCQ.md](LCQ.md).
 
 **A phone gets no sign-in page:** run `npm start -- --verbose` and rejoin from the phone; each DNS question and web request is printed.
 - Nothing printed: the phone is not asking the laptop. A `169.254` address or none on the phone means the router's addresses ran out (see Router). Otherwise check the router's Primary DNS and that the phone's Private DNS is Off or Automatic.

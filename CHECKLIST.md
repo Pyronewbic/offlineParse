@@ -32,6 +32,6 @@ On each phone, forget the booth Wi-Fi, then scan the Wi-Fi QR:
 
 ## After the event
 
-- [ ] Before stopping the server, the tablet's bar says **Up to date** (no taps waiting; an iPad can clear a site's storage after a week unused).
+- [ ] Before stopping the server, the tablet's bar says **Up to date** (no taps waiting).
 - [ ] Stop the server (Ctrl+C), then `npm run booth-ip:undo`.
 - [ ] **Download CSV** and copy `data/` somewhere safe.
