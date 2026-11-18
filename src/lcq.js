@@ -13,7 +13,8 @@ CREATE TABLE IF NOT EXISTS lcq_matches (
 CREATE TABLE IF NOT EXISTS lcq_drops (leadId INTEGER PRIMARY KEY, at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS lcq_games (
   eventCode TEXT NOT NULL, game TEXT NOT NULL, finalizedAt TEXT, endedAt TEXT, PRIMARY KEY (eventCode, game)
-);`;
+);
+CREATE TABLE IF NOT EXISTS lcq_ops (opId TEXT PRIMARY KEY, at TEXT NOT NULL, refused INTEGER NOT NULL);`;
 
 export class LcqError extends Error {}
 
@@ -35,6 +36,40 @@ export class Lcq {
 
   event() {
     return this.store.currentEvent().code;
+  }
+
+  /** Run fn all or nothing. A savepoint, so a tablet op can wrap an action that has one of its own. */
+  tx(fn) {
+    this.db.exec('SAVEPOINT tx');
+    try {
+      const out = fn();
+      this.db.exec('RELEASE tx');
+      return out;
+    } catch (e) {
+      this.db.exec('ROLLBACK TO tx');
+      this.db.exec('RELEASE tx');
+      throw e;
+    }
+  }
+
+  /**
+   * Apply a tablet op once: the tablet resends an op until it hears back, so one seen before is not applied
+   * again. Only the outcome is kept, not the refusal's text, which can name a player who may later be deleted.
+   */
+  once(opId, apply) {
+    const seen = this.db.prepare('SELECT refused FROM lcq_ops WHERE opId = ?').get(opId);
+    if (seen?.refused) throw new LcqError('This tap reached the laptop before and was refused then; the page shows where things stand.');
+    if (seen) return;
+    const mark = (refused) => this.db.prepare('INSERT INTO lcq_ops (opId, at, refused) VALUES (?, ?, ?)').run(opId, now(), refused);
+    try {
+      this.tx(() => {
+        apply();
+        mark(0);
+      });
+    } catch (e) {
+      if (e instanceof LcqError) mark(1);
+      throw e;
+    }
   }
 
   /** The same runner, reading an earlier event; for viewing only, since every change checks the current event. */
@@ -238,19 +273,13 @@ export class Lcq {
     }
     const loser = m.winner === m.a ? m.b : m.a;
     const back = m.a !== m.b && this.db.prepare('DELETE FROM lcq_drops WHERE leadId = ?');
-    this.db.exec('BEGIN');
-    let restored = 0;
-    try {
+    const restored = this.tx(() => {
       for (const x of later) this.db.prepare('DELETE FROM lcq_matches WHERE id = ?').run(x.id);
-      if (back) restored = Number(back.run(loser).changes);
       // A bye has no match to go back to.
       if (m.a === m.b) this.db.prepare('DELETE FROM lcq_matches WHERE id = ?').run(matchId);
       else this.db.prepare('UPDATE lcq_matches SET winner = NULL, decidedAt = NULL WHERE id = ?').run(matchId);
-      this.db.exec('COMMIT');
-    } catch (e) {
-      this.db.exec('ROLLBACK');
-      throw e;
-    }
+      return back ? Number(back.run(loser).changes) : 0;
+    });
     return { cancelled: later.map((x) => `${this.nameOf(x.a)} vs ${this.nameOf(x.b)}`), back: restored ? this.nameOf(loser) : null };
   }
 
@@ -272,15 +301,10 @@ export class Lcq {
     const after = (m) => this.db.prepare('SELECT * FROM lcq_matches WHERE id > ? AND (a = ? OR b = ?) ORDER BY id').all(m.id, m.a, m.a);
     const bye = (st.rounds[p.wins] ?? []).find((m) => m.a === m.b && m.createdAt >= p.droppedAt && !after(m).some((x) => x.winner !== null));
     const called = bye ? after(bye) : [];
-    this.db.exec('BEGIN');
-    try {
+    this.tx(() => {
       for (const m of [...called, ...(bye ? [bye] : [])]) this.db.prepare('DELETE FROM lcq_matches WHERE id = ?').run(m.id);
       this.db.prepare('DELETE FROM lcq_drops WHERE leadId = ?').run(leadId);
-      this.db.exec('COMMIT');
-    } catch (e) {
-      this.db.exec('ROLLBACK');
-      throw e;
-    }
+    });
     return { cancelled: called.map((x) => `${this.nameOf(x.a)} vs ${this.nameOf(x.b)}`), back: p.name, bye: bye?.aName ?? null };
   }
 

@@ -8,6 +8,8 @@ The LCQ is single elimination: lose once and you are out. There is no draw: play
 
 On a tablet on the booth Wi-Fi, open the address and PIN shown on the admin page (`http://100.64.0.2/lcq`). If a sign-in sheet appears when joining the Wi-Fi, choose to stay connected. The tablet stays signed in until the server restarts, and updates itself every few seconds.
 
+The bar at the bottom says whether the tablet is up to date. If the Wi-Fi or the laptop drops, keep tapping: each tap waits on the tablet and goes to the laptop, in order, once it is back ("2 taps not on the laptop yet"). The page shows the last state it had until then, so a tap on something already changed is refused and the bar says why; tap **OK** once read. **Sync** sends what is waiting and shows the laptop's state at once. Do not reload the page while the laptop is unreachable: the browser shows an error page until it is back (the waiting taps are kept). If the bar says **Signed out** (the laptop restarted), tap **Enter the PIN**; the waiting taps go once you are in.
+
 Each game has its own tab. **Event** at the top (once there is more than one event) shows an earlier event's results and winners; only the current event can be run.
 
 ## Run a game

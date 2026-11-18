@@ -6,7 +6,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { after, before, beforeEach, describe, test } from 'node:test';
 import { Lcq, bracketGap } from '../src/lcq.js';
 import { LeadStore } from '../src/leads.js';
-import { againstFor, bracketLayout, clockText, createPortalServer, holdsUpdates, overdue, runnerPage, runnerVersion } from '../src/web.js';
+import { againstFor, bracketLayout, clockText, createPortalServer, holdsUpdates, outboxOf, overdue, runnerPage, runnerVersion } from '../src/web.js';
 import { makeConfig, postForm, request } from './helpers.js';
 
 describe('LCQ runner over HTTP', () => {
@@ -30,7 +30,7 @@ describe('LCQ runner over HTTP', () => {
   });
   beforeEach(() => {
     now += 120_000;
-    store.db.exec('DELETE FROM leads; DELETE FROM lcq_matches; DELETE FROM lcq_drops; DELETE FROM lcq_games;');
+    store.db.exec('DELETE FROM leads; DELETE FROM lcq_matches; DELETE FROM lcq_drops; DELETE FROM lcq_games; DELETE FROM lcq_ops;');
     store.setBracket('normal');
   });
 
@@ -761,6 +761,126 @@ describe('LCQ runner over HTTP', () => {
     assert.ok(!rows[1].includes('/lcq/undo') && !rows[2].includes('/lcq/undo'), 'the earlier results cannot until the final is undone, so no button');
     for (const m of [m1, m2]) assert.throws(() => lcq.undo(m.id), /first/, 'and the server agrees');
     assert.ok(!html.includes('class="quiet"'), 'Undo is not styled as danger');
+  });
+
+  describe('taps sent from the tablet queue', () => {
+    let seq = 0;
+    const opId = () => (seq += 1).toString(16).padStart(32, '0');
+    const JSON_ACCEPT = { Accept: 'application/json' };
+    const queued = (cookie, path, fields, op = opId()) =>
+      post(path, { ...fields, op, opEvent: store.currentEvent().code }, { ...cookie, ...JSON_ACCEPT });
+
+    test('a tap resent after a lost answer is applied once', async () => {
+      const cookie = await signIn();
+      signUp(2);
+      const [p] = lcq.state().proposals;
+      const op = opId();
+      const first = await queued(cookie, '/lcq/start', { a: String(p.a.id), b: String(p.b.id) }, op);
+      assert.equal(first.status, 200);
+      assert.deepEqual(JSON.parse(first.body), { ok: true });
+      assert.match(first.headers['content-type'], /^application\/json/);
+      assert.equal(lcq.state().open.length, 1, 'positive control: the first send started the match');
+      // Called off since, so the same start would work again if the resend were applied.
+      lcq.cancel(lcq.state().open[0].id);
+      const again = await queued(cookie, '/lcq/start', { a: String(p.a.id), b: String(p.b.id) }, op);
+      assert.equal(again.status, 200);
+      assert.deepEqual(lcq.state().open, [], 'the resend changed nothing');
+      const fresh = await queued(cookie, '/lcq/start', { a: String(p.a.id), b: String(p.b.id) });
+      assert.equal(fresh.status, 200);
+      assert.equal(lcq.state().open.length, 1, 'a new tap with a new id is applied');
+    });
+
+    test('a refused tap answers 409 with the reason, stays refused when resent, and keeps no names', async () => {
+      const cookie = await signIn();
+      signUp(2);
+      const [p] = lcq.state().proposals;
+      lcq.start(p.a.id, p.b.id);
+      const [m] = lcq.state().open;
+      lcq.result(m.id, m.a);
+      const op = opId();
+      const res = await queued(cookie, '/lcq/result', { match: String(m.id), winner: String(m.b) }, op);
+      assert.equal(res.status, 409);
+      assert.match(JSON.parse(res.body).error, /already has a result/);
+      const again = await queued(cookie, '/lcq/result', { match: String(m.id), winner: String(m.b) }, op);
+      assert.equal(again.status, 409);
+      assert.match(JSON.parse(again.body).error, /reached the laptop before and was refused/);
+      assert.equal(lcq.state().decided[0].winner, m.a, 'the result stands');
+      const rows = store.db.prepare('SELECT * FROM lcq_ops').all().map((r) => ({ ...r }));
+      assert.deepEqual(rows.map((r) => Object.keys(r).sort()), [['at', 'opId', 'refused']], 'only the id, time and outcome are kept');
+      assert.equal(rows[0].refused, 1);
+      const page = await request({ port, path: '/lcq', headers: cookie });
+      assert.ok(!page.body.includes('already has a result'), 'a queued refusal is not shown again as a flash');
+    });
+
+    test('a tap queued during an earlier event is not applied to the current one', async () => {
+      const cookie = await signIn();
+      store.setBracket('lcq');
+      signUp(2);
+      const res = await post('/lcq/finalize', { game: '', op: opId(), opEvent: 'some-older-event' }, { ...cookie, ...JSON_ACCEPT });
+      assert.equal(res.status, 409);
+      assert.match(JSON.parse(res.body).error, /earlier event/);
+      assert.equal(lcq.phase('').finalizedAt, null);
+      const ok = await queued(cookie, '/lcq/finalize', { game: '' });
+      assert.equal(ok.status, 200, 'positive control: the same tap stamped with this event works');
+      assert.ok(lcq.phase('').finalizedAt);
+    });
+
+    test('Undo and bringing a player back work inside a queued tap, all or nothing', async () => {
+      const cookie = await signIn();
+      signUp(2);
+      const [p] = lcq.state().proposals;
+      lcq.start(p.a.id, p.b.id);
+      const [m] = lcq.state().open;
+      lcq.result(m.id, m.a);
+      const res = await queued(cookie, '/lcq/undo', { match: String(m.id) });
+      assert.equal(res.status, 200, res.body);
+      assert.equal(lcq.state().open.length, 1, 'the result is undone');
+      lcq.drop(m.b);
+      const back = await queued(cookie, '/lcq/undrop', { player: String(m.b) });
+      assert.equal(back.status, 200, back.body);
+      assert.equal(lcq.state().players.find((x) => x.id === m.b).status, 'playing');
+      const page = await request({ port, path: '/lcq', headers: cookie });
+      assert.match(page.body, /is back in/, 'the notice waits for the next page swap');
+    });
+
+    test('without a session a queued tap gets 401, so the tablet keeps it and asks for the PIN', async () => {
+      signUp(2);
+      const [p] = lcq.state().proposals;
+      const res = await post('/lcq/start', { a: String(p.a.id), b: String(p.b.id), op: opId(), opEvent: store.currentEvent().code }, JSON_ACCEPT);
+      assert.equal(res.status, 401);
+      assert.deepEqual(lcq.state().open, []);
+      const plainPost = await post('/lcq/start', { a: String(p.a.id), b: String(p.b.id) });
+      assert.equal(plainPost.status, 303, 'a form post without the queue is sent to the PIN page as before');
+    });
+
+    test('a malformed op id is ignored, so the tap is applied as a plain one', async () => {
+      const cookie = await signIn();
+      signUp(2);
+      const [p] = lcq.state().proposals;
+      const res = await queued(cookie, '/lcq/start', { a: String(p.a.id), b: String(p.b.id) }, "x'; DROP TABLE lcq_ops; --");
+      assert.equal(res.status, 200);
+      assert.equal(lcq.state().open.length, 1);
+      assert.equal(store.db.prepare('SELECT COUNT(*) AS n FROM lcq_ops').get().n, 0);
+    });
+
+    test('the tablet script parses, and the page says which event its taps belong to', async () => {
+      const js = (await request({ port, path: '/lcq/app.js' })).body;
+      assert.doesNotThrow(() => new Function(js));
+      assert.match(js, /const outboxOf = \(raw\) =>/, 'the tablet runs the same read-back check');
+      const page = await request({ port, path: '/lcq', headers: await signIn() });
+      assert.match(page.body, new RegExp(`id="version" data-version="[^"]+" data-event="${store.currentEvent().code}"`));
+    });
+
+    test('queued taps read back from storage keep only well-formed ones', () => {
+      const good = { id: 'a'.repeat(32), url: '/lcq/result', body: 'match=1&winner=2' };
+      assert.deepEqual(outboxOf(JSON.stringify([good])), [good]);
+      for (const raw of [null, '', 'not json', '{}', '"x"', '[null]']) assert.deepEqual(outboxOf(raw), [], String(raw));
+      const bad = [
+        { ...good, id: 'A'.repeat(32) }, { ...good, id: 'a'.repeat(31) }, { ...good, url: 'https://elsewhere.example/lcq/result' },
+        { ...good, url: '/admin/delete' }, { ...good, url: '/lcq/../admin' }, { ...good, body: 1 }, { ...good, body: 'x'.repeat(8193) },
+      ];
+      assert.deepEqual(outboxOf(JSON.stringify([...bad, good])), [good], 'the good one survives among the bad');
+    });
   });
 
   test('the admin page shows the runner address and PIN', async () => {

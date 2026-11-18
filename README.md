@@ -15,6 +15,7 @@ npm install   # needs internet once
 npm test
 npm run try         # the whole booth on this laptop, no router, data in data/try/ (see below)
 npm run try:check   # with try running: checks DNS, sign-in, sign-up, desk and tablet; deletes its test sign-up
+npm run tablet:check   # drives the tablet runner in headless Chrome: taps online, offline, refused and signed out (CHROME=path if not in /Applications)
 ```
 
 **Practice on this laptop:** with `npm run try` running, open the phone form at `http://127.0.0.1/`, the desk at `http://localhost/admin` and the tablet runner at `http://127.0.0.1/lcq` (PIN on the desk page). Its DNS answers on port 5300 instead of 53, so it does not clash with anything else on this laptop.
