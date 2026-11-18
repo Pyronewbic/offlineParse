@@ -763,7 +763,8 @@ ${newEvent}
 ${counts}
 <div>
 <dl class="stats">
-  <div class="stat"><dt>Total</dt><dd>${leads.length}</dd></div>
+  <div class="stat"><dt>People</dt><dd>${new Set(leads.map((l) => l.phone)).size}</dd></div>
+  <div class="stat"><dt>Sign-ups</dt><dd>${leads.length}</dd></div>
   <div class="stat"><dt>Wi-Fi form</dt><dd>${bySource('form')}</dd></div>
   <div class="stat"><dt>At the desk</dt><dd>${bySource('desk')}</dd></div>
   <div class="stat"><dt>Last sign-up</dt><dd>${last ? esc(toISTShort(last.createdAt)) : '-'}</dd></div>

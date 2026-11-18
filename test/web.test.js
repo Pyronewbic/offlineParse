@@ -199,7 +199,7 @@ describe('portal server', () => {
     assert.equal(res.status, 200);
     const order = [...res.body.matchAll(/<td class="num idx">(\d+)<\/td><th scope="row">([^<]+)<\/th>/g)].map((m) => `${m[1]} ${m[2]}`);
     assert.deepEqual(order, ['3 Meera', '2 Ravi Kumar', '1 Asha Rao']);
-    assert.match(res.body, /<dt>Total<\/dt><dd>3<\/dd>/);
+    assert.match(res.body, /<dt>Sign-ups<\/dt><dd>3<\/dd>/);
     assert.match(res.body, /<dt>Wi-Fi form<\/dt><dd>2<\/dd>/);
     assert.match(res.body, /<dt>At the desk<\/dt><dd>1<\/dd>/);
     assert.match(res.body, /<dt>Last sign-up<\/dt><dd>\d{1,2} [A-Z][a-z]{2}, \d{1,2}:\d\d [ap]m<\/dd>/);

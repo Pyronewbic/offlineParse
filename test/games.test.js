@@ -154,7 +154,12 @@ describe('games on the admin page', () => {
     assert.match(all, /<a href="\/admin\?tab=normal&amp;game=Avatar\+Legends" aria-label="Normal, Avatar Legends: 1 sign-up">1<\/a>/);
     assert.match(all, /<a href="\/admin\?tab=lcq&amp;game=Avatar\+Legends" aria-label="LCQ, Avatar Legends: 1 sign-up">1<\/a>/,
       'each game shows its Normal and LCQ counts at once');
+    const stat = (body, dt) => body.match(new RegExp(`<dt>${dt}</dt><dd>(\\d+)</dd>`))?.[1];
+    assert.deepEqual([stat(all, 'People'), stat(all, 'Sign-ups')], ['2', '3'], 'one person in two games counts once as a person');
+    const both = await page('/admin?game=Avatar+Legends');
+    assert.deepEqual([stat(both, 'People'), stat(both, 'Sign-ups')], ['2', '2'], 'People follows the game filter');
     const avatar = await page('/admin?tab=lcq&game=Avatar+Legends');
+    assert.deepEqual([stat(avatar, 'People'), stat(avatar, 'Sign-ups')], ['1', '1'], 'and the bracket tab');
     assert.equal((avatar.match(/<tr><td class="num idx">/g) ?? []).length, 1, 'LCQ and Avatar Legends only');
     assert.match(avatar, /<a href="\/admin\?tab=lcq&amp;game=Avatar\+Legends" aria-current="page" aria-label="LCQ, Avatar Legends: 1 sign-up">1<\/a>/,
       'the cell for this bracket and game is the one marked');
