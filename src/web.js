@@ -96,6 +96,8 @@ export function bracketLayout(nodes) {
 /** The Against choices for a Player: free players on the same wins, or anyone but them with Any wins. */
 export const againstFor = (options, player, any) =>
   options.filter((o) => o.value !== player.value && (any || !player.value || o.dataset.w === player.dataset.w));
+/** Whether a Pick a match choice fits the search: every word typed is in its name or number. */
+export const pickHit = (option, q) => q.toLowerCase().split(/\s+/).filter(Boolean).every((w) => (option.dataset.q || '').includes(w));
 /** The tablet's queued taps read back from its storage, keeping only well-formed ones, as anything can be in there. */
 export const outboxOf = (raw) => {
   let list;
@@ -125,6 +127,7 @@ const RUNNER_JS = `(() => {
   const load = () => { try { return JSON.parse(localStorage.getItem(KEY)) || {}; } catch { return {}; } };
   const save = (s) => { try { localStorage.setItem(KEY, JSON.stringify(s)); } catch {} };
   const apply = () => {
+    for (const q of document.querySelectorAll('.pick-q')) q.hidden = false;
     const s = load();
     for (const d of document.querySelectorAll('details[id]')) if (d.id in s) d.open = s[d.id];
   };
@@ -212,23 +215,31 @@ const RUNNER_JS = `(() => {
   // A scroll can cancel a touch instead of ending it; either way the finger is up.
   for (const t of ['touchend', 'touchcancel']) addEventListener(t, () => { touching = false; touched(); }, { passive: true });
   for (const t of ['focusin', 'input', 'change', 'keydown']) addEventListener(t, touched, true);
-  // Against lists only the Player's wins unless Any wins is ticked; rebuilt, since iOS ignores hidden options.
+  // Pick a match: each list narrows to its search, and Against to the Player's wins unless Any wins is ticked.
+  // Lists are rebuilt, since iOS ignores hidden options; a search that leaves one player picks them.
   const againstFor = ${againstFor};
+  const pickHit = ${pickHit};
   const everyone = new WeakMap();
-  const pickEls = () => ['pa', 'pb', 'lcq-any'].map((id) => document.getElementById(id));
-  const repick = () => {
-    const [a, b, any] = pickEls();
-    if (!a || !b || !any) return;
-    if (!everyone.has(b)) everyone.set(b, [...b.options].slice(1));
-    const keep = againstFor(everyone.get(b), a.selectedOptions[0], any.checked);
-    const was = b.value;
-    const blank = b.options[0];
-    blank.textContent = keep.length || !a.value ? 'Choose player' : 'Nobody else free on ' + a.selectedOptions[0].dataset.w + 'W; tick Any wins';
-    b.replaceChildren(blank, ...keep);
-    b.value = keep.some((o) => o.value === was) ? was : '';
+  const pickEls = () => ['pa', 'pb', 'pa-q', 'pb-q', 'lcq-any'].map((id) => document.getElementById(id));
+  const fill = (s, q, keep, empty) => {
+    if (!everyone.has(s)) everyone.set(s, [...s.options].slice(1));
+    const shown = keep(everyone.get(s)).filter((o) => pickHit(o, q.value));
+    const was = s.value;
+    const blank = s.options[0];
+    blank.textContent = shown.length ? 'Choose player' : q.value.trim() ? 'Nobody free matches that search' : empty();
+    s.replaceChildren(blank, ...shown);
+    s.value = shown.some((o) => o.value === was) ? was : q.value.trim() && shown.length === 1 ? shown[0].value : '';
   };
+  const repick = () => {
+    const [a, b, aq, bq, any] = pickEls();
+    if (!a || !b || !aq || !bq || !any) return;
+    fill(a, aq, (all) => all, () => 'Choose player');
+    const player = a.selectedOptions[0];
+    fill(b, bq, (all) => againstFor(all, player, any.checked), () => (a.value ? 'Nobody else free on ' + player.dataset.w + 'W; tick Any wins' : 'Choose player'));
+  };
+  addEventListener('input', (e) => { if (e.target.classList.contains('pick-q')) repick(); });
   addEventListener('change', (e) => {
-    const [a, b, any] = pickEls();
+    const [a, b, , , any] = pickEls();
     if ([a, any].includes(e.target)) repick();
     // A chosen player should not hold updates off; the pick is carried over them instead.
     if ([a, b].includes(e.target)) e.target.blur();
@@ -483,6 +494,7 @@ form.find > button.secondary{min-height:42px;margin:0;padding:.45rem 1rem}
 .panel input[type=search],.panel select{width:100%;padding:.6rem .85rem;font-family:inherit;color:var(--text);background:var(--surface);border:3px solid var(--line);border-radius:10px;-webkit-appearance:none;appearance:none}
 .panel button,.panel .btn{min-height:46px}
 .panel select{-webkit-appearance:auto;appearance:auto}
+.pick-q{margin-bottom:6px}
 .showing{margin:0 0 8px;color:var(--muted);font-weight:600}
 table.reg{width:100%;border-collapse:separate;border-spacing:0;font-size:15px;background:var(--surface);border:3px solid var(--line);border-radius:14px}
 .reg th,.reg td{padding:10px 14px;text-align:left;vertical-align:middle;border-bottom:1px solid var(--rule)}
@@ -892,8 +904,11 @@ export function runnerPage(cfg, state, {
   // Native folding; the script remembers each section's state by id across updates.
   const section = (id, title, count, body, isOpen) =>
     `<details class="panel" id="${id}"${isOpen ? ' open' : ''}><summary><h2>${title}${count === null ? '' : ` (${count})`}</h2></summary>${body}</details>`;
-  const choose = (list, id, name, label) => `<div><label for="${id}">${label}</label><select id="${id}" name="${name}" required>` +
-    `<option value="">Choose player</option>${list.map((p) => `<option value="${p.id}" data-w="${p.wins}">${esc(p.name)} (${record(p)})</option>`).join('')}</select></div>`;
+  // The search box has no name, so it is never sent; the script shows it.
+  const choose = (list, id, name, label) => `<div><label for="${id}">${label}</label>` +
+    `<input type="search" id="${id}-q" class="pick-q" placeholder="Search name or number" aria-label="Search ${label}" autocomplete="off" hidden>` +
+    `<select id="${id}" name="${name}" required><option value="">Choose player</option>${list.map((p) =>
+      `<option value="${p.id}" data-w="${p.wins}" data-q="${esc(`${p.name} ${p.phone}`.toLowerCase())}">${esc(p.name)} (${record(p)})</option>`).join('')}</select></div>`;
 
   const elapsed = (iso) => `<span data-wait="${now - Date.parse(iso)}">${waitText(now - Date.parse(iso))}</span>`;
   const byId = new Map(players.map((p) => [p.id, p]));

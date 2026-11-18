@@ -1,5 +1,5 @@
 // Drives the real LCQ tablet script in headless Chrome against an in-process booth server: taps online, offline,
-// with a lost answer, refused, signed out, and a half-made Pick a match. Needs Chrome (set CHROME to its path); exits 2 if it cannot run.
+// with a lost answer, refused, signed out, and Pick a match search. Needs Chrome (set CHROME to its path); exits 2 if it cannot run.
 import { spawn } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -147,9 +147,24 @@ try {
   await js('[...document.querySelectorAll(".sync button")].find((b) => b.textContent === "Sync").click()');
   check('F: Sync shows a change made on the laptop', !!(await until(() => js('/Late Larry/.test(document.querySelector("main").textContent)'))));
 
+  // G: Pick a match searches each list; a search that leaves one player picks them.
   const opts = (id) => js(`[...document.getElementById('${id}').options].slice(1).map((o) => o.textContent.replace(/ \\(.*/, ''))`);
   const picked = (id) => js(`{ const s = document.getElementById('${id}'); s.value ? s.selectedOptions[0].textContent.replace(/ \\(.*/, '') : ''; }`);
+  const type = async (id, text) => { await js(`document.getElementById('${id}').focus()`); await send('Input.insertText', { text }); };
   await js('document.getElementById("lcq-pick").open = true');
+  check('G: the search boxes show once the script runs', await js('[...document.querySelectorAll(".pick-q")].every((q) => !q.hidden)'));
+  await type('pa-q', 'larry');
+  check('G: the Player search narrows the list', JSON.stringify(await opts('pa')) === '["Late Larry"]', JSON.stringify(await opts('pa')));
+  check('G: and one left is picked', (await picked('pa')) === 'Late Larry');
+  check('G: Against lists the others on the same wins', JSON.stringify(await opts('pb')) === '["P1","P2","P3","P4"]', JSON.stringify(await opts('pb')));
+  await type('pb-q', '+91987650000');
+  check('G: Against searches by number too', JSON.stringify(await opts('pb')) === '["P1","P2","P3","P4"]', JSON.stringify(await opts('pb')));
+  await type('pb-q', '2');
+  check('G: a longer number leaves one, and it is picked', (await picked('pb')) === 'P3', `${JSON.stringify(await opts('pb'))} picked ${await picked('pb')}`);
+  await js('document.querySelector(\'#lcq-pick button[type="submit"]\').click()');
+  check('G: Start match starts the picked pair', !!(await until(() => lcq.state().open.some((m) => [m.aName, m.bName].sort().join() === 'Late Larry,P3'))));
+  check('G: after the tap the pick starts afresh', !!(await until(() => js('document.getElementById("pa-q")?.value === "" && document.getElementById("pa")?.value === ""'))));
+
   // H: a half-made pick no longer freezes the page: a new sign-up shows up and the pick is kept.
   const choose = (id, name) => js(`{ const s = document.getElementById('${id}'); s.value = [...s.options].find((o) => o.textContent.startsWith('${name} ')).value;
     s.dispatchEvent(new Event('change', { bubbles: true })); }`);

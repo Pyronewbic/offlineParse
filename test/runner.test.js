@@ -6,7 +6,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { after, before, beforeEach, describe, test } from 'node:test';
 import { Lcq, bracketGap } from '../src/lcq.js';
 import { LeadStore } from '../src/leads.js';
-import { againstFor, bracketLayout, clockText, createPortalServer, holdsUpdates, outboxOf, overdue, runnerPage, runnerVersion } from '../src/web.js';
+import { againstFor, bracketLayout, clockText, createPortalServer, holdsUpdates, outboxOf, overdue, pickHit, runnerPage, runnerVersion } from '../src/web.js';
 import { makeConfig, postForm, request } from './helpers.js';
 
 describe('LCQ runner over HTTP', () => {
@@ -349,8 +349,11 @@ describe('LCQ runner over HTTP', () => {
     lcq.result(m1.id, m1.a);
     lcq.result(m2.id, m2.a);
     const body = runnerPage(makeConfig(), lcq.state());
-    assert.match(body, /<option value="\d+" data-w="1">P1 \(1W 0L\)<\/option>/, 'each choice carries its wins');
-    assert.match(body, /<option value="\d+" data-w="0">P7 \(0W 0L\)<\/option>/);
+    assert.match(body, /<option value="\d+" data-w="1" data-q="p1 \+919876500000">P1 \(1W 0L\)<\/option>/, 'each choice carries its wins, and its name and number to search');
+    assert.match(body, /<option value="\d+" data-w="0" data-q="p7 \+919876500006">P7 \(0W 0L\)<\/option>/);
+    assert.match(body, /<label for="pa">Player<\/label><input type="search" id="pa-q" class="pick-q" [^>]*aria-label="Search Player"[^>]* hidden><select id="pa" name="a" required>/,
+      'a search box per list, hidden until the script shows it, and never sent (no name)');
+    assert.ok(!/<input[^>]*class="pick-q"[^>]*name=/.test(body));
     assert.match(body, /<label class="check"><input type="checkbox" id="lcq-any"><span>Any wins/);
     assert.match((await request({ port, path: '/lcq/app.js' })).body, /const againstFor = \(options, player, any\) =>/, 'the tablet runs the same filter');
     const opt = (value, w) => ({ value, dataset: { w } });
@@ -360,6 +363,13 @@ describe('LCQ runner over HTTP', () => {
     assert.deepEqual(ids(againstFor(options, opt('5', '0'), false)), ['6']);
     assert.deepEqual(ids(againstFor(options, opt('1', '1'), true)), ['3', '5', '6'], 'Any wins');
     assert.deepEqual(ids(againstFor(options, opt('', undefined), false)), ['1', '3', '5', '6'], 'no Player yet: everyone');
+    const named = (q) => ({ dataset: { q } });
+    assert.equal(pickHit(named('asha rao +919876543210'), 'ASHA'), true, 'any case');
+    assert.equal(pickHit(named('asha rao +919876543210'), ' rao  asha '), true, 'words in any order');
+    assert.equal(pickHit(named('asha rao +919876543210'), '98765 43210'), true, 'a number typed in parts');
+    assert.equal(pickHit(named('asha rao +919876543210'), 'ravi'), false);
+    assert.equal(pickHit(named('asha rao +919876543210'), ''), true, 'an empty search keeps everyone');
+    assert.equal(pickHit({ dataset: {} }, 'a'), false, 'a choice with nothing to search never matches a search');
     const [a, b] = [lcq.state().players.find((p) => p.name === 'P1'), lcq.state().players.find((p) => p.name === 'P7')];
     lcq.start(a.id, b.id);
     assert.equal(lcq.state().open.at(-1).aName, 'P1', 'the server still allows any two free players, so the override works');
