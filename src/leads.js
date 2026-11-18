@@ -323,10 +323,11 @@ export class LeadStore {
   changed(event, id) {
     if (!this.files) return;
     this.files.record(event, this.get(id));
-    this.files.sync(this.list());
+    this.files.later(() => this.list());
   }
 
   close() {
+    this.files?.flushCsv();
     this.db.close();
   }
 }

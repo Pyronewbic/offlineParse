@@ -45,8 +45,8 @@ describe('lead files', () => {
   let errors;
   let files;
   let store;
-  const open = () => {
-    files = new LeadFiles({ csvPath, logPath, onError: (m) => errors.push(m) });
+  const open = (opts = {}) => {
+    files = new LeadFiles({ csvPath, logPath, onError: (m) => errors.push(m), ...opts });
     store = new LeadStore(join(dir, 'leads.db'), { files, firstEvent: { code: 'EVT26', name: 'Event XYZ' } });
   };
   const add = (overrides = {}) => store.register({
@@ -72,6 +72,7 @@ describe('lead files', () => {
     add();
     add({ name: 'Asha Again' });
     add({ name: 'Ravi', phone: '+919123456789', source: 'desk' });
+    files.flushCsv();
     assert.equal(readFileSync(csvPath, 'utf8'), leadsCsv(store.list()));
     const rows = csvRows(csvPath);
     assert.equal(rows.length, 2);
@@ -112,9 +113,60 @@ describe('lead files', () => {
     symlinkSync(victim, csvPath);
     open();
     add();
+    files.flushCsv();
     assert.equal(readFileSync(victim, 'utf8'), 'untouched');
     assert.ok(lstatSync(csvPath).isFile());
     assert.equal(csvRows(csvPath).length, 1);
+  });
+
+  test('a sign-up does not wait for the CSV, which follows within the delay', async () => {
+    open({ csvDelayMs: 20 });
+    add();
+    assert.deepEqual(csvRows(csvPath), [], 'not written in the sign-up itself');
+    assert.equal(store.list().length, 1, 'positive control: the sign-up is saved');
+    await new Promise((r) => setTimeout(r, 80));
+    assert.equal(csvRows(csvPath).length, 1, 'written by the timer');
+    assert.equal(files.retry(), false, 'nothing left due');
+  });
+
+  test('a burst of sign-ups is one CSV rewrite', () => {
+    open();
+    let writes = 0;
+    const sync = files.sync.bind(files);
+    files.sync = (leads) => { writes += 1; sync(leads); };
+    for (const game of ['SSBU', 'SF6', 'Tekken 8']) add({ game });
+    assert.equal(writes, 0);
+    files.flushCsv();
+    assert.equal(writes, 1);
+    assert.equal(csvRows(csvPath).length, 3);
+  });
+
+  test('a slow disk does not slow a sign-up', () => {
+    open();
+    files.sync = () => { const until = Date.now() + 300; while (Date.now() < until); };
+    const started = Date.now();
+    add();
+    assert.ok(Date.now() - started < 150, `sign-up took ${Date.now() - started} ms`);
+  });
+
+  test('closing the store writes a CSV that was still due', () => {
+    open();
+    add();
+    store.close();
+    files.close();
+    store = files = undefined;
+    assert.equal(csvRows(csvPath).length, 1);
+  });
+
+  test('a deletion while a rewrite is due is never written back', () => {
+    open();
+    add({ name: 'Zanzibar Quokka', phone: '+919111122222' });
+    add();
+    store.remove(1);
+    files.flushCsv();
+    const text = readFileSync(csvPath, 'utf8');
+    assert.ok(!text.includes('Zanzibar'), 'the due rewrite read the rows after the deletion');
+    assert.ok(text.includes('Asha'), 'positive control: the other sign-up is in the sheet');
   });
 
   test('a symlink at the log path is refused at startup', () => {
@@ -147,6 +199,7 @@ describe('lead files', () => {
     writeFileSync(join(csvPath, 'blocker'), '');
     add();
     add({ phone: '+919123456789', name: 'Ravi' });
+    files.flushCsv();
     assert.equal(store.list().length, 2, 'sign-ups still saved');
     assert.equal(errors.length, 1, 'one warning, not one per failed write');
     assert.equal(files.warnings().length, 1);
@@ -191,6 +244,7 @@ describe('lead files', () => {
       assert.deepEqual(twins, [200, ...Array(9).fill(409)], 'exactly one of the same-number submissions wins');
 
       assert.equal(store.list().length, 41);
+      files.flushCsv();
       assert.equal(csvRows(csvPath).length, 41);
       assert.equal(readFileSync(csvPath, 'utf8'), leadsCsv(store.list()));
       const entries = logEntries(logPath);
