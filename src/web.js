@@ -67,8 +67,8 @@ export const clockText = (ms) => {
   return s < 3600 ? `${Math.floor(s / 60)}:${two(s % 60)}` : `${Math.floor(s / 3600)}:${two(Math.floor(s / 60) % 60)}:${two(s % 60)}`;
 };
 /**
- * Whether the tablet holds off swapping in an update: just after any touch, or while a finger is down, a field has
- * focus or a pick is half made, but never past a minute idle, so a forgotten tap cannot freeze the page.
+ * Whether the tablet holds off swapping in an update: just after any touch, or while a finger is down or a field has
+ * focus, but never past a minute idle, so a forgotten tap cannot freeze the page. A half-made pick is carried over.
  */
 export const holdsUpdates = (idleMs, active) => idleMs < 400 || (active && idleMs < 60_000);
 
@@ -96,6 +96,15 @@ export function bracketLayout(nodes) {
 /** The Against choices for a Player: free players on the same wins, or anyone but them with Any wins. */
 export const againstFor = (options, player, any) =>
   options.filter((o) => o.value !== player.value && (any || !player.value || o.dataset.w === player.dataset.w));
+/** Whether a Pick a match choice fits the search: every word typed is in its name or number. */
+export const pickHit = (option, q) => q.toLowerCase().split(/\s+/).filter(Boolean).every((w) => (option.dataset.q || '').includes(w));
+/** The tablet's queued taps read back from its storage, keeping only well-formed ones, as anything can be in there. */
+export const outboxOf = (raw) => {
+  let list;
+  try { list = JSON.parse(raw); } catch { return []; }
+  return Array.isArray(list) ? list.filter((o) => o && typeof o.id === 'string' && /^[0-9a-f]{32}$/.test(o.id) &&
+    typeof o.url === 'string' && /^\/lcq\/[a-z]+$/.test(o.url) && typeof o.body === 'string' && o.body.length <= 8192) : [];
+};
 const RUNNER_JS = `(() => {
   // Waiting times count up from the server's figure, so the tablet's own clock does not matter.
   const waitText = ${waitText};
@@ -118,14 +127,75 @@ const RUNNER_JS = `(() => {
   const load = () => { try { return JSON.parse(localStorage.getItem(KEY)) || {}; } catch { return {}; } };
   const save = (s) => { try { localStorage.setItem(KEY, JSON.stringify(s)); } catch {} };
   const apply = () => {
+    for (const q of document.querySelectorAll('.pick-q')) q.hidden = false;
     const s = load();
     for (const d of document.querySelectorAll('details[id]')) if (d.id in s) d.open = s[d.id];
   };
   document.addEventListener('toggle', (e) => {
     if (e.target.id) save({ ...load(), [e.target.id]: e.target.open });
   }, true);
-  // Each button press reloads the page; come back to the same place instead of the top.
-  addEventListener('submit', () => { try { sessionStorage.setItem('lcq-y', String(scrollY)); } catch {} });
+  // Taps wait in a queue kept on the tablet and go to the laptop one at a time, in order, so a slow or missing
+  // laptop never freezes the page. Each carries an id, so one resent after a lost answer is applied only once.
+  const outboxOf = ${outboxOf};
+  const QKEY = 'lcq-outbox';
+  const queue = () => { try { return outboxOf(localStorage.getItem(QKEY)); } catch { return []; } };
+  const keep = (q) => localStorage.setItem(QKEY, JSON.stringify(q));
+  const timeout = (ms) => (AbortSignal.timeout ? AbortSignal.timeout(ms) : undefined);
+  const problems = [];
+  let sending = false;
+  let signedOut = false;
+  let reachable = true;
+  let syncedAt = Date.now();
+  let delay = 0;
+  let retry = null;
+  const bar = document.createElement('div');
+  bar.className = 'sync';
+  bar.innerHTML = '<div></div><div class="sync-row"><span></span><a class="btn secondary" href="/lcq">Enter the PIN</a><button type="button" class="secondary">Sync</button></div>';
+  document.body.append(bar);
+  const [list, row] = bar.children;
+  const [text, pinLink, syncButton] = row.children;
+  const show = () => {
+    const n = queue().length;
+    const taps = n + ' tap' + (n === 1 ? '' : 's');
+    // Refusals can name players, so they go in as text, never as HTML.
+    list.replaceChildren(...problems.map((m) => Object.assign(document.createElement('p'), { className: 'error', textContent: m })));
+    if (problems.length) {
+      const ok = Object.assign(document.createElement('button'), { type: 'button', className: 'quiet', textContent: 'OK' });
+      ok.addEventListener('click', () => { problems.length = 0; show(); });
+      list.append(ok);
+    }
+    pinLink.hidden = !signedOut;
+    bar.classList.toggle('waiting', n > 0 || !reachable || signedOut);
+    text.textContent = signedOut ? 'Signed out (did the laptop restart?).' + (n ? ' ' + taps + ' kept here; they go once you enter the PIN.' : '')
+      : n ? taps + ' not on the laptop yet' + (reachable ? '; sending' : '; cannot reach it, retrying')
+      : (reachable ? 'Up to date' : 'Cannot reach the laptop') + ', last synced ' + waitText(Date.now() - syncedAt) + ' ago';
+  };
+  addEventListener('submit', (e) => {
+    const f = e.target;
+    const path = new URL(f.getAttribute('action') || '', location.href).pathname;
+    let queued = false;
+    if (f.method === 'post' && /^\\/lcq\\/[a-z]+$/.test(path) && path !== '/lcq/login') {
+      try {
+        let data;
+        try { data = new FormData(f, e.submitter); } catch { data = new FormData(f); }
+        const body = new URLSearchParams(data);
+        const id = Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) => b.toString(16).padStart(2, '0')).join('');
+        body.set('op', id);
+        body.set('opEvent', document.getElementById('version').dataset.event);
+        keep([...queue(), { id, url: path, body: body.toString() }]);
+        queued = true;
+      } catch {}
+    }
+    if (!queued) {
+      // Sent the old way, as a page load (no storage here): come back to the same place instead of the top.
+      try { sessionStorage.setItem('lcq-y', String(scrollY)); } catch {}
+      return;
+    }
+    e.preventDefault();
+    for (const b of f.querySelectorAll('button')) b.disabled = true;
+    show();
+    flush();
+  });
   try {
     const y = sessionStorage.getItem('lcq-y');
     sessionStorage.removeItem('lcq-y');
@@ -145,44 +215,132 @@ const RUNNER_JS = `(() => {
   // A scroll can cancel a touch instead of ending it; either way the finger is up.
   for (const t of ['touchend', 'touchcancel']) addEventListener(t, () => { touching = false; touched(); }, { passive: true });
   for (const t of ['focusin', 'input', 'change', 'keydown']) addEventListener(t, touched, true);
-  // Against lists only the Player's wins unless Any wins is ticked; rebuilt, since iOS ignores hidden options.
+  // Pick a match: each list narrows to its search, and Against to the Player's wins unless Any wins is ticked.
+  // Lists are rebuilt, since iOS ignores hidden options; a search that leaves one player picks them.
   const againstFor = ${againstFor};
+  const pickHit = ${pickHit};
   const everyone = new WeakMap();
+  const pickEls = () => ['pa', 'pb', 'pa-q', 'pb-q', 'lcq-any'].map((id) => document.getElementById(id));
+  const fill = (s, q, keep, empty) => {
+    if (!everyone.has(s)) everyone.set(s, [...s.options].slice(1));
+    const shown = keep(everyone.get(s)).filter((o) => pickHit(o, q.value));
+    const was = s.value;
+    const blank = s.options[0];
+    blank.textContent = shown.length ? 'Choose player' : q.value.trim() ? 'Nobody free matches that search' : empty();
+    s.replaceChildren(blank, ...shown);
+    s.value = shown.some((o) => o.value === was) ? was : q.value.trim() && shown.length === 1 ? shown[0].value : '';
+  };
+  const repick = () => {
+    const [a, b, aq, bq, any] = pickEls();
+    if (!a || !b || !aq || !bq || !any) return;
+    fill(a, aq, (all) => all, () => 'Choose player');
+    const player = a.selectedOptions[0];
+    fill(b, bq, (all) => againstFor(all, player, any.checked), () => (a.value ? 'Nobody else free on ' + player.dataset.w + 'W; tick Any wins' : 'Choose player'));
+  };
+  addEventListener('input', (e) => { if (e.target.classList.contains('pick-q')) repick(); });
   addEventListener('change', (e) => {
-    const a = document.getElementById('pa');
-    const b = document.getElementById('pb');
-    const any = document.getElementById('lcq-any');
-    if (!a || !b || !any || ![a, any].includes(e.target)) return;
-    if (!everyone.has(b)) everyone.set(b, [...b.options].slice(1));
-    const keep = againstFor(everyone.get(b), a.selectedOptions[0], any.checked);
-    const was = b.value;
-    const blank = b.options[0];
-    blank.textContent = keep.length || !a.value ? 'Choose player' : 'Nobody else free on ' + a.selectedOptions[0].dataset.w + 'W; tick Any wins';
-    b.replaceChildren(blank, ...keep);
-    b.value = keep.some((o) => o.value === was) ? was : '';
+    const [a, b, , , any] = pickEls();
+    if ([a, any].includes(e.target)) repick();
+    // A chosen player should not hold updates off; the pick is carried over them instead.
+    if ([a, b].includes(e.target)) e.target.blur();
   });
-  const busy = () => holdsUpdates(Date.now() - interactedAt, touching || !!(document.getElementById('pa') || {}).value ||
+  // The pick in progress, to put back after an update: a player no longer free is dropped by the new lists.
+  const pickState = () => pickEls().map((el) => el && (el.type === 'checkbox' ? el.checked : el.value));
+  const putPick = (state) => {
+    const els = pickEls();
+    if (!state || els.some((el) => !el)) return;
+    els.forEach((el, i) => { if (el.type === 'checkbox') el.checked = state[i]; else el.value = state[i]; });
+    repick();
+  };
+  const busy = () => holdsUpdates(Date.now() - interactedAt, touching ||
     ['INPUT', 'SELECT', 'TEXTAREA'].includes(document.activeElement && document.activeElement.tagName));
   let version = document.getElementById('version').dataset.version;
   apply();
-  // Swap in the new page body when something changed, so the scroll position and folds stay put.
+  // Swap in the new page body, so the scroll position and folds stay put. force is for the operator's own taps
+  // and Sync, which they expect to see, like the page load a tap used to be.
+  const swap = async (force) => {
+    const page = await fetch(location.pathname + location.search, { cache: 'no-store', signal: timeout(8000) });
+    const next = new DOMParser().parseFromString(await page.text(), 'text/html').querySelector('main');
+    if (!page.ok || !next || !next.querySelector('#version') || (!force && busy())) return false;
+    next.querySelectorAll('script').forEach((s) => s.remove());
+    const pick = force ? null : pickState();
+    document.querySelector('main').replaceWith(next);
+    version = document.getElementById('version').dataset.version;
+    loadedAt = syncedAt = Date.now();
+    apply();
+    putPick(pick);
+    return true;
+  };
+  async function flush() {
+    if (sending || signedOut) return;
+    sending = true;
+    clearTimeout(retry);
+    let sent = 0;
+    try {
+      for (let q = queue(); q.length; q = queue()) {
+        const op = q[0];
+        let r = null;
+        try {
+          r = await fetch(op.url, { method: 'POST', body: op.body, cache: 'no-store', signal: timeout(8000),
+            headers: { Accept: 'application/json', 'Content-Type': 'application/x-www-form-urlencoded' } });
+        } catch {}
+        if (r && r.status === 401) { signedOut = true; break; }
+        // No answer, or the laptop failed: keep the tap and try again, waiting longer each time, up to 8 s.
+        if (!r || r.status >= 500) {
+          reachable = !!r;
+          delay = Math.min(delay ? delay * 2 : 1000, 8000);
+          retry = setTimeout(flush, delay);
+          break;
+        }
+        reachable = true;
+        delay = 0;
+        if (!r.ok) problems.push(((await r.json().catch(() => null)) || {}).error || 'The laptop refused a tap (' + r.status + ').');
+        try {
+          keep(queue().filter((o) => o.id !== op.id));
+        } catch {
+          problems.push('This tablet cannot update its storage; tap Sync, or reload the page.');
+          break;
+        }
+        sent += 1;
+      }
+      if (sent && !queue().length) await swap(true).catch(() => {});
+    } finally {
+      sending = false;
+      show();
+    }
+  }
+  syncButton.addEventListener('click', async () => {
+    delay = 0;
+    await flush();
+    if (!queue().length) {
+      try { await swap(true); reachable = true; } catch { reachable = false; }
+    }
+    show();
+  });
+  addEventListener('visibilitychange', () => { if (!document.hidden) flush(); });
+  setInterval(show, 30000);
+  show();
+  flush();
   setInterval(async () => {
     try {
-      const r = await fetch('/lcq/version' + location.search, { cache: 'no-store' });
-      if (!r.ok || (await r.json()).v === version || busy()) return;
-      const page = await fetch(location.pathname + location.search, { cache: 'no-store' });
-      const next = new DOMParser().parseFromString(await page.text(), 'text/html').querySelector('main');
-      if (!page.ok || !next || !next.querySelector('#version') || busy()) return;
-      next.querySelectorAll('script').forEach((s) => s.remove());
-      document.querySelector('main').replaceWith(next);
-      version = document.getElementById('version').dataset.version;
-      loadedAt = Date.now();
-      apply();
-    } catch {}
+      const r = await fetch('/lcq/version' + location.search, { cache: 'no-store', signal: timeout(8000) });
+      reachable = true;
+      // The page is not the laptop's state until every queued tap is in, so those go first.
+      if (queue().length) return void flush();
+      if (!r.ok) return;
+      if ((await r.json()).v === version) syncedAt = Date.now();
+      else if (!busy()) await swap(false);
+    } catch {
+      reachable = false;
+    } finally {
+      show();
+    }
   }, 3000);
 })();
 `;
 const SESSION_COOKIE = /(?:^|;\s*)lcq=([A-Za-z0-9_-]{43})(?:;|$)/;
+const OP_ID = /^[0-9a-f]{32}$/;
+const RUNNER_ACTIONS = new Set(['start', 'result', 'undo', 'cancel', 'finalize', 'unfinalize', 'bye', 'end', 'reopen', 'undrop', 'drop'].map((a) => `/lcq/${a}`));
 
 const HEAVY = 'Impact,Haettenschweiler,"Arial Narrow Bold",system-ui,sans-serif';
 const CSS = `${themeCss()}
@@ -263,6 +421,14 @@ details.panel > summary h2{display:inline}
 .names details.drop > summary{display:flex;align-items:center;min-height:48px;padding:0 4px;color:var(--error);font-weight:700;cursor:pointer}
 .names details.drop[open]{flex-basis:100%;padding-bottom:.6rem}
 .names details.back > summary{color:var(--text)}
+.sync{position:fixed;left:0;right:0;bottom:0;z-index:3;padding:8px 16px calc(8px + env(safe-area-inset-bottom));background:var(--surface);border-top:3px solid var(--line)}
+.sync.waiting{background:var(--errorBg)}
+.sync-row{display:flex;flex-wrap:wrap;gap:8px 12px;align-items:center;justify-content:flex-end;max-width:72rem;margin:0 auto}
+.sync-row span{flex:1 1 12rem;font-weight:700}
+.sync .error{margin:0 auto 6px;max-width:72rem}
+.sync [hidden]{display:none}
+.runner{padding-bottom:72px}
+.runner button:disabled{opacity:.45;cursor:default;transform:none}
 .jump{position:sticky;top:0;z-index:2;display:flex;gap:8px;overflow-x:auto;margin:0 -20px 16px;padding:8px 20px;background:var(--bg);border-bottom:2px solid var(--line)}
 .jump a{flex:none;display:flex;align-items:center;min-height:48px;padding:0 14px;border:2px solid var(--line);border-radius:999px;background:var(--surface);font-weight:700;text-decoration:none;white-space:nowrap}
 .attention{margin:0 0 16px;padding:.6rem .9rem;border:3px solid var(--line);border-left:12px solid var(--error);border-radius:10px;background:var(--errorBg)}
@@ -328,6 +494,7 @@ form.find > button.secondary{min-height:42px;margin:0;padding:.45rem 1rem}
 .panel input[type=search],.panel select{width:100%;padding:.6rem .85rem;font-family:inherit;color:var(--text);background:var(--surface);border:3px solid var(--line);border-radius:10px;-webkit-appearance:none;appearance:none}
 .panel button,.panel .btn{min-height:46px}
 .panel select{-webkit-appearance:auto;appearance:auto}
+.pick-q{margin-bottom:6px}
 .showing{margin:0 0 8px;color:var(--muted);font-weight:600}
 table.reg{width:100%;border-collapse:separate;border-spacing:0;font-size:15px;background:var(--surface);border:3px solid var(--line);border-radius:14px}
 .reg th,.reg td{padding:10px 14px;text-align:left;vertical-align:middle;border-bottom:1px solid var(--rule)}
@@ -624,7 +791,8 @@ ${newEvent}
 ${counts}
 <div>
 <dl class="stats">
-  <div class="stat"><dt>Total</dt><dd>${leads.length}</dd></div>
+  <div class="stat"><dt>People</dt><dd>${new Set(leads.map((l) => l.phone)).size}</dd></div>
+  <div class="stat"><dt>Sign-ups</dt><dd>${leads.length}</dd></div>
   <div class="stat"><dt>Wi-Fi form</dt><dd>${bySource('form')}</dd></div>
   <div class="stat"><dt>At the desk</dt><dd>${bySource('desk')}</dd></div>
   <div class="stat"><dt>Last sign-up</dt><dd>${last ? esc(toISTShort(last.createdAt)) : '-'}</dd></div>
@@ -736,8 +904,11 @@ export function runnerPage(cfg, state, {
   // Native folding; the script remembers each section's state by id across updates.
   const section = (id, title, count, body, isOpen) =>
     `<details class="panel" id="${id}"${isOpen ? ' open' : ''}><summary><h2>${title}${count === null ? '' : ` (${count})`}</h2></summary>${body}</details>`;
-  const choose = (list, id, name, label) => `<div><label for="${id}">${label}</label><select id="${id}" name="${name}" required>` +
-    `<option value="">Choose player</option>${list.map((p) => `<option value="${p.id}" data-w="${p.wins}">${esc(p.name)} (${record(p)})</option>`).join('')}</select></div>`;
+  // The search box has no name, so it is never sent; the script shows it.
+  const choose = (list, id, name, label) => `<div><label for="${id}">${label}</label>` +
+    `<input type="search" id="${id}-q" class="pick-q" placeholder="Search name or number" aria-label="Search ${label}" autocomplete="off" hidden>` +
+    `<select id="${id}" name="${name}" required><option value="">Choose player</option>${list.map((p) =>
+      `<option value="${p.id}" data-w="${p.wins}" data-q="${esc(`${p.name} ${p.phone}`.toLowerCase())}">${esc(p.name)} (${record(p)})</option>`).join('')}</select></div>`;
 
   const elapsed = (iso) => `<span data-wait="${now - Date.parse(iso)}">${waitText(now - Date.parse(iso))}</span>`;
   const byId = new Map(players.map((p) => [p.id, p]));
@@ -966,7 +1137,7 @@ export function runnerPage(cfg, state, {
   const undoLine = live && undo ? `<div class="flash" role="status">${esc(undo.text)} ${btn('undo', { match: undo.id }, 'Undo', 'quiet')}</div>` : '';
 
   // Feedback, then the bracket's state (Finalize before play, the Winner at the end), then the matches.
-  return page('LCQ runner', `<div id="version" data-version="${esc(version)}" hidden></div>
+  return page('LCQ runner', `<div id="version" data-version="${esc(version)}" data-event="${esc(event?.code ?? '')}" hidden></div>
 <div class="runner">
 ${adminHeader(cfg, brand, 'LCQ runner')}
 ${eventLinks}
@@ -1161,10 +1332,14 @@ export function createPortalServer(cfg, store, {
           Location: '/lcq', 'Set-Cookie': `lcq=${token}; Path=/lcq; HttpOnly; SameSite=Strict; Max-Age=86400`,
         });
       }
-      if (!session) return redirect(res, '/lcq', 303);
+      // The tablet's queue sends taps with fetch and wants a short answer; a plain form post gets the page back.
+      const wantsJson = /\bapplication\/json\b/.test(req.headers.accept ?? '');
+      const json = (status, body) => send(res, status, 'application/json', JSON.stringify(body));
+      if (!session) return wantsJson ? json(401, { error: 'Enter the PIN again.' }) : redirect(res, '/lcq', 303);
+      if (!RUNNER_ACTIONS.has(path)) return plain(res, 404, 'not found');
       const game = gameOf(fields.game);
       const n = (key) => Number(fields[key]);
-      try {
+      const act = () => {
         if (path === '/lcq/start') lcq.start(n('a'), n('b'));
         else if (path === '/lcq/result') {
           lcq.result(n('match'), n('winner'));
@@ -1187,14 +1362,22 @@ export function createPortalServer(cfg, store, {
           flashes.set(session, { notice: `${back} is back in.${bye ? ` ${bye}'s Bye is taken back.` : ''}` +
             `${cancelled.length ? ` Also called off ${cancelled.join(', ')}, which depended on it.` : ''}` });
         } else if (path === '/lcq/drop') {
-          if (fields.confirm === 'yes') lcq.drop(n('player'));
-          else flashes.set(session, { error: 'Tick that they are not here, then tap Drop.' });
+          if (fields.confirm !== 'yes') throw new LcqError('Tick that they are not here, then tap Drop.');
+          lcq.drop(n('player'));
         }
-        else return plain(res, 404, 'not found');
+      };
+      const op = OP_ID.test(fields.op ?? '') ? fields.op : null;
+      try {
+        // A queued tap can outlive its event (a tablet left with taps unsent); it must not change the next one.
+        if (op && fields.opEvent !== store.currentEvent().code) throw new LcqError('A tap made during an earlier event was not applied.');
+        if (op) lcq.once(op, act);
+        else act();
       } catch (e) {
         if (!(e instanceof LcqError)) throw e;
+        if (wantsJson) return json(409, { error: e.message });
         flashes.set(session, { error: e.message });
       }
+      if (wantsJson) return json(200, { ok: true });
       return redirect(res, lcqUrl(game, runnerGames().some(Boolean)), 303);
     }
     if (method !== 'GET' || (path !== '/lcq' && path !== '/lcq/version')) return plain(res, 404, 'not found');

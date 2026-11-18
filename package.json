@@ -15,7 +15,8 @@
     "qr:show": "node scripts/make-qr.js --terminal",
     "booth-ip": "node scripts/booth-ip.js",
     "booth-ip:undo": "node scripts/booth-ip.js --undo",
-    "test": "node --test"
+    "test": "node --test",
+    "tablet:check": "node scripts/tablet-check.js"
   },
   "dependencies": {
     "qrcode": "1.5.4"

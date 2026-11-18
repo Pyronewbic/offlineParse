@@ -8,11 +8,17 @@ The LCQ is single elimination: lose once and you are out. There is no draw: play
 
 On a tablet on the booth Wi-Fi, open the address and PIN shown on the admin page (`http://100.64.0.2/lcq`). If a sign-in sheet appears when joining the Wi-Fi, choose to stay connected. The tablet stays signed in until the server restarts, and updates itself every few seconds.
 
+The bar at the bottom says whether the tablet is up to date; **Sync** sends any waiting taps and shows the laptop's state at once.
+
+- **Wi-Fi or laptop drops:** keep tapping. Taps wait on the tablet and go in order once it is back ("2 taps not on the laptop yet"). A tap on something that changed meanwhile is refused and the bar says why; tap **OK**.
+- **Don't reload while it is down:** the browser shows an error page until the laptop is back. Waiting taps are kept.
+- **Signed out** (the laptop restarted): tap **Enter the PIN**; waiting taps go once you are in.
+
 Each game has its own tab. **Event** at the top (once there is more than one event) shows an earlier event's results and winners; only the current event can be run.
 
 ## Run a game
 
-1. **Start a match.** **Ready to play** lists the pairs on the same wins, longest waiting first. Tap **Start**. To pair two people yourself, open **Pick a match**: Against lists only players on the Player's wins; tick **Any wins** to pair across wins.
+1. **Start a match.** **Ready to play** lists the pairs on the same wins, longest waiting first. Tap **Start**. To pair two people yourself, open **Pick a match**: type part of a name or number in the box above Player or Against to shorten its list (when one person is left, they are picked). Against lists only players on the Player's wins; tick **Any wins** to pair across wins. A half-made pick stays put while the page updates.
 2. **Record the winner.** In **Playing**, tap the winner's button (A or B). Each match has a clock that turns red once it runs past the limit (15 min unless set otherwise). The result shows at the top with **Undo** until the next change. In **Results**, Undo shows on a result only while neither player has a later one; undo the later one first. **Call off** cancels a match that has no result (started by mistake).
 3. **Fill the bracket.** It comes out even when the number of players is a power of 2 (8, 16, 32), so the tab says how many more sign-ups make it full: "24 in the bracket: need 8 more for a full bracket of 32."
 4. **LCQ Finalize** when sign-ups for this game close. It fixes who is in; a bracket that is not full needs a tick, as some players will need a Bye. Anyone who signs up after it is told the bracket is full and is counted on the tab; **LCQ Unfinalize** lets them in.

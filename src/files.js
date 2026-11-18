@@ -10,6 +10,8 @@ const CSV_FORMULA_PREFIXES = ['=', '+', '-', '@', '\t', '\r'];
 const LOG_FIELDS = ['id', 'name', 'phone', 'email', 'source', 'eventCode', 'bracket', 'game'];
 const MAX_LOG_REWRITE_BYTES = 64 * 1024 * 1024;
 export const CSV_RETRY_MS = 15000;
+// A burst of sign-ups (one per ticked game, or a queue at the booth) becomes one CSV rewrite.
+export const CSV_DELAY_MS = 500;
 // Windows refuses to replace a file another app holds open, which is what Excel does with a CSV.
 const LOCKED_CODES = new Set(['EPERM', 'EBUSY', 'EACCES']);
 
@@ -106,12 +108,14 @@ export function leadsCsv(leads) {
 }
 
 /**
- * Human-facing copies of the lead table: a CSV rewritten whole after every change, and an
+ * Human-facing copies of the lead table: a CSV rewritten whole shortly after a change, and an
  * append-only JSON Lines log. The database stays the source of truth, so a failed file write
  * is reported but never fails the sign-up.
  */
 export class LeadFiles {
-  constructor({ csvPath, logPath, onError = (msg) => console.error(msg), onInfo = (msg) => console.log(msg), platform = process.platform }) {
+  constructor({
+    csvPath, logPath, onError = (msg) => console.error(msg), onInfo = (msg) => console.log(msg), platform = process.platform, csvDelayMs = CSV_DELAY_MS,
+  }) {
     this.csvPath = resolve(csvPath);
     this.logPath = resolve(logPath);
     this.onError = onError;
@@ -119,6 +123,9 @@ export class LeadFiles {
     this.platform = platform;
     this.problems = new Map();
     this.pendingCsv = null;
+    this.csvDelayMs = csvDelayMs;
+    this.dueCsv = null;
+    this.csvTimer = null;
     // Deletions not yet scrubbed from the log, kept on disk so a restart still finishes them.
     this.pendingPath = join(dirname(this.logPath), 'pending-erasures.json');
     this.pendingErasures = new Map();
@@ -190,11 +197,39 @@ export class LeadFiles {
     }
   }
 
-  /** Retry deletions and a CSV rewrite that failed, without waiting for the next change. True if any was pending. */
+  /**
+   * Rewrite the CSV soon, once for a burst of changes, so a sign-up never waits on the disk. `leads` is a
+   * function read when the write runs, so a deletion in between is never written back.
+   */
+  later(leads) {
+    this.dueCsv = leads;
+    this.csvTimer ??= setTimeout(() => this.flushCsv(), this.csvDelayMs).unref();
+  }
+
+  /** Run a rewrite that later() is holding, now. */
+  flushCsv() {
+    clearTimeout(this.csvTimer);
+    this.csvTimer = null;
+    const due = this.dueCsv;
+    this.dueCsv = null;
+    if (!due) return;
+    let leads;
+    try {
+      leads = due();
+    } catch (e) {
+      this.fail(this.csvPath, e);
+      return;
+    }
+    this.sync(leads);
+  }
+
+  /** Retry deletions and a CSV rewrite that failed or is due, without waiting. True if any was pending. */
   retry() {
-    const pending = this.pendingErasures.size > 0 || this.pendingCsv !== null;
+    const pending = this.pendingErasures.size > 0 || this.pendingCsv !== null || this.dueCsv !== null;
     if (this.pendingErasures.size) this.flushErasures();
-    if (this.pendingCsv) this.sync(this.pendingCsv);
+    // A due rewrite reads the rows fresh, so it supersedes the snapshot a failed one kept.
+    if (this.dueCsv) this.flushCsv();
+    else if (this.pendingCsv) this.sync(this.pendingCsv);
     return pending;
   }
 
@@ -273,6 +308,8 @@ export class LeadFiles {
   }
 
   close() {
+    clearTimeout(this.csvTimer);
+    this.csvTimer = null;
     if (this.logFd !== null) closeSync(this.logFd);
   }
 }

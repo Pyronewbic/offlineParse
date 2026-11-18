@@ -14,7 +14,7 @@ On each phone, forget the booth Wi-Fi, then scan the Wi-Fi QR:
 - [ ] **Android:** "Sign in" appears (as a pop-up or in the notification shade), and the terminal shows `generate_204`.
 - [ ] **iPhone:** the sign-in sheet opens within about 10 seconds, and the terminal shows `hotspot-detect.html`.
 - [ ] Register a test name: the thank-you page shows, the name is on the admin page, the same number again is refused. Delete it.
-- [ ] LCQ tablet: join the booth Wi-Fi and stay on it (if a sign-in sheet appears, do not tap Cancel; choose to stay connected or use without internet), open the runner address, enter the PIN, and check it is still connected and updating after 15 minutes.
+- [ ] LCQ tablet: join the booth Wi-Fi and stay on it (if a sign-in sheet appears, do not tap Cancel; choose to stay connected or use without internet), open the runner address, enter the PIN, and check it is still connected and updating after 15 minutes. Then turn the tablet's Wi-Fi off, tap a Start, see the bar say 1 tap is waiting, turn Wi-Fi back on: the match starts on the admin side within a few seconds.
 
 **Windows:** the commands run in an administrator Command Prompt ("No rules match the specified criteria" on the first run is fine); sleep is off; after `npm run booth-ip:undo`, home Wi-Fi works again.
 
@@ -32,5 +32,6 @@ On each phone, forget the booth Wi-Fi, then scan the Wi-Fi QR:
 
 ## After the event
 
+- [ ] Before stopping the server, the tablet's bar says **Up to date** (no taps waiting).
 - [ ] Stop the server (Ctrl+C), then `npm run booth-ip:undo`.
 - [ ] **Download CSV** and copy `data/` somewhere safe.
