@@ -67,8 +67,8 @@ export const clockText = (ms) => {
   return s < 3600 ? `${Math.floor(s / 60)}:${two(s % 60)}` : `${Math.floor(s / 3600)}:${two(Math.floor(s / 60) % 60)}:${two(s % 60)}`;
 };
 /**
- * Whether the tablet holds off swapping in an update: just after any touch, or while a finger is down, a field has
- * focus or a pick is half made, but never past a minute idle, so a forgotten tap cannot freeze the page.
+ * Whether the tablet holds off swapping in an update: just after any touch, or while a finger is down or a field has
+ * focus, but never past a minute idle, so a forgotten tap cannot freeze the page. A half-made pick is carried over.
  */
 export const holdsUpdates = (idleMs, active) => idleMs < 400 || (active && idleMs < 60_000);
 
@@ -215,11 +215,10 @@ const RUNNER_JS = `(() => {
   // Against lists only the Player's wins unless Any wins is ticked; rebuilt, since iOS ignores hidden options.
   const againstFor = ${againstFor};
   const everyone = new WeakMap();
-  addEventListener('change', (e) => {
-    const a = document.getElementById('pa');
-    const b = document.getElementById('pb');
-    const any = document.getElementById('lcq-any');
-    if (!a || !b || !any || ![a, any].includes(e.target)) return;
+  const pickEls = () => ['pa', 'pb', 'lcq-any'].map((id) => document.getElementById(id));
+  const repick = () => {
+    const [a, b, any] = pickEls();
+    if (!a || !b || !any) return;
     if (!everyone.has(b)) everyone.set(b, [...b.options].slice(1));
     const keep = againstFor(everyone.get(b), a.selectedOptions[0], any.checked);
     const was = b.value;
@@ -227,8 +226,22 @@ const RUNNER_JS = `(() => {
     blank.textContent = keep.length || !a.value ? 'Choose player' : 'Nobody else free on ' + a.selectedOptions[0].dataset.w + 'W; tick Any wins';
     b.replaceChildren(blank, ...keep);
     b.value = keep.some((o) => o.value === was) ? was : '';
+  };
+  addEventListener('change', (e) => {
+    const [a, b, any] = pickEls();
+    if ([a, any].includes(e.target)) repick();
+    // A chosen player should not hold updates off; the pick is carried over them instead.
+    if ([a, b].includes(e.target)) e.target.blur();
   });
-  const busy = () => holdsUpdates(Date.now() - interactedAt, touching || !!(document.getElementById('pa') || {}).value ||
+  // The pick in progress, to put back after an update: a player no longer free is dropped by the new lists.
+  const pickState = () => pickEls().map((el) => el && (el.type === 'checkbox' ? el.checked : el.value));
+  const putPick = (state) => {
+    const els = pickEls();
+    if (!state || els.some((el) => !el)) return;
+    els.forEach((el, i) => { if (el.type === 'checkbox') el.checked = state[i]; else el.value = state[i]; });
+    repick();
+  };
+  const busy = () => holdsUpdates(Date.now() - interactedAt, touching ||
     ['INPUT', 'SELECT', 'TEXTAREA'].includes(document.activeElement && document.activeElement.tagName));
   let version = document.getElementById('version').dataset.version;
   apply();
@@ -239,10 +252,12 @@ const RUNNER_JS = `(() => {
     const next = new DOMParser().parseFromString(await page.text(), 'text/html').querySelector('main');
     if (!page.ok || !next || !next.querySelector('#version') || (!force && busy())) return false;
     next.querySelectorAll('script').forEach((s) => s.remove());
+    const pick = force ? null : pickState();
     document.querySelector('main').replaceWith(next);
     version = document.getElementById('version').dataset.version;
     loadedAt = syncedAt = Date.now();
     apply();
+    putPick(pick);
     return true;
   };
   async function flush() {

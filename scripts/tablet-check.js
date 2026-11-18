@@ -1,5 +1,5 @@
 // Drives the real LCQ tablet script in headless Chrome against an in-process booth server: taps online, offline,
-// with a lost answer, refused, and signed out. Needs Chrome (set CHROME to its path); exits 2 if it cannot run.
+// with a lost answer, refused, signed out, and a half-made Pick a match. Needs Chrome (set CHROME to its path); exits 2 if it cannot run.
 import { spawn } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -146,6 +146,23 @@ try {
   await js('document.querySelector("#pa")?.focus()');
   await js('[...document.querySelectorAll(".sync button")].find((b) => b.textContent === "Sync").click()');
   check('F: Sync shows a change made on the laptop', !!(await until(() => js('/Late Larry/.test(document.querySelector("main").textContent)'))));
+
+  const opts = (id) => js(`[...document.getElementById('${id}').options].slice(1).map((o) => o.textContent.replace(/ \\(.*/, ''))`);
+  const picked = (id) => js(`{ const s = document.getElementById('${id}'); s.value ? s.selectedOptions[0].textContent.replace(/ \\(.*/, '') : ''; }`);
+  await js('document.getElementById("lcq-pick").open = true');
+  // H: a half-made pick no longer freezes the page: a new sign-up shows up and the pick is kept.
+  const choose = (id, name) => js(`{ const s = document.getElementById('${id}'); s.value = [...s.options].find((o) => o.textContent.startsWith('${name} ')).value;
+    s.dispatchEvent(new Event('change', { bubbles: true })); }`);
+  await js('document.activeElement.blur()');
+  await choose('pa', 'P1');
+  await choose('pb', 'P2');
+  const p = (name) => lcq.state().players.find((x) => x.name === name);
+  store.register({ name: 'Newcomer', phone: '+919999922222', source: 'desk', noticeVersion: 'v', bracket: 'lcq' });
+  check('H: with a pick made, a new sign-up reaches Against without a reload', !!(await until(async () => (await opts('pb')).includes('Newcomer'), 10000)), JSON.stringify(await opts('pb')));
+  check('H: and the pick is kept', (await picked('pa')) === 'P1' && (await picked('pb')) === 'P2', `${await picked('pa')} vs ${await picked('pb')}`);
+  lcq.start(p('P2').id, p('P4').id);
+  check('H: a picked player who is no longer free is dropped from the pick', !!(await until(async () => (await picked('pb')) === '' && !(await opts('pb')).includes('P2'), 10000)), JSON.stringify(await opts('pb')));
+  check('H: the other half of the pick stays', (await picked('pa')) === 'P1');
 
   check('no script errors on the page', errors.length === 0, errors.join(' | '));
   ws.close();
